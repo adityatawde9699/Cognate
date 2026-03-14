@@ -1,0 +1,25 @@
+{
+    "identifier": "default",
+    "description": "Default capabilities for Cognote main window",
+    "windows": [
+        "main"
+    ],
+    "permissions": [
+        "core:default",
+        "core:window:allow-minimize",
+        "core:window:allow-maximize",
+        "core:window:allow-close",
+        "core:window:allow-toggle-maximize",
+        "core:window:allow-show",
+        "sql:allow-execute",
+        "sql:allow-select",
+        "sql:allow-load",
+        "sql:allow-close",
+        "notification:allow-notify",
+        "log:allow-log",
+        "core:tray:allow-set-icon",
+        "core:tray:allow-set-visible",
+        "notification:allow-request-permission",
+        "notification:allow-is-permission-granted"
+    ]
+}

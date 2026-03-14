@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cognote</title>
+</head>
+<body>
+<!-- ── DB STARTUP ERROR (S3) ── -->
+<div id="errorScreen" class="error-screen hidden">
+  <div class="err-box">
+    <i class="fa-solid fa-triangle-exclamation"></i>
+    <h2>Failed to start Cognote</h2>
+    <p id="errMsg"></p>
+    <button onclick="location.reload()" class="btn-primary">Retry</button>
+  </div>
+</div>
+
+<div id="root">
+
+  <!-- ═══════ TITLEBAR (frameless native window) ═══════ -->
+  <header class="titlebar" data-tauri-drag-region>
+    <div class="tb-brand" data-tauri-drag-region>
+      <span class="tb-emoji">🧠</span>
+      <span class="tb-name">Cognote</span>
+    </div>
+    <div class="tb-win-controls">
+      <button class="tb-btn" id="btnTheme" title="Toggle theme (T)">
+        <i class="fa-solid fa-circle-half-stroke"></i>
+      </button>
+      <button class="tb-btn" id="btnSettings" title="Settings">
+        <i class="fa-solid fa-gear"></i>
+      </button>
+      <button class="tb-btn" id="btnShortcuts" title="Keyboard shortcuts (?)">
+        <i class="fa-solid fa-keyboard"></i>
+      </button>
+      <button class="tb-btn wc" id="btnMinimize" title="Minimize">
+        <i class="fa-solid fa-minus"></i>
+      </button>
+      <button class="tb-btn wc" id="btnMaximize" title="Maximize">
+        <i class="fa-regular fa-square"></i>
+      </button>
+      <button class="tb-btn wc danger" id="btnClose" title="Close">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+  </header>
+
+  <!-- ═══════ BODY LAYOUT ═══════ -->
+  <div class="layout">
+
+    <!-- ── SIDEBAR ── -->
+    <aside class="sidebar">
+
+      <!-- Nav Filters -->
+      <nav class="nav" role="navigation">
+        <button class="nav-btn active" data-filter="all" id="nav-all">
+          <i class="fa-solid fa-table-list"></i>
+          <span>All Tasks</span>
+          <span class="badge" id="badge-all">0</span>
+        </button>
+        <button class="nav-btn" data-filter="today" id="nav-today">
+          <i class="fa-solid fa-sun"></i>
+          <span>Due Today</span>
+          <span class="badge" id="badge-today">0</span>
+        </button>
+        <button class="nav-btn" data-filter="high" id="nav-high">
+          <i class="fa-solid fa-fire"></i>
+          <span>High Priority</span>
+          <span class="badge badge-red" id="badge-high">0</span>
+        </button>
+        <button class="nav-btn" id="nav-analytics">
+          <i class="fa-solid fa-chart-column"></i>
+          <span>Analytics</span>
+        </button>
+      </nav>
+
+      <!-- Tags Nav (M5) -->
+      <div id="tagsNav" class="tags-nav"></div>
+
+      <!-- Stats Grid -->
+      <div class="stats-grid">
+        <div class="stat-card">
+          <i class="fa-solid fa-circle-check sc-icon green"></i>
+          <span class="sc-val" id="stat-done">0</span>
+          <span class="sc-lbl">Done</span>
+        </div>
+        <div class="stat-card">
+          <i class="fa-solid fa-fire-flame-curved sc-icon orange"></i>
+          <span class="sc-val" id="stat-streak">0</span>
+          <span class="sc-lbl">Streak</span>
+        </div>
+        <div class="stat-card">
+          <i class="fa-solid fa-stopwatch sc-icon yellow"></i>
+          <span class="sc-val" id="stat-focus">0</span>
+          <span class="sc-lbl">Focus hrs</span>
+        </div>
+        <div class="stat-card">
+          <i class="fa-solid fa-triangle-exclamation sc-icon red"></i>
+          <span class="sc-val" id="stat-urgent">0</span>
+          <span class="sc-lbl">Urgent</span>
+        </div>
+      </div>
+
+      <!-- Add Task Button -->
+      <button class="btn-add" id="openModal">
+        <i class="fa-solid fa-plus"></i>
+        <span>New Task</span>
+        <kbd class="shortcut-key">N</kbd>
+      </button>
+
+    </aside>
+
+    <!-- ── MAIN BOARD ── -->
+    <main class="main" id="mainBoard">
+
+      <!-- Toolbar: Search + Pomodoro -->
+      <div class="toolbar">
+        <div class="search-wrap">
+          <i class="fa-solid fa-magnifying-glass"></i>
+          <input id="searchInput" type="search" placeholder="Search tasks… ( / )" autocomplete="off" />
+          <kbd class="shortcut-key ghost" id="searchKbd">/</kbd>
+        </div>
+
+        <!-- Pomodoro Chip -->
+        <div class="pomo-chip" id="pomoChip">
+          <div class="pomo-ring-wrap">
+            <svg viewBox="0 0 40 40" class="ring-svg">
+              <circle class="r-bg" cx="20" cy="20" r="17"/>
+              <circle class="r-fg" id="pomoFg" cx="20" cy="20" r="17"
+                      stroke-dasharray="106.81 106.81" stroke-dashoffset="0"/>
+            </svg>
+            <span class="pomo-time-txt" id="pomoTime">25:00</span>
+          </div>
+          <div class="pomo-meta">
+            <p class="pomo-task-name" id="pomoTask">Select a task</p>
+            <div class="pomo-controls">
+              <button class="pomo-btn" id="pomoStart" title="Play / Pause">
+                <i class="fa-solid fa-play"></i>
+              </button>
+              <button class="pomo-btn" id="pomoReset" title="Reset">
+                <i class="fa-solid fa-rotate-left"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Board Columns -->
+      <div class="board">
+        <section class="col">
+          <div class="col-hd">
+            <i class="fa-solid fa-hourglass-half"></i>
+            Pending
+            <span class="col-count" id="pendingCount">0</span>
+          </div>
+          <div class="task-list" id="pendingList">
+            <!-- Skeleton loader -->
+            <div class="skeleton-group" id="skeletonGroup">
+              <div class="skeleton"></div>
+              <div class="skeleton" style="animation-delay:.1s"></div>
+              <div class="skeleton" style="animation-delay:.2s"></div>
+            </div>
+            <div class="empty-state hidden" id="emptyPending">
+              <div class="empty-emoji">🌱</div>
+              <p>No pending tasks. You're on fire! 🔥</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="col">
+          <div class="col-hd done-hd">
+            <i class="fa-solid fa-circle-check"></i>
+            Completed
+            <span class="col-count" id="doneCount">0</span>
+          </div>
+          <div class="task-list" id="doneList">
+            <div class="empty-state hidden" id="emptyDone">
+              <div class="empty-emoji">📋</div>
+              <p>Complete a task to see it here.</p>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <!-- ── ANALYTICS PANEL (slide-in) ── -->
+    <aside class="analytics-panel hidden" id="analyticsPanel">
+      <div class="ap-hd">
+        <h3><i class="fa-solid fa-chart-column"></i> Analytics</h3>
+        <div>
+          <button class="icon-btn" id="btnExportCSV" title="Export CSV" style="font-size:0.9rem; margin-right:4px;">⬇ CSV</button>
+          <button class="icon-btn" id="btnExportJSON" title="Export JSON" style="font-size:0.9rem; margin-right:8px;">⬇ JSON</button>
+          <button class="icon-btn" id="closeAnalytics"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+      </div>
+
+      <div class="chart-section">
+        <p class="chart-label">Tasks completed — last 7 days</p>
+        <canvas id="weekChart"></canvas>
+      </div>
+
+      <div class="ap-stats-grid">
+        <div class="ap-stat"><span class="ap-val" id="apTotal">0</span><span class="ap-lbl">Total</span></div>
+        <div class="ap-stat"><span class="ap-val" id="apDone">0</span><span class="ap-lbl">Done</span></div>
+        <div class="ap-stat"><span class="ap-val" id="apPomos">0</span><span class="ap-lbl">Pomodoros</span></div>
+        <div class="ap-stat"><span class="ap-val" id="apHours">0</span><span class="ap-lbl">Focus hrs</span></div>
+      </div>
+
+      <div class="priority-breakdown">
+        <h4>Priority Breakdown</h4>
+        <div class="pb-track">
+          <div class="pb-seg high" id="pbHigh"></div>
+          <div class="pb-seg medium" id="pbMed"></div>
+          <div class="pb-seg low"  id="pbLow"></div>
+        </div>
+        <div class="pb-legend">
+          <span><span class="dot high"></span> High</span>
+          <span><span class="dot medium"></span> Medium</span>
+          <span><span class="dot low"></span> Low</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ── SETTINGS PANEL (M4) ── -->
+    <aside class="analytics-panel hidden" id="settingsPanel">
+      <div class="ap-hd">
+        <h3><i class="fa-solid fa-gear"></i> Settings</h3>
+        <button class="icon-btn" id="closeSettings"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      
+      <div class="settings-group">
+        <h4>Pomodoro Timer</h4>
+        <div class="fg">
+          <label>Work Duration (minutes)</label>
+          <input type="number" id="setWorkMins" min="1" max="120" value="25" class="setting-input"/>
+        </div>
+        <div class="fg">
+          <label>Short Break (minutes)</label>
+          <input type="number" id="setShortMins" min="1" max="30" value="5" class="setting-input"/>
+        </div>
+        <div class="fg">
+          <label>Long Break (minutes)</label>
+          <input type="number" id="setLongMins" min="1" max="60" value="15" class="setting-input"/>
+        </div>
+        <div class="fg-check">
+          <input type="checkbox" id="setAutoBreak" />
+          <label for="setAutoBreak">Auto-start breaks</label>
+        </div>
+      </div>
+    </aside>
+
+  </div><!-- /layout -->
+
+  <!-- ── MOBILE BOTTOM NAV ── -->
+  <nav class="mobile-nav">
+    <button class="mob-btn active" data-filter="all">
+      <i class="fa-solid fa-table-list"></i><span>All</span>
+    </button>
+    <button class="mob-btn" data-filter="today">
+      <i class="fa-solid fa-sun"></i><span>Today</span>
+    </button>
+    <button class="mob-btn" data-filter="high">
+      <i class="fa-solid fa-fire"></i><span>Priority</span>
+    </button>
+    <button class="mob-btn" id="mobAnalytics">
+      <i class="fa-solid fa-chart-column"></i><span>Charts</span>
+    </button>
+    <button class="mob-btn accent" id="mobAdd">
+      <i class="fa-solid fa-plus"></i><span>Add</span>
+    </button>
+  </nav>
+
+  <!-- ── TASK MODAL ── -->
+  <div class="modal-overlay" id="modalOverlay" role="dialog" aria-modal="true">
+    <div class="modal-box">
+      <div class="modal-hd">
+        <h3 id="modalTitle">New Task</h3>
+        <button class="icon-btn" id="closeModal"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <form id="taskForm" novalidate>
+        <input type="hidden" id="editId" />
+        <div class="fg">
+          <label for="fTitle">Title <span class="req">*</span></label>
+          <input id="fTitle" type="text" placeholder="What needs to be done?" required maxlength="120" />
+        </div>
+        <div class="fg">
+          <label for="fDesc">Description</label>
+          <textarea id="fDesc" placeholder="Add details…" rows="2"></textarea>
+        </div>
+        <div class="frow">
+          <div class="fg">
+            <label for="fDeadline">Deadline</label>
+            <input id="fDeadline" type="date" />
+          </div>
+          <div class="fg">
+            <label for="fTags">Tags <span class="hint">(comma-separated)</span></label>
+            <input id="fTags" type="text" placeholder="design, bug, docs" />
+          </div>
+        </div>
+        <div class="frow">
+          <div class="fg">
+            <label for="fImp">Importance <span class="rv" id="rvImp">3</span>/5</label>
+            <input id="fImp" type="range" min="1" max="5" value="3" />
+          </div>
+          <div class="fg">
+            <label for="fEff">Effort <span class="rv" id="rvEff">3</span>/5</label>
+            <input id="fEff" type="range" min="1" max="5" value="3" />
+          </div>
+        </div>
+        <div class="prio-preview" id="prioPreview">
+          <i class="fa-solid fa-robot"></i>
+          AI Priority: <strong id="prevLabel">—</strong>
+        </div>
+        <div class="modal-ft">
+          <button type="button" class="btn-ghost" id="cancelModal">Cancel</button>
+          <button type="submit" class="btn-primary" id="saveBtn">
+            <i class="fa-solid fa-floppy-disk"></i> Save Task
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ── KEYBOARD SHORTCUTS OVERLAY ── -->
+  <div class="shortcuts-overlay hidden" id="shortcutsOverlay">
+    <div class="shortcuts-box">
+      <h3><i class="fa-solid fa-keyboard"></i> Keyboard Shortcuts</h3>
+      <div class="sc-list">
+        <div class="sc-row"><kbd>N</kbd><span>New task</span></div>
+        <div class="sc-row"><kbd>/</kbd><span>Focus search</span></div>
+        <div class="sc-row"><kbd>1</kbd><span>All tasks</span></div>
+        <div class="sc-row"><kbd>2</kbd><span>Due today</span></div>
+        <div class="sc-row"><kbd>3</kbd><span>High priority</span></div>
+        <div class="sc-row"><kbd>A</kbd><span>Analytics panel</span></div>
+        <div class="sc-row"><kbd>T</kbd><span>Toggle dark / light</span></div>
+        <div class="sc-row"><kbd>?</kbd><span>This help dialog</span></div>
+        <div class="sc-row"><kbd>Esc</kbd><span>Close any panel</span></div>
+      </div>
+      <button class="btn-ghost" id="closeShortcuts">Got it</button>
+    </div>
+  </div>
+
+  <!-- ── TOAST ── -->
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+</div><!-- #root -->
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
