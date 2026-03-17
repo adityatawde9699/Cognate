@@ -19,6 +19,10 @@ tauri        = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-sql          = { version = "2", features = ["sqlite"] }
 tauri-plugin-notification = "2"
 tauri-plugin-log = "2"
+tauri-plugin-oauth = "2.0.0-rc"
+reqwest = { version = "0.12", features = ["json"] }
+tokio = { version = "1", features = ["full"] }
 log = "0.4"
 serde      = { version = "1", features = ["derive"] }
 serde_json = "1"
+tauri-plugin-shell = "2.3.5"

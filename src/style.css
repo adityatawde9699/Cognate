@@ -649,6 +649,12 @@ textarea {
     border-radius: 4px 0 0 4px;
 }
 
+.task-card:focus {
+    outline: none;
+    border-color: var(--violet);
+    box-shadow: 0 0 0 3px var(--violet-glow);
+}
+
 .task-card:hover {
     background: var(--glass-h);
     transform: translateY(-2px);

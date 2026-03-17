@@ -7,6 +7,7 @@ import { toast } from '../utils/toast.js';
 import { P_LABEL, P_COLOR, fmtDate, isOverdue, esc } from '../utils/format.js';
 import { selectPomoTask, resetPomo } from './pomodoro.js';
 import { openModal } from './modal.js';
+import { playPop } from './audio.js';
 
 let _refreshCb = null;
 
@@ -29,6 +30,7 @@ function buildCard(task) {
     card.dataset.id = task.id;
     card.dataset.priority = task.priority;
     card.draggable = true;
+    card.tabIndex = 0; // Make focusable for keyboard navigation
 
     const dots = Array.from({ length: Math.min(task.pomodorosSpent || 0, 8) })
         .map(() => '<div class="pomo-dot"></div>').join('');
@@ -69,7 +71,9 @@ function buildCard(task) {
     </div>`;
 
     // Events
-    card.querySelector('.card-check').addEventListener('click', async () => {
+    card.querySelector('.card-check').addEventListener('click', async (e) => {
+        e.stopPropagation(); // prevent card click
+        if (!task.done) playPop();
         await toggleTask(task.id);
         if (_refreshCb) _refreshCb();
         toast('Task updated ✓');
@@ -82,6 +86,22 @@ function buildCard(task) {
         toast('🗑️ Task deleted');
     });
     card.querySelector('.btn-focus-sel').addEventListener('click', () => selectPomoTask(task));
+
+    // Keyboard navigation
+    card.addEventListener('keydown', (e) => {
+        if (e.key === ' ' || e.key === 'Enter') {
+            e.preventDefault();
+            card.querySelector('.card-check').click();
+        } else if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            const next = card.nextElementSibling;
+            if (next && next.classList.contains('task-card')) next.focus();
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            const prev = card.previousElementSibling;
+            if (prev && prev.classList.contains('task-card')) prev.focus();
+        }
+    });
 
     // Drag-and-drop
     card.addEventListener('dragstart', () => { window._cnDragId = task.id; card.classList.add('dragging'); });

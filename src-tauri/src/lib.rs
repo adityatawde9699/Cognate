@@ -6,6 +6,8 @@ use tauri::{
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod integrations;
+
 pub fn run() {
     let migrations = vec![Migration {
         version: 1,
@@ -22,6 +24,8 @@ pub fn run() {
                 .level(log::LevelFilter::Info)
                 .build(),
         )
+        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_oauth::init())
         .plugin(
             tauri_plugin_sql::Builder::default()
                 .add_migrations("sqlite:cognote.db", migrations)
@@ -65,7 +69,12 @@ pub fn run() {
             Ok(())
         })
         // ── Commands ─────────────────────────────────
-        .invoke_handler(tauri::generate_handler![app_ready, calc_priority])
+        .invoke_handler(tauri::generate_handler![
+            app_ready,
+            calc_priority,
+            integrations::send_notification,
+            integrations::start_oauth
+        ])
         .run(tauri::generate_context!())
         .expect("error while running Cognote");
 }

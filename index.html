@@ -25,22 +25,22 @@
       <span class="tb-name">Cognote</span>
     </div>
     <div class="tb-win-controls">
-      <button class="tb-btn" id="btnTheme" title="Toggle theme (T)">
+      <button class="tb-btn" id="btnTheme" title="Toggle theme (T)" aria-label="Toggle dark/light theme">
         <i class="fa-solid fa-circle-half-stroke"></i>
       </button>
-      <button class="tb-btn" id="btnSettings" title="Settings">
+      <button class="tb-btn" id="btnSettings" title="Settings" aria-label="Open settings">
         <i class="fa-solid fa-gear"></i>
       </button>
-      <button class="tb-btn" id="btnShortcuts" title="Keyboard shortcuts (?)">
+      <button class="tb-btn" id="btnShortcuts" title="Keyboard shortcuts (?)" aria-label="View keyboard shortcuts">
         <i class="fa-solid fa-keyboard"></i>
       </button>
-      <button class="tb-btn wc" id="btnMinimize" title="Minimize">
+      <button class="tb-btn wc" id="btnMinimize" title="Minimize" aria-label="Minimize application">
         <i class="fa-solid fa-minus"></i>
       </button>
-      <button class="tb-btn wc" id="btnMaximize" title="Maximize">
+      <button class="tb-btn wc" id="btnMaximize" title="Maximize" aria-label="Maximize application">
         <i class="fa-regular fa-square"></i>
       </button>
-      <button class="tb-btn wc danger" id="btnClose" title="Close">
+      <button class="tb-btn wc danger" id="btnClose" title="Close" aria-label="Close application">
         <i class="fa-solid fa-xmark"></i>
       </button>
     </div>
@@ -246,6 +246,36 @@
         <div class="fg-check">
           <input type="checkbox" id="setAutoBreak" />
           <label for="setAutoBreak">Auto-start breaks</label>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <h4>Calendars (OAuth2)</h4>
+        <div class="button-row" style="display:flex; gap:10px; margin-top:8px;">
+            <button class="btn-ghost" id="btnGoogleCal" style="flex:1;"><i class="fa-brands fa-google"></i> Google</button>
+            <button class="btn-ghost" id="btnOutlookCal" style="flex:1;"><i class="fa-brands fa-microsoft"></i> Outlook</button>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <h4>Notifications & Webhooks</h4>
+        <div class="fg">
+          <label>Discord Webhook URL</label>
+          <input type="url" id="setDiscord" placeholder="https://discord.com/api/webhooks/..." class="setting-input"/>
+        </div>
+        <div class="fg">
+          <label>Slack Webhook URL</label>
+          <input type="url" id="setSlack" placeholder="https://hooks.slack.com/services/..." class="setting-input"/>
+        </div>
+        <div class="frow">
+            <div class="fg">
+            <label>Telegram Bot Token</label>
+            <input type="text" id="setTgToken" placeholder="1234:ABC..." class="setting-input"/>
+            </div>
+            <div class="fg">
+            <label>Chat ID</label>
+            <input type="text" id="setTgChat" placeholder="-100..." class="setting-input"/>
+            </div>
         </div>
       </div>
     </aside>

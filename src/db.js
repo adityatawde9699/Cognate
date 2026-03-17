@@ -257,9 +257,26 @@ export async function updateSortOrders(orderedIds) {
         return;
     }
     const d = await db();
-    // Run sequentially; inside a transaction would be better but tauri-plugin-sql doesn't expose easy txns yet
-    for (let i = 0; i < orderedIds.length; i++) {
-        await d.execute('UPDATE tasks SET sort_order=? WHERE id=?', [i, orderedIds[i]]);
+    
+    // Batch update using a CASE expression to prevent multiple IPC roundtrips
+    if (orderedIds.length === 0) return;
+    
+    const caseSnippets = orderedIds.map((id, index) => `WHEN '${id}' THEN ${index}`).join(' ');
+    const idList = orderedIds.map(id => `'${id}'`).join(',');
+    
+    const query = `
+        UPDATE tasks 
+        SET sort_order = CASE id 
+            ${caseSnippets} 
+            ELSE sort_order 
+        END 
+        WHERE id IN (${idList})
+    `;
+    
+    try {
+        await d.execute(query);
+    } catch (err) {
+        console.error('Failed to batch update sort orders', err);
     }
 }
 
