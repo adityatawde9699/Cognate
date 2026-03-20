@@ -4,9 +4,14 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Manager,
 };
-use std::time::{SystemTime, UNIX_EPOCH};
+use chrono::{NaiveDate, Utc};
 
 mod integrations;
+
+struct PomoState {
+    time_left: u32,
+    is_active: bool,
+}
 
 pub fn run() {
     let migrations = vec![Migration {
@@ -17,6 +22,10 @@ pub fn run() {
     }];
 
     tauri::Builder::default()
+        .manage(std::sync::Mutex::new(PomoState {
+            time_left: 25 * 60,
+            is_active: false,
+        }))
         // ── Plugins ──────────────────────────────────
         .plugin(tauri_plugin_notification::init())
         .plugin(
@@ -72,6 +81,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             app_ready,
             calc_priority,
+            toggle_pomodoro,
+            reset_pomodoro,
             integrations::send_notification,
             integrations::start_oauth
         ])
@@ -88,30 +99,27 @@ fn app_ready() -> String {
 
 /// Priority calculation in Rust (M3)
 #[tauri::command]
-fn calc_priority(importance: u8, effort: u8, deadline: Option<String>) -> String {
+fn calc_priority(importance: u8, effort: u8, deadline: Option<String>) -> Result<String, String> {
     let imp = (importance as f64 / 5.0) * 4.0;
     
     let deadl = if let Some(dl) = deadline {
         if dl.is_empty() {
             0.0
         } else {
-            // Very basic day math: parse YYYY-MM-DD
-            if let Ok(parsed_time) = parse_date(&dl) {
-                let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-                
-                // Truncate both to midnight for pure day difference
-                let days_left = (parsed_time as f64 - now as f64) / 86400.0;
-                let days_left = days_left.round();
-                
-                if days_left <= 0.0 {
-                    4.0
-                } else if days_left <= 14.0 {
-                    4.0 * (1.0 - days_left / 14.0)
-                } else {
-                    0.0
+            match NaiveDate::parse_from_str(&dl, "%Y-%m-%d") {
+                Ok(parsed_date) => {
+                    let now = Utc::now().naive_utc().date();
+                    let days_left = parsed_date.signed_duration_since(now).num_days() as f64;
+                    
+                    if days_left <= 0.0 {
+                        4.0
+                    } else if days_left <= 14.0 {
+                        4.0 * (1.0 - days_left / 14.0)
+                    } else {
+                        0.0
+                    }
                 }
-            } else {
-                0.0
+                Err(_) => return Err(format!("Invalid deadline format: {}", dl)),
             }
         }
     } else {
@@ -122,39 +130,59 @@ fn calc_priority(importance: u8, effort: u8, deadline: Option<String>) -> String
     let total = imp + deadl + eff;
 
     if total >= 6.5 {
-        "high".to_string()
+        Ok("high".to_string())
     } else if total >= 3.5 {
-        "medium".to_string()
+        Ok("medium".to_string())
     } else {
-        "low".to_string()
+        Ok("low".to_string())
     }
 }
 
-// Simple YYYY-MM-DD to UNIX timestamp parser
-fn parse_date(date: &str) -> Result<u64, ()> {
-    let parts: Vec<&str> = date.split('-').collect();
-    if parts.len() != 3 { return Err(()); }
+// Pomodoro Timer commands (M3)
+#[tauri::command]
+fn toggle_pomodoro(app: tauri::AppHandle, state: tauri::State<'_, std::sync::Mutex<PomoState>>) -> Result<bool, String> {
+    let mut s = state.lock().unwrap();
+    s.is_active = !s.is_active;
+    let is_active = s.is_active;
     
-    let y: u64 = parts[0].parse().map_err(|_| ())?;
-    let m: u64 = parts[1].parse().map_err(|_| ())?;
-    let d: u64 = parts[2].parse().map_err(|_| ())?;
-    
-    // Very rough UNIX timestamp logic for YYYY-MM-DD just for difference
-    // This ignores leap years/complex timezone math but it matches JS rough math perfectly
-    let mut days = (y - 1970) * 365 + (y - 1969) / 4;
-    let month_days = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    
-    for i in 1..m {
-        days += month_days[i as usize];
+    if is_active {
+        // Start the background tracking timer
+        let app_clone = app.clone();
+        tauri::async_runtime::spawn(async move {
+            loop {
+                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                
+                let (time_left, active) = {
+                    let state_mutex = app_clone.state::<std::sync::Mutex<PomoState>>();
+                    let mut s_curr = state_mutex.lock().unwrap();
+                    if !s_curr.is_active {
+                        break;
+                    }
+                    if s_curr.time_left > 0 {
+                        s_curr.time_left -= 1;
+                    } else {
+                        s_curr.is_active = false;
+                    }
+                    (s_curr.time_left, s_curr.is_active)
+                };
+                
+                let _ = app_clone.emit("pomo-tick", time_left);
+                
+                if !active {
+                    let _ = app_clone.emit("pomo-finished", ());
+                    break;
+                }
+            }
+        });
     }
-    if m > 2 && is_leap_year(y) {
-        days += 1;
-    }
-    days += d - 1;
     
-    Ok(days * 86400)
+    Ok(is_active)
 }
 
-fn is_leap_year(year: u64) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+#[tauri::command]
+fn reset_pomodoro(state: tauri::State<'_, std::sync::Mutex<PomoState>>) -> Result<(), String> {
+    let mut s = state.lock().unwrap();
+    s.is_active = false;
+    s.time_left = 25 * 60;
+    Ok(())
 }

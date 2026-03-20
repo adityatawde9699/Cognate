@@ -1,14 +1,42 @@
-import { useState } from 'react';
-// import { useStore } from '../store';
+import { useState, useEffect } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 
 export function Pomodoro() {
   const [timeLeft, setTimeLeft] = useState(25 * 60);
   const [isActive, setIsActive] = useState(false);
   
-  // Real logic will need to access Tauri IPC or WebWorkers later for background timing.
+  useEffect(() => {
+    let unlistenTick: () => void;
+    let unlistenFinished: () => void;
+    
+    const setupListeners = async () => {
+      unlistenTick = await listen<number>('pomo-tick', (event) => {
+        setTimeLeft(event.payload);
+        setIsActive(true);
+      });
+      unlistenFinished = await listen('pomo-finished', () => {
+        setIsActive(false);
+        // Dispatch event for Audio playback or other notification triggers
+        window.dispatchEvent(new CustomEvent('pomo-finished-local'));
+      });
+    };
+    
+    setupListeners();
+    
+    return () => {
+      if (unlistenTick) unlistenTick();
+      if (unlistenFinished) unlistenFinished();
+    };
+  }, []);
 
-  const toggleTimer = () => setIsActive(!isActive);
-  const resetTimer = () => {
+  const toggleTimer = async () => {
+    const active = await invoke<boolean>('toggle_pomodoro');
+    setIsActive(active);
+  };
+  
+  const resetTimer = async () => {
+    await invoke('reset_pomodoro');
     setIsActive(false);
     setTimeLeft(25 * 60);
   };

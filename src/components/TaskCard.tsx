@@ -3,42 +3,42 @@ import { Task } from '../store';
 // @ts-ignore
 import { P_LABEL, fmtDate, isOverdue } from '../utils/format';
 import { useState } from 'react';
-// import { toggleTask, deleteTask } from '../db'; // We'll hook this up later
 
 interface Props {
   task: Task;
   onEdit: (task: Task) => void;
   pomoTaskId?: string | null;
   onSelectPomo: (task: Task) => void;
+  onToggle: (task: Task) => void;
+  onDelete: (task: Task) => void;
+  onDragStart?: () => void;
 }
 
-export function TaskCard({ task, onEdit, pomoTaskId, onSelectPomo }: Props) {
+export function TaskCard({ task, onEdit, pomoTaskId, onSelectPomo, onToggle, onDelete, onDragStart }: Props) {
   const [isHovered, setIsHovered] = useState(false);
   const isPomoSel = pomoTaskId === task.id && !task.done;
   const isOverdueTask = isOverdue(task.deadline) && !task.done;
 
-  const handleToggle = async (e: React.MouseEvent) => {
+  const handleToggle = (e: React.MouseEvent) => {
     e.stopPropagation();
-    // await toggleTask(task.id);
-    // refresh
+    onToggle(task);
   };
 
-  const handleDelete = async (e: React.MouseEvent) => {
+  const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
-    // await deleteTask(task.id);
-    // refresh
+    onDelete(task);
   };
 
-  // Drag and drop handlers simplified for now
   const handleDragStart = (e: React.DragEvent) => {
     e.dataTransfer.setData('taskId', task.id);
+    if (onDragStart) onDragStart();
   };
 
   return (
     <div 
       className={`task-card ${task.done ? 'done-card' : ''}`}
       data-id={task.id}
-      draggable
+      draggable={!task.done}
       onDragStart={handleDragStart}
       tabIndex={0}
       onMouseEnter={() => setIsHovered(true)}

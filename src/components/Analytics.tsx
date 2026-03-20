@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import Chart from 'chart.js/auto';
+import { exportCSV, exportJSON } from '../utils/export';
 
 export function Analytics() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -37,10 +38,18 @@ export function Analytics() {
     <aside className="analytics-panel">
       <div className="ap-hd">
         <h3><i className="fa-solid fa-chart-column"></i> Analytics</h3>
-        <div>
-          <button className="icon-btn" title="Export CSV" style={{fontSize: '0.9rem', marginRight: '4px'}}>⬇ CSV</button>
-          <button className="icon-btn" title="Export JSON" style={{fontSize: '0.9rem', marginRight: '8px'}}>⬇ JSON</button>
-          <button className="icon-btn"><i className="fa-solid fa-xmark"></i></button>
+        <div className="ap-actions">
+          <button className="ap-action-btn" title="Export as CSV" onClick={exportCSV}>
+            <i className="fa-solid fa-file-csv"></i>
+            <span>CSV</span>
+          </button>
+          <button className="ap-action-btn" title="Export as JSON" onClick={exportJSON}>
+            <i className="fa-solid fa-file-code"></i>
+            <span>JSON</span>
+          </button>
+          <button className="ap-action-btn ap-close-btn" title="Close Analytics">
+            <i className="fa-solid fa-xmark"></i>
+          </button>
         </div>
       </div>
 

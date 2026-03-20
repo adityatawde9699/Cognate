@@ -258,11 +258,20 @@ export async function updateSortOrders(orderedIds) {
     }
     const d = await db();
     
-    // Batch update using a CASE expression to prevent multiple IPC roundtrips
+    // Batch update utilizing fully parameterized queries to prevent SQL injection
     if (orderedIds.length === 0) return;
     
-    const caseSnippets = orderedIds.map((id, index) => `WHEN '${id}' THEN ${index}`).join(' ');
-    const idList = orderedIds.map(id => `'${id}'`).join(',');
+    const caseSnippets = orderedIds.map(() => `WHEN ? THEN ?`).join(' ');
+    const idList = orderedIds.map(() => '?').join(',');
+    
+    // Build arguments: [id1, order1, id2, order2, ..., id1, id2, ...]
+    const args = [];
+    orderedIds.forEach((id, index) => {
+        args.push(id, index);
+    });
+    orderedIds.forEach(id => {
+        args.push(id);
+    });
     
     const query = `
         UPDATE tasks 
@@ -274,7 +283,7 @@ export async function updateSortOrders(orderedIds) {
     `;
     
     try {
-        await d.execute(query);
+        await d.execute(query, args);
     } catch (err) {
         console.error('Failed to batch update sort orders', err);
     }

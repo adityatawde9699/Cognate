@@ -28,6 +28,14 @@ interface AppState {
   setTasks: (tasks: Task[]) => void;
   setSearchQuery: (query: string) => void;
   
+  // Modals
+  isTaskModalOpen: boolean;
+  editingTask: Task | null;
+  setTaskModalOpen: (isOpen: boolean, task?: Task | null) => void;
+
+  isSettingsModalOpen: boolean;
+  setSettingsModalOpen: (isOpen: boolean) => void;
+
   // Computed values that existed in previous format
   getVisibleTasks: () => Task[];
 }
@@ -36,6 +44,13 @@ export const useStore = create<AppState>((set, get) => ({
   currentFilter: 'all',
   currentTasks: [],
   searchQuery: '',
+  
+  isTaskModalOpen: false,
+  editingTask: null,
+  setTaskModalOpen: (isOpen, task = null) => set({ isTaskModalOpen: isOpen, editingTask: task }),
+
+  isSettingsModalOpen: false,
+  setSettingsModalOpen: (isOpen) => set({ isSettingsModalOpen: isOpen }),
   
   setFilter: (filter: FilterType) => set({ currentFilter: filter }),
   setTasks: (tasks: Task[]) => set({ currentTasks: tasks }),

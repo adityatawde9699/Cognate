@@ -929,6 +929,67 @@ textarea {
     color: var(--violet);
 }
 
+/* Analytics action buttons (Export + Close) */
+.ap-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.ap-action-btn {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 10px;
+    border-radius: 99px;
+    background: var(--glass);
+    border: 1px solid var(--glass-bd);
+    color: var(--text-m);
+    font-size: .72rem;
+    font-weight: 600;
+    letter-spacing: .3px;
+    transition: var(--trans);
+    backdrop-filter: blur(8px);
+}
+
+.ap-action-btn i {
+    color: var(--violet);
+    font-size: .75rem;
+}
+
+.ap-action-btn:hover {
+    background: var(--glass-h);
+    border-color: var(--violet);
+    color: var(--text);
+    box-shadow: 0 0 10px var(--violet-glow);
+}
+
+.ap-action-btn:hover i {
+    color: var(--accent);
+}
+
+/* Close button — icon only, circular */
+.ap-close-btn {
+    padding: 5px 8px;
+    color: var(--text-d);
+}
+
+.ap-close-btn i {
+    color: var(--text-d);
+    font-size: .8rem;
+}
+
+.ap-close-btn:hover {
+    background: rgba(255, 92, 92, .12);
+    border-color: rgba(255, 92, 92, .3);
+    color: var(--danger);
+    box-shadow: 0 0 8px rgba(255, 92, 92, .2);
+}
+
+.ap-close-btn:hover i {
+    color: var(--danger);
+}
+
 .chart-section {
     display: flex;
     flex-direction: column;
@@ -1543,3 +1604,175 @@ input[type="range"]::-webkit-slider-thumb {
         display: none;
     }
 }
+
+/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   DRAG-AND-DROP ZONE INDICATOR
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+.card-drop-zone {
+    transition: transform var(--trans), padding var(--trans);
+}
+
+.card-drop-zone.drag-over {
+    padding-top: 6px;
+    border-top: 2px dashed var(--violet);
+}
+
+/* Inline "+" button in column header */
+.col-hd {
+    position: relative;
+}
+
+.btn-add-inline {
+    margin-left: auto;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--glass);
+    border: 1px solid var(--glass-bd);
+    font-size: .65rem;
+    color: var(--text-m);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: var(--trans);
+}
+
+.btn-add-inline:hover {
+    background: var(--accent-glow);
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+/* Settings gear in toolbar */
+.settings-btn-top {
+    flex-shrink: 0;
+    width: 34px;
+    height: 34px;
+    border-radius: var(--radius-s);
+    background: var(--glass);
+    border: 1px solid var(--glass-bd);
+    color: var(--text-m);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: var(--trans);
+}
+
+.settings-btn-top:hover {
+    background: var(--glass-h);
+    color: var(--text);
+}
+
+/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   MOBILE — full responsive overhaul (≤ 768px)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+@media (max-width: 768px) {
+    :root {
+        --sidebar-w: 0px;
+        --ap-w: 100vw;
+    }
+
+    /* Hide sidebar on small screens — nav lives in bottom bar */
+    .sidebar {
+        display: none;
+    }
+
+    /* Stack columns vertically instead of side-by-side */
+    .board {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto auto;
+        overflow-y: auto;
+        overflow-x: hidden;
+    }
+
+    .col {
+        border-right: none;
+        border-bottom: 1px solid var(--glass-bd);
+        padding: 14px 12px;
+    }
+
+    .col:last-child {
+        border-bottom: none;
+    }
+
+    /* Compress toolbar, hide shortcut hints */
+    .toolbar {
+        padding: 10px 14px;
+        gap: 8px;
+    }
+
+    .shortcut-key.ghost {
+        display: none;
+    }
+
+    /* Allow text to scroll horizontally on cards */
+    .task-card {
+        cursor: default;
+    }
+
+    /* Card actions always visible on mobile (no hover mechanism) */
+    .card-actions {
+        opacity: 1 !important;
+    }
+
+    /* Pomodoro chip compact mode */
+    .pomo-chip {
+        padding: 6px 10px;
+        gap: 8px;
+    }
+
+    .pomo-meta {
+        display: none;
+    }
+
+    /* Bottom navigation bar for mobile */
+    .mobile-nav {
+        display: flex;
+        align-items: center;
+        justify-content: space-around;
+        height: 54px;
+        background: var(--bg2);
+        border-top: 1px solid var(--glass-bd);
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        z-index: 900;
+    }
+
+    .mobile-nav-btn {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 3px;
+        color: var(--text-m);
+        font-size: .6rem;
+        padding: 6px 0;
+        transition: var(--trans);
+    }
+
+    .mobile-nav-btn i {
+        font-size: 1.1rem;
+    }
+
+    .mobile-nav-btn.active {
+        color: var(--accent);
+    }
+
+    /* Push content above mobile nav bar */
+    .layout {
+        padding-bottom: 54px;
+    }
+}
+
+/* Tablet adjustments (769–1024px) */
+@media (min-width: 769px) and (max-width: 1024px) {
+    :root {
+        --sidebar-w: 200px;
+    }
+
+    .pomo-meta {
+        min-width: 90px;
+    }
+}
