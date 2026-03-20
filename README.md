@@ -1,6 +1,7 @@
 # Cognote
 
 Cognote is a cross-platform desktop task management application built with Tauri 2, React 19, and SQLite. It provides a local-first task board with a Pomodoro timer, automated priority scoring, tag-based filtering, and optional outbound notification delivery to Slack, Discord, and Telegram via webhook and bot APIs. The application runs natively on Windows, macOS, and Linux, embedding the frontend inside a Tauri WebView with a Rust backend that handles timer state, IPC commands, and data persistence through a local SQLite database.
+
 ---
 
 ## Features
