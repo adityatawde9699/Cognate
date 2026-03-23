@@ -1,0 +1,2 @@
+    Checking cognote v0.1.0 (C:\Users\ASUS\Downloads\Cognate\src-tauri)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.76s

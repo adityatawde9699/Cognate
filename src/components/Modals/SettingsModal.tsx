@@ -39,12 +39,16 @@ export function SettingsModal() {
 
   const startOAuth = async (provider: string) => {
     try {
+        if (!(window as any).__TAURI_INTERNALS__) {
+            throw new Error('Not running inside Tauri window');
+        }
         const { invoke } = await import('@tauri-apps/api/core');
         const { open } = await import('@tauri-apps/plugin-shell');
         const url: string = await invoke('start_oauth', { provider });
         await open(url);
-    } catch (e) {
+    } catch (e: any) {
         console.error('OAuth initiation failed', e);
+        alert(`Failed to connect calendar: ${e.message || String(e)}`);
     }
   };
 

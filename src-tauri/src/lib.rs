@@ -2,9 +2,9 @@ use tauri_plugin_sql::{Migration, MigrationKind};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager,
+    Manager, Emitter,
 };
-use chrono::{NaiveDate, Utc};
+use chrono::{NaiveDate, Local};
 
 mod integrations;
 
@@ -108,7 +108,7 @@ fn calc_priority(importance: u8, effort: u8, deadline: Option<String>) -> Result
         } else {
             match NaiveDate::parse_from_str(&dl, "%Y-%m-%d") {
                 Ok(parsed_date) => {
-                    let now = Utc::now().naive_utc().date();
+                    let now = Local::now().naive_local().date();
                     let days_left = parsed_date.signed_duration_since(now).num_days() as f64;
                     
                     if days_left <= 0.0 {

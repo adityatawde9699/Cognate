@@ -1,28 +1,29 @@
 import { useEffect, useState } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { useStore } from '../store';
 
 export function Titlebar() {
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const setSettingsModalOpen = useStore((state) => state.setSettingsModalOpen);
 
   useEffect(() => {
-    // Basic theme initialization (you could wire this to getSetting from db.js later)
-    const isDark = document.body.classList.contains('dark-theme');
-    setTheme(isDark ? 'dark' : 'light');
+    const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+    setTheme(currentTheme as 'light' | 'dark');
   }, []);
 
   const toggleTheme = () => {
     const newTheme = theme === 'light' ? 'dark' : 'light';
-    if (newTheme === 'dark') {
-      document.body.classList.add('dark-theme');
+    if (newTheme === 'light') {
+      document.documentElement.setAttribute('data-theme', 'light');
     } else {
-      document.body.classList.remove('dark-theme');
+      document.documentElement.removeAttribute('data-theme');
     }
     setTheme(newTheme);
   };
 
   const handleMinimize = async () => {
     try {
-      if (window.__TAURI_INTERNALS__) {
+      if ((window as any).__TAURI_INTERNALS__) {
         await getCurrentWindow().minimize();
       }
     } catch(e) { console.error(e); }
@@ -30,7 +31,7 @@ export function Titlebar() {
 
   const handleMaximize = async () => {
     try {
-      if (window.__TAURI_INTERNALS__) {
+      if ((window as any).__TAURI_INTERNALS__) {
         await getCurrentWindow().toggleMaximize();
       }
     } catch(e) { console.error(e); }
@@ -38,7 +39,7 @@ export function Titlebar() {
 
   const handleClose = async () => {
     try {
-      if (window.__TAURI_INTERNALS__) {
+      if ((window as any).__TAURI_INTERNALS__) {
         await getCurrentWindow().close();
       }
     } catch(e) { console.error(e); }
@@ -54,10 +55,10 @@ export function Titlebar() {
         <button className="tb-btn" title="Toggle theme (T)" aria-label="Toggle dark/light theme" onClick={toggleTheme}>
           <i className="fa-solid fa-circle-half-stroke"></i>
         </button>
-        <button className="tb-btn" title="Settings" aria-label="Open settings">
+        <button className="tb-btn" title="Settings" aria-label="Open settings" onClick={() => setSettingsModalOpen(true)}>
           <i className="fa-solid fa-gear"></i>
         </button>
-        <button className="tb-btn" title="Keyboard shortcuts (?)" aria-label="View keyboard shortcuts">
+        <button className="tb-btn" title="Keyboard shortcuts (?)" aria-label="View keyboard shortcuts" onClick={() => alert('Keyboard shortcuts:\\n? - Show this menu\\nN - New Task\\nT - Toggle Theme')}>
           <i className="fa-solid fa-keyboard"></i>
         </button>
         <button className="tb-btn wc" title="Minimize" aria-label="Minimize application" onClick={handleMinimize}>

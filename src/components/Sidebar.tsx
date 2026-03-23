@@ -13,7 +13,8 @@ export function Sidebar() {
 
   // Calculate badges on the fly from Zustand tasks
   const allCount = tasks.length;
-  const todayStr = new Date().toISOString().split('T')[0];
+  const d = new Date();
+  const todayStr = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   const todayCount = tasks.filter(t => t.deadline === todayStr).length;
   const highCount = tasks.filter((t: any) => t.priority === 'high' && !t.done).length;
 
@@ -73,7 +74,7 @@ export function Sidebar() {
           <span>High Priority</span>
           <span className="badge badge-red">{highCount}</span>
         </button>
-        <button className="nav-btn">
+        <button className="nav-btn" onClick={() => useStore.getState().setAnalyticsOpen(true)}>
           <i className="fa-solid fa-chart-column"></i>
           <span>Analytics</span>
         </button>

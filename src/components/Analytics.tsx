@@ -1,83 +1,175 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Chart from 'chart.js/auto';
 import { exportCSV, exportJSON } from '../utils/export';
+import { useStore } from '../store';
+import { getStats } from '../db';
 
 export function Analytics() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const { isAnalyticsOpen, setAnalyticsOpen } = useStore();
+  const barRef = useRef<HTMLCanvasElement>(null);
+  const pieRef = useRef<HTMLCanvasElement>(null);
+  const doughRef = useRef<HTMLCanvasElement>(null);
+  
+  const [stats, setStats] = useState<any>(null);
 
   useEffect(() => {
-    if (!canvasRef.current) return;
-    
-    // Stub chart logic based on vanilla implementation
-    const ctx = canvasRef.current.getContext('2d');
-    if (!ctx) return;
+    if (isAnalyticsOpen) {
+      getStats().then(setStats);
+    }
+  }, [isAnalyticsOpen]);
 
-    const chart = new Chart(ctx, {
-      type: 'bar',
-      data: {
-        labels: ['M', 'T', 'W', 'T', 'F', 'S', 'S'],
-        datasets: [{
-          label: 'Completed Tasks',
-          data: [1, 5, 2, 8, 3, 0, 4],
-          backgroundColor: '#ffe24a',
-          borderRadius: 4
-        }]
-      },
-      options: {
-        responsive: true,
-        plugins: {
-          legend: { display: false }
-        }
+  useEffect(() => {
+    if (!isAnalyticsOpen || !stats) return;
+
+    // 1. Bar Chart (Tasks Completed)
+    let barChart: Chart | null = null;
+    if (barRef.current) {
+      const ctx = barRef.current.getContext('2d');
+      if (ctx) {
+        barChart = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: stats.weekData.map((d: any) => d.label).reverse(),
+            datasets: [{
+              label: 'Completed Tasks',
+              data: stats.weekData.map((d: any) => d.count).reverse(),
+              backgroundColor: '#7c5cfc',
+              borderRadius: 4
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false }
+            }
+          }
+        });
       }
-    });
+    }
 
-    return () => chart.destroy();
-  }, []);
+    // 2. Pie Chart (Done vs Pending)
+    let pieChart: Chart | null = null;
+    if (pieRef.current) {
+      const ctx = pieRef.current.getContext('2d');
+      if (ctx) {
+        pieChart = new Chart(ctx, {
+          type: 'pie',
+          data: {
+            labels: ['Done', 'Pending'],
+            datasets: [{
+              data: [stats.done, stats.total - stats.done],
+              backgroundColor: ['#3dffa3', '#4a4e6b'],
+              borderWidth: 0
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { position: 'bottom', labels: { color: '#7b7f9a' } }
+            }
+          }
+        });
+      }
+    }
+
+    // 3. Doughnut Chart (Priority Breakdown)
+    let doughChart: Chart | null = null;
+    if (doughRef.current) {
+      const ctx = doughRef.current.getContext('2d');
+      if (ctx) {
+        doughChart = new Chart(ctx, {
+          type: 'doughnut',
+          data: {
+            labels: ['High', 'Medium', 'Low'],
+            datasets: [{
+              data: [stats.high, stats.medium, stats.low],
+              backgroundColor: ['#ff5c5c', '#f5d63d', '#3dffa3'],
+              borderWidth: 0
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { position: 'bottom', labels: { color: '#7b7f9a' } }
+            }
+          }
+        });
+      }
+    }
+
+    return () => {
+      if (barChart) barChart.destroy();
+      if (pieChart) pieChart.destroy();
+      if (doughChart) doughChart.destroy();
+    };
+  }, [isAnalyticsOpen, stats]);
+
+  if (!isAnalyticsOpen) return null;
 
   return (
-    <aside className="analytics-panel">
-      <div className="ap-hd">
-        <h3><i className="fa-solid fa-chart-column"></i> Analytics</h3>
-        <div className="ap-actions">
-          <button className="ap-action-btn" title="Export as CSV" onClick={exportCSV}>
-            <i className="fa-solid fa-file-csv"></i>
-            <span>CSV</span>
+    <div className="analytics-full">
+      <div className="af-header">
+        <div className="af-title">
+          <i className="fa-solid fa-chart-pie"></i>
+          <h2>Full Analytics Dashboard</h2>
+        </div>
+        <div className="af-actions">
+          <button className="btn-ghost" title="Export as CSV" onClick={exportCSV}>
+            <i className="fa-solid fa-file-csv"></i> CSV
           </button>
-          <button className="ap-action-btn" title="Export as JSON" onClick={exportJSON}>
-            <i className="fa-solid fa-file-code"></i>
-            <span>JSON</span>
+          <button className="btn-ghost" title="Export as JSON" onClick={exportJSON}>
+            <i className="fa-solid fa-file-code"></i> JSON
           </button>
-          <button className="ap-action-btn ap-close-btn" title="Close Analytics">
+          <button className="btn-icon close-af" title="Close Analytics" onClick={() => setAnalyticsOpen(false)}>
             <i className="fa-solid fa-xmark"></i>
           </button>
         </div>
       </div>
 
-      <div className="chart-section">
-        <p className="chart-label">Tasks completed — last 7 days</p>
-        <canvas ref={canvasRef}></canvas>
-      </div>
-
-      <div className="ap-stats-grid">
-        <div className="ap-stat"><span className="ap-val">0</span><span className="ap-lbl">Total</span></div>
-        <div className="ap-stat"><span className="ap-val">0</span><span className="ap-lbl">Done</span></div>
-        <div className="ap-stat"><span className="ap-val">0</span><span className="ap-lbl">Pomodoros</span></div>
-        <div className="ap-stat"><span className="ap-val">0</span><span className="ap-lbl">Focus hrs</span></div>
-      </div>
-
-      <div className="priority-breakdown">
-        <h4>Priority Breakdown</h4>
-        <div className="pb-track">
-          <div className="pb-seg high" style={{width: '33%'}}></div>
-          <div className="pb-seg medium" style={{width: '33%'}}></div>
-          <div className="pb-seg low" style={{width: '34%'}}></div>
+      <div className="af-content">
+        <div className="af-stats-cards">
+          <div className="af-card stat">
+            <span className="sc-val">{stats?.total || 0}</span>
+            <span className="sc-lbl">Total Tasks</span>
+          </div>
+          <div className="af-card stat">
+            <span className="sc-val" style={{color: 'var(--success)'}}>{stats?.done || 0}</span>
+            <span className="sc-lbl">Completed</span>
+          </div>
+          <div className="af-card stat">
+            <span className="sc-val" style={{color: 'var(--accent)'}}>{stats?.pomos || 0}</span>
+            <span className="sc-lbl">Pomodoros</span>
+          </div>
+          <div className="af-card stat">
+            <span className="sc-val" style={{color: 'var(--violet)'}}>{stats?.focusHrs || 0}</span>
+            <span className="sc-lbl">Focus Hours</span>
+          </div>
         </div>
-        <div className="pb-legend">
-          <span><span className="dot high"></span> High</span>
-          <span><span className="dot medium"></span> Medium</span>
-          <span><span className="dot low"></span> Low</span>
+
+        <div className="af-charts-grid">
+          <div className="af-card chart-large">
+            <h3>Activity (Last 7 Days)</h3>
+            <div className="canvas-container">
+              <canvas ref={barRef}></canvas>
+            </div>
+          </div>
+          <div className="af-card chart-small">
+            <h3>Task Status</h3>
+            <div className="canvas-container">
+              <canvas ref={pieRef}></canvas>
+            </div>
+          </div>
+          <div className="af-card chart-small">
+            <h3>Priority Breakdown</h3>
+            <div className="canvas-container">
+              <canvas ref={doughRef}></canvas>
+            </div>
+          </div>
         </div>
       </div>
-    </aside>
+    </div>
   );
 }

@@ -1,56 +1,48 @@
-name: "Cognote CI/CD"
+name: Release Builds
+
 on:
   push:
-    branches: ["main"]
-  pull_request:
-    branches: ["main"]
+    tags:
+      - 'v*'
 
 jobs:
-  test:
-    name: "Run Unit Tests"
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Use Node.js 22
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - run: npm ci
-      - run: npm test
-
-  build:
-    name: "Tauri Build Matrix"
-    needs: test
+  release:
+    name: Build & Release App
     strategy:
       fail-fast: false
       matrix:
         platform: [ubuntu-22.04, macos-latest, windows-latest]
     runs-on: ${{ matrix.platform }}
+
     steps:
-      - uses: actions/checkout@v4
-      - name: Use Node.js 22
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Use Rust stable
+          cache: 'npm'
+
+      - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
-      
+
       - name: Install dependencies (Ubuntu only)
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-          
-      - name: npm ci
+
+      - name: Install JS dependencies
         run: npm ci
-        
-      - name: Build Tauri App
+
+      - name: Build and Package Tauri App
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: v__VERSION__ # the action automatically replaces \_\_VERSION\_\_ with the app version
+          tagName: v__VERSION__ # The action replaces v__VERSION__ with the actual version
           releaseName: "Cognote v__VERSION__"
-          releaseBody: "See the assets to download this version and install."
+          releaseBody: "See the assets below to download and install this version."
           releaseDraft: true
           prerelease: false

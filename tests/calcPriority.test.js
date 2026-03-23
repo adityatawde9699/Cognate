@@ -15,9 +15,17 @@ export function calcPriority(importance, effort, deadline) {
 }
 
 describe('calcPriority (JS Fallback logic)', () => {
-    const today = new Date().toISOString().split('T')[0];
-    const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
-    const past = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+    // Generate dates based on the precise local timezone matching the frontend system.
+    const getLocalDateString = (d) => {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+    };
+
+    const today = getLocalDateString(new Date());
+    const tomorrow = getLocalDateString(new Date(Date.now() + 86400000));
+    const past = getLocalDateString(new Date(Date.now() - 86400000));
 
     it('returns high for high importance, low effort, past deadline', () => {
         expect(calcPriority(5, 1, past)).toBe('high');

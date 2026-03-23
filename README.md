@@ -1,6 +1,21 @@
 # Cognote
 
+![License](https://img.shields.io/github/license/adityatawde9699/Cognate)
+![Tests](https://github.com/adityatawde9699/Cognate/actions/workflows/test.yml/badge.svg)
+![Release](https://github.com/adityatawde9699/Cognate/actions/workflows/release.yml/badge.svg)
+![Platforms](https://img.shields.io/badge/platform-windows%20%7C%20macos%20%7C%20linux-blue)
+
 Cognote is a cross-platform desktop task management application built with Tauri 2, React 19, and SQLite. It provides a local-first task board with a Pomodoro timer, automated priority scoring, tag-based filtering, and optional outbound notification delivery to Slack, Discord, and Telegram via webhook and bot APIs. The application runs natively on Windows, macOS, and Linux, embedding the frontend inside a Tauri WebView with a Rust backend that handles timer state, IPC commands, and data persistence through a local SQLite database.
+
+## Table of Contents
+- [Features](#features)
+- [Tech Stack](#tech-stack)
+- [Architecture](#architecture)
+- [Setup & Installation](#setup--installation)
+- [Usage](#usage)
+- [Project Structure](#project-structure)
+- [Known Limitations](#known-limitations)
+- [Future Improvements](#future-improvements)
 
 ---
 
@@ -23,6 +38,7 @@ Cognote is a cross-platform desktop task management application built with Tauri
 - **localStorage fallback** — All database operations fall back to `localStorage` when running outside Tauri (browser/Vite dev server)
 - **Desktop notifications** — `tauri-plugin-notification` is registered; notification dispatch is not wired to any application event in the current codebase
 - **Seed data** — On first launch, six example tasks are inserted with representative priorities, tags, and deadlines
+- **Automated CI/CD** — Pre-configured GitHub Actions pipelines automatically perform testing, formatting checks, and build cross-platform release binaries for Windows, macOS, and Linux.
 
 ---
 
@@ -325,8 +341,6 @@ cognote/
 
 - **Test coverage is minimal.** The test suite contains one file with 4 unit tests covering the JavaScript priority calculation fallback. No tests cover the React components, Zustand store integration, database operations, or Rust commands.
 
-- **No CI/CD pipeline.** The `.github` directory is present but no workflow files were found in this analysis. There is no automated test, lint, or build pipeline.
-
 - **SQLite JSON1 dependency.** Tag filtering uses the `json_each()` function, which requires SQLite 3.38 or later. This is satisfied by modern Tauri-bundled SQLite builds but is an implicit requirement not documented anywhere in the project.
 
 - **Webhook tokens stored in plaintext.** Discord webhooks, Slack webhooks, and Telegram bot tokens are stored as plain text strings in the SQLite `app_state` table with no encryption.
@@ -343,7 +357,6 @@ cognote/
 - Add an in-app trigger for desktop notifications on Pomodoro completion and task deadline.
 - Add a mechanism (e.g., a dedicated "notify" button on a task card) that calls `send_notification` with configured webhook targets.
 - Expand test coverage: add component tests using a React testing library, store integration tests, and Rust unit tests for `calc_priority` edge cases.
-- Set up a GitHub Actions workflow for lint → test → release build on version tags.
 - Encrypt sensitive settings (webhook URLs, bot tokens) using the OS keychain or a Tauri secrets plugin rather than plaintext SQLite storage.
 - Remove or formally deprecate `state.js` to eliminate dead code.
 - Add a `rust-toolchain.toml` file to pin the Rust version for reproducible builds across contributor environments.

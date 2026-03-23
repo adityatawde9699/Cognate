@@ -6,6 +6,13 @@
 // Use native crypto.randomUUID() — available in all modern browsers & Tauri WebView
 const uuid = () => crypto.randomUUID();
 
+export function getLocalDateString(date = new Date()) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+}
+
 // ── Detect Tauri runtime ────────────────────────────────────
 export const IS_TAURI = Boolean(window.__TAURI_INTERNALS__ || window.__TAURI__);
 
@@ -63,11 +70,11 @@ function rowToTask(r) {
 }
 
 // ── Seed data (Cognote starter tasks) ─────────────────────────────
-const today = new Date().toISOString().split('T')[0];
-const tomorrow = new Date(Date.now() + 86_400_000).toISOString().split('T')[0];
-const in3days = new Date(Date.now() + 3 * 86_400_000).toISOString().split('T')[0];
-const in7days = new Date(Date.now() + 7 * 86_400_000).toISOString().split('T')[0];
-const in10days = new Date(Date.now() + 10 * 86_400_000).toISOString().split('T')[0];
+const today = getLocalDateString();
+const tomorrow = getLocalDateString(new Date(Date.now() + 86_400_000));
+const in3days = getLocalDateString(new Date(Date.now() + 3 * 86_400_000));
+const in7days = getLocalDateString(new Date(Date.now() + 7 * 86_400_000));
+const in10days = getLocalDateString(new Date(Date.now() + 10 * 86_400_000));
 
 const SEED_TASKS = [
     { title: '📝 Design Cognote landing page', description: 'Create a vibrant, conversion-focused landing page for the Cognote product launch.', tags: ['design', 'marketing'], deadline: today, importance: 5, effort: 2, pomodorosSpent: 2 },
@@ -142,7 +149,7 @@ export async function initDb() {
 export async function getAllTasks(filter = 'all') {
     if (!IS_TAURI) {
         let tasks = localLoad().map(rowToTask);
-        const todayStr = new Date().toISOString().split('T')[0];
+        const todayStr = getLocalDateString();
         if (filter === 'today') tasks = tasks.filter(t => t.deadline === todayStr);
         if (filter === 'high') tasks = tasks.filter(t => t.priority === 'high' && !t.done);
         // M5: tag filter support
@@ -153,7 +160,7 @@ export async function getAllTasks(filter = 'all') {
         return tasks.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
     }
     const d = await db();
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getLocalDateString();
 
     // S4: Parameterized queries
     if (filter === 'today') {
@@ -303,7 +310,7 @@ export async function addPomodoro(id) {
 
 // M2: Aggregated SQL getStats
 export async function getStats() {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getLocalDateString();
     let s = { total: 0, done: 0, urgent: 0, pomos: 0, high: 0, medium: 0, low: 0, todayCount: 0, highPending: 0 };
     let completedDates = [];
 
@@ -318,7 +325,7 @@ export async function getStats() {
         s.low = tasks.filter(t => t.priority === 'low').length;
         s.todayCount = tasks.filter(t => t.deadline === today).length;
         s.highPending = s.urgent;
-        completedDates = tasks.filter(t => t.completedAt).map(t => t.completedAt.split('T')[0]);
+        completedDates = tasks.filter(t => t.completedAt).map(t => getLocalDateString(new Date(t.completedAt)));
     } else {
         const d = await db();
         // Aggregated query
@@ -350,7 +357,7 @@ export async function getStats() {
 
         // Minimal query for streak
         const datesRes = await d.select('SELECT completed_at FROM tasks WHERE completed_at IS NOT NULL');
-        completedDates = datesRes.map(r => r.completed_at.split('T')[0]);
+        completedDates = datesRes.map(r => getLocalDateString(new Date(r.completed_at)));
     }
 
     const focusHrs = parseFloat((s.pomos * 25 / 60).toFixed(1));
@@ -358,7 +365,7 @@ export async function getStats() {
     // Streak logic
     const completedSet = new Set(completedDates);
     let streak = 0, checkDay = new Date();
-    while (completedSet.has(checkDay.toISOString().split('T')[0])) {
+    while (completedSet.has(getLocalDateString(checkDay))) {
         streak++;
         checkDay.setDate(checkDay.getDate() - 1);
     }
@@ -367,7 +374,7 @@ export async function getStats() {
     const weekData = [];
     for (let i = 6; i >= 0; i--) {
         const date = new Date(Date.now() - i * 86_400_000);
-        const key = date.toISOString().split('T')[0];
+        const key = getLocalDateString(date);
         weekData.push({
             label: date.toLocaleDateString('en', { weekday: 'short' }),
             count: completedDates.filter(d => d === key).length

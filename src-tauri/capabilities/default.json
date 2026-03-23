@@ -20,6 +20,7 @@
         "core:tray:allow-set-icon",
         "core:tray:allow-set-visible",
         "notification:allow-request-permission",
-        "notification:allow-is-permission-granted"
+        "notification:allow-is-permission-granted",
+        "shell:allow-open"
     ]
 }
