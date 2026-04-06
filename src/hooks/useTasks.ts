@@ -1,32 +1,29 @@
 import { useEffect } from 'react';
-import { useStore, Task } from '../store';
-import { getAllTasks, initDb } from '../db';
+import { useStore } from '../store';
+import { loadAllTasks } from '../services/taskService';
 
 /**
  * Custom hook to initialize the database, load tasks on mount,
- * and synchronize with the Zustand store.
+ * and synchronize with the Zustand store when the filter changes.
+ * 
+ * Should be called once at the App root level.
  */
 export function useTasks() {
   const currentFilter = useStore((state) => state.currentFilter);
-  const setTasks = useStore((state) => state.setTasks);
 
   useEffect(() => {
     let mounted = true;
 
-    async function loadTasks() {
-      try {
-        await initDb();
-        const data = await getAllTasks(currentFilter);
-        if (mounted) setTasks(data as Task[]);
-      } catch (err) {
-        console.error("Failed to load tasks:", err);
+    async function hydrate() {
+      if (mounted) {
+        await loadAllTasks(currentFilter);
       }
     }
 
-    loadTasks();
+    hydrate();
 
     return () => {
       mounted = false;
     };
-  }, [currentFilter, setTasks]);
+  }, [currentFilter]);
 }

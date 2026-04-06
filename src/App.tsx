@@ -5,26 +5,34 @@ import { Titlebar } from './components/Titlebar';
 import { Sidebar } from './components/Sidebar';
 import { TaskModal } from './components/Modals/TaskModal';
 import { SettingsModal } from './components/Modals/SettingsModal';
+import { Toast } from './components/Toast';
 import { useStore } from './store';
 import { useShortcuts } from './hooks/useShortcuts';
 import { useTheme } from './hooks/useTheme';
+import { useTasks } from './hooks/useTasks';
 
 function App() {
-  const { setSettingsModalOpen } = useStore();
+  const { appError, setSettingsModalOpen } = useStore();
   useTheme(); // Initialize theme
   useShortcuts(); // Initialize global shortcuts
+  useTasks(); // Hydrate tasks from DB at app root
 
-  return (
-    <>
-      <div id="errorScreen" className="error-screen hidden">
+  // ── Fatal error screen (React-managed) ──────────────
+  if (appError) {
+    return (
+      <div className="error-screen">
         <div className="err-box">
           <i className="fa-solid fa-triangle-exclamation"></i>
-          <h2>Failed to start Cognote</h2>
-          <p id="errMsg"></p>
+          <h2>Failed to start Cognate</h2>
+          <p>{appError}</p>
           <button onClick={() => window.location.reload()} className="btn-primary">Retry</button>
         </div>
       </div>
+    );
+  }
 
+  return (
+    <>
       <Titlebar />
       
       <div className="layout">
@@ -59,6 +67,8 @@ function App() {
         <TaskModal />
         <SettingsModal />
       </div>
+
+      <Toast />
     </>
   );
 }

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useStore } from '../../store';
-import { calcPriority, createTask, updateTask } from '../../db';
+import { calcPriority } from '../../db';
+import { addTask, editTask } from '../../services/taskService';
 import { toast } from '../../utils/toast';
 
 const P_LABEL: Record<number, string> = { 1: 'Low', 2: 'Medium', 3: 'High' };
@@ -66,17 +67,15 @@ export function TaskModal() {
     };
 
     if (editingTask) {
-      await updateTask(editingTask.id, payload);
+      await editTask(editingTask.id, payload);
       toast('✏️ Task updated');
     } else {
-      await createTask(payload);
+      await addTask(payload);
       toast('✅ Task created!');
     }
 
     setTaskModalOpen(false);
-    // TODO: Need to refresh tasks list from DB here maybe trigger a global refresh?
-    // This will be handled in board/store implementation.
-    window.dispatchEvent(new CustomEvent('refresh-tasks'));
+    // No more window.dispatchEvent('refresh-tasks') — CQRS handles state updates
   };
 
   return (

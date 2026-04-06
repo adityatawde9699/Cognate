@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useStore } from '../store';
 
+import { Logo } from './Logo';
+
 export function Titlebar() {
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const setSettingsModalOpen = useStore((state) => state.setSettingsModalOpen);
@@ -48,8 +50,7 @@ export function Titlebar() {
   return (
     <header className="titlebar" data-tauri-drag-region>
       <div className="tb-brand" data-tauri-drag-region>
-        <span className="tb-emoji">🧠</span>
-        <span className="tb-name">Cognote</span>
+        <Logo className="tb-logo" />
       </div>
       <div className="tb-win-controls">
         <button className="tb-btn" title="Toggle theme (T)" aria-label="Toggle dark/light theme" onClick={toggleTheme}>

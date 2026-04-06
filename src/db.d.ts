@@ -1,10 +1,14 @@
 export function calcPriority(imp: number, eff: number, dl: string): Promise<number>;
+export function initDb(): Promise<void>;
 export function createTask(payload: any): Promise<any>;
 export function updateTask(id: string, payload: any): Promise<any>;
 export function toggleTask(id: string): Promise<any>;
 export function deleteTask(id: string): Promise<void>;
 export function updateSortOrders(orderedIds: string[]): Promise<void>;
+export function addPomodoro(id: string): Promise<any>;
 export function getSetting(key: string, defaultVal: string): Promise<string>;
 export function setSetting(key: string, val: string): Promise<void>;
 export function getStats(): Promise<{ done: number; streak: number; focusHrs: number; urgent: number }>;
 export function getAllTasks(filter: string): Promise<any[]>;
+export function getLocalDateString(date?: Date): string;
+export const IS_TAURI: boolean;

@@ -23,6 +23,7 @@ Cognote is a cross-platform desktop task management application built with Tauri
 
 - **Task board** — Two-column view (Pending / Completed) with drag-and-drop reordering persisted to the database
 - **Task CRUD** — Create, read, update, and delete tasks including title, description, tags, deadline, importance (1–5), and effort (1–5)
+- **CQRS Persistence Pipeline** — Robust state synchronization between SQLite and Zustand using a Command Query Responsibility Segregation (CQRS) approach with fully optimistic UI updates and auto-rollbacks on database failures.
 - **Automated priority scoring** — Rust command (`calc_priority`) computes a weighted score from importance, effort, and deadline proximity; classifies tasks as `low`, `medium`, or `high`; JavaScript fallback available for browser-only runs
 - **Pomodoro timer** — 25-minute countdown managed entirely in Rust (`toggle_pomodoro`, `reset_pomodoro`) with per-second tick events emitted to the frontend; completed sessions increment `pomodoros_spent` on the linked task
 - **Sidebar filters** — Per-view filters: All Tasks, Due Today, High Priority, and tag-based filters derived dynamically from task data
@@ -112,7 +113,8 @@ Cognote follows a two-process architecture as required by Tauri: a Rust process 
 │  ├── TaskModal         ← create / edit form                      │
 │  └── SettingsModal     ← pomo config + webhook inputs + OAuth    │
 │                                                                  │
-│  store.ts (Zustand)    ← UI state: filter, tasks, modals        │
+│  store.ts (Zustand)    ← UI state + CQRS task mutations         │
+│  taskService.ts        ← CQRS operations connecting UI with db  │
 │  db.js                 ← SQLite abstraction + localStorage shim  │
 └──────────────┬───────────────────────────────────────────────────┘
                │  invoke() / listen()  (Tauri IPC)
@@ -136,11 +138,11 @@ Cognote follows a two-process architecture as required by Tauri: a Rust process 
           └── app_state  (key/value store for settings and seeded flag)
 ```
 
-**Data flow for task creation:**
+**Data flow for task creation (CQRS & Optimistic UI):**
 1. User submits the Task Modal form in the WebView.
-2. `createTask()` in `db.js` calls `invoke('calc_priority')` to obtain the priority label from Rust.
-3. The result is inserted into SQLite via `tauri-plugin-sql`.
-4. A `refresh-tasks` DOM event triggers `Board` to reload the task list from the database.
+2. `taskService.addTask()` is called. It immediately saves a snapshot of the current tasks and performs an optimistic update in the Zustand store.
+3. The app asynchronously writes to SQLite via `db.js` `createTask()` which also invokes `calc_priority` in Rust.
+4. If the database insertion succeeds, the Zustand store is reconciled with the new authoritative DB record. If it fails, the store is rolled back to the prior snapshot and an error is displayed.
 
 **Pomodoro flow:**
 1. Frontend calls `invoke('toggle_pomodoro')`.
@@ -272,11 +274,10 @@ cognote/
 ├── src/                        # Frontend source (TypeScript + React)
 │   ├── main.tsx                # React DOM entry; mounts <App />
 │   ├── App.tsx                 # Root component; layout composition
-│   ├── store.ts                # Zustand store (UI state only)
+│   ├── store.ts                # Zustand store (UI state + task mutations)
 │   ├── db.js                   # SQLite/localStorage abstraction layer
 │   ├── db.d.ts                 # TypeScript declarations for db.js
 │   ├── logger.js               # Tauri log plugin wrapper
-│   ├── state.js                # Legacy state helpers (superseded by store.ts)
 │   ├── style.css               # Global styles (~39 KB)
 │   ├── vite-env.d.ts           # Vite environment type shim
 │   ├── store.test.ts           # Zustand store unit tests
@@ -288,21 +289,25 @@ cognote/
 │   │   ├── Pomodoro.tsx        # Timer chip wired to Rust via IPC events
 │   │   ├── Analytics.tsx       # Chart.js bar chart + export buttons
 │   │   ├── Titlebar.tsx        # Custom window chrome
+│   │   ├── Toast.tsx           # React-managed toast notifications
 │   │   └── Modals/
 │   │       ├── TaskModal.tsx   # Create/edit task form
 │   │       └── SettingsModal.tsx  # Pomodoro config, webhooks, OAuth
 │   │
 │   ├── hooks/
 │   │   ├── useShortcuts.ts     # Global keyboard shortcut bindings
-│   │   ├── useTasks.ts         # Task-loading helper hook
-│   │   └── useTheme.ts         # Theme persistence hook
+│   │   ├── useTasks.ts         # Task-loading and DB hydration hook
+│   │   ├── useTheme.ts         # Theme persistence hook
+│   │   └── useVisibleTasks.ts  # Memoized hook for filtered/searched tasks
+│   │
+│   ├── services/
+│   │   └── taskService.ts      # CQRS operations connecting UI with db.js
 │   │
 │   └── utils/
 │       ├── export.ts           # CSV and JSON export functions
 │       ├── audio.ts            # Audio playback utilities
 │       ├── format.js           # Date/time formatting helpers
-│       ├── toast.js            # Lightweight toast notification helper
-│       └── toast.d.ts          # TypeScript declarations for toast.js
+│       └── toast.ts            # Global toast trigger linked to Toast.tsx
 │
 ├── tests/
 │   └── calcPriority.test.js    # Unit tests for JS priority scoring
@@ -337,9 +342,7 @@ cognote/
 
 - **Webhook invocation has no in-app trigger.** The `send_notification` Rust command exists and functions, but no UI action in the current codebase calls it automatically. Manual invocation via Tauri devtools or code modification is required.
 
-- **`state.js` is a legacy artifact.** The file exists alongside `store.ts` and appears to be an earlier global state implementation. It is not imported by any current component based on this analysis.
-
-- **Test coverage is minimal.** The test suite contains one file with 4 unit tests covering the JavaScript priority calculation fallback. No tests cover the React components, Zustand store integration, database operations, or Rust commands.
+- **Test coverage requires expansion.** While the Zustand store has solid unit tests for mutations and error states, and the JS priority scoring is tested, there is still missing coverage for React components, database operations, and Rust commands.
 
 - **SQLite JSON1 dependency.** Tag filtering uses the `json_each()` function, which requires SQLite 3.38 or later. This is satisfied by modern Tauri-bundled SQLite builds but is an implicit requirement not documented anywhere in the project.
 
@@ -358,7 +361,6 @@ cognote/
 - Add a mechanism (e.g., a dedicated "notify" button on a task card) that calls `send_notification` with configured webhook targets.
 - Expand test coverage: add component tests using a React testing library, store integration tests, and Rust unit tests for `calc_priority` edge cases.
 - Encrypt sensitive settings (webhook URLs, bot tokens) using the OS keychain or a Tauri secrets plugin rather than plaintext SQLite storage.
-- Remove or formally deprecate `state.js` to eliminate dead code.
 - Add a `rust-toolchain.toml` file to pin the Rust version for reproducible builds across contributor environments.
 
 ---

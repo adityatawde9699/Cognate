@@ -1,11 +1,12 @@
 import { useStore, Task } from '../store';
+import { useVisibleTasks } from '../hooks/useVisibleTasks';
 import { TaskCard } from './TaskCard';
-import { useEffect, useCallback, useState } from 'react';
-import { getAllTasks, updateSortOrders, toggleTask, deleteTask } from '../db';
+import { useState } from 'react';
+import { toggleTaskDone, removeTask, reorderTasks } from '../services/taskService';
 
 export function Board() {
-  const { currentFilter, setTasks, getVisibleTasks, setTaskModalOpen } = useStore();
-  const visibleTasks = getVisibleTasks();
+  const setTaskModalOpen = useStore((s) => s.setTaskModalOpen);
+  const visibleTasks = useVisibleTasks();
   
   const pending = visibleTasks.filter((t: Task) => !t.done);
   const done    = visibleTasks.filter((t: Task) => t.done);
@@ -13,23 +14,6 @@ export function Board() {
   // drag state – only IDs needed, no raw Task reference
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
-
-  const loadTasks = useCallback(async () => {
-    try {
-      const tasks = await getAllTasks(currentFilter);
-      setTasks(tasks);
-    } catch (e) {
-      console.error('Failed to load tasks', e);
-    }
-  }, [currentFilter, setTasks]);
-
-  // Re-load on filter change, and whenever a task event fires
-  useEffect(() => {
-    loadTasks();
-    const handler = () => loadTasks();
-    window.addEventListener('refresh-tasks', handler);
-    return () => window.removeEventListener('refresh-tasks', handler);
-  }, [loadTasks]);
 
   // ── DnD handlers ───────────────────────────────────
   const handleDragStart = (id: string) => setDraggedId(id);
@@ -49,21 +33,18 @@ export function Board() {
     if (fromIdx !== -1 && toIdx !== -1) {
       pendingIds.splice(fromIdx, 1);
       pendingIds.splice(toIdx, 0, draggedId);
-      await updateSortOrders(pendingIds);
-      loadTasks();
+      await reorderTasks(pendingIds);
     }
     setDraggedId(null); setDragOverId(null);
   };
 
-  // ── Task actions ───────────────────────────────────
+  // ── Task actions (CQRS — optimistic) ───────────────
   const handleToggle = async (task: Task) => {
-    await toggleTask(task.id);
-    loadTasks();
+    await toggleTaskDone(task.id);
   };
 
   const handleDelete = async (task: Task) => {
-    await deleteTask(task.id);
-    loadTasks();
+    await removeTask(task.id);
   };
 
   const handleEdit = (task: Task) => setTaskModalOpen(true, task);
