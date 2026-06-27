@@ -215,11 +215,19 @@ export const useStore = create<AppState>((set) => ({
 
   toggleTaskOptimistic: (id) =>
     set((state) => ({
-      currentTasks: state.currentTasks.map((t) =>
-        t.id === id
-          ? { ...t, done: !t.done, completed_at: !t.done ? new Date().toISOString() : null }
-          : t
-      ),
+      currentTasks: state.currentTasks.map((t) => {
+        if (t.id !== id) return t;
+        const nowDone = !t.done;
+        return {
+          ...t,
+          done: nowDone,
+          completed_at: nowDone ? new Date().toISOString() : null,
+          // Clear the schedule block immediately when marking done so the PlanView
+          // stops rendering a stale block for this task. The DB keeps the value as
+          // a historical record; the store must not expose it to the plan renderer.
+          ...(nowDone ? { scheduled_start: null, scheduled_end: null } : {}),
+        };
+      }),
     })),
 
   incrementPomodoro: (id) =>

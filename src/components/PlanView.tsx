@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useRef, useMemo, useState } from 'react';
 import { useStore, type Task, type CalendarEvent } from '../store';
 import {
   planDay,
@@ -23,7 +23,9 @@ import { advisePlan } from '../services/aiService';
 import { ChiefOfStaff } from './ChiefOfStaff';
 import { toast } from '../utils/toast';
 
-const PX_PER_MIN = 1.1;
+// Padding reserved at top/bottom of the timeline canvas (px)
+const PAD_TOP = 10;
+const PAD_BOT = 16;
 
 function todayStr(): string {
   const d = new Date();
@@ -60,6 +62,10 @@ export function PlanView() {
   const [drag, setDrag] = useState<{ id: string; dur: number; startY: number; origMin: number; curMin: number } | null>(null);
   const [note, setNote] = useState('');
   const [briefing, setBriefing] = useState(false);
+  // Measured inner height of the timeline container (px). Drives pxPerMin so
+  // the full work day always fits without scrolling.
+  const [containerH, setContainerH] = useState(0);
+  const timelineRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     getWorkHours().then(setWork);
@@ -70,11 +76,31 @@ export function PlanView() {
   const refreshEvents = async () => setEvents(await getCalendarEvents());
   useEffect(() => { refreshEvents(); }, []);
 
+  // Keep containerH in sync with the timeline wrapper's rendered height.
+  useEffect(() => {
+    const el = timelineRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => {
+      setContainerH(entry.contentRect.height);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   // Tasks the planner has placed on this date.
+  // Completed tasks intentionally keep their scheduled_start in the DB as a
+  // historical record, but we must NOT render them as plan blocks — otherwise
+  // old blocks and new blocks overlap at the same time slot.
   const scheduled = useMemo(
     () =>
       tasks
-        .filter((t) => t.scheduled_start && String(t.scheduled_start).slice(0, 10) === date && !t.deleted_at)
+        .filter(
+          (t) =>
+            !t.done &&
+            !t.deleted_at &&
+            t.scheduled_start &&
+            String(t.scheduled_start).slice(0, 10) === date
+        )
         .map((t) => ({
           task: t,
           start: minutesOf(t.scheduled_start!),
@@ -101,7 +127,19 @@ export function PlanView() {
 
   const hours: number[] = [];
   for (let m = work.start; m <= work.end; m += 60) hours.push(m);
-  const dayHeight = (work.end - work.start) * PX_PER_MIN;
+
+  // pxPerMin fills the measured container exactly — no overflow, no scroll.
+  // Fall back to 1.4 before the first measurement arrives.
+  const workMinutes = work.end - work.start;
+  const pxPerMin = containerH > 0
+    ? Math.max(0.6, (containerH - PAD_TOP - PAD_BOT) / workMinutes)
+    : 1.4;
+
+  // Pixel helpers — all positioned children share these.
+  const toY  = (min: number) => PAD_TOP + (min - work.start) * pxPerMin;
+  const toH  = (mins: number) => Math.max(mins * pxPerMin, 28);
+  // Total canvas height exactly matches the container so no scrollbar appears.
+  const dayHeight = containerH > 0 ? containerH : workMinutes * 1.4 + PAD_TOP + PAD_BOT;
 
   const handleAutoPlan = async () => {
     setPlanning(true);
@@ -177,7 +215,7 @@ export function PlanView() {
   };
   const onGripMove = (e: React.PointerEvent) => {
     if (!drag) return;
-    const delta = (e.clientY - drag.startY) / PX_PER_MIN;
+    const delta = (e.clientY - drag.startY) / pxPerMin;
     let m = Math.round((drag.origMin + delta) / SNAP) * SNAP;
     m = Math.max(work.start, Math.min(work.end - drag.dur, m));
     if (m !== drag.curMin) setDrag({ ...drag, curMin: m });
@@ -241,7 +279,11 @@ export function PlanView() {
           <div className="plan-eyebrow"><i className="fa-regular fa-calendar-check"></i> Your day, planned</div>
           <h1 className="plan-title">{prettyDate(date)}</h1>
           <p className="plan-sub">
-            {fmtClock(work.start)}–{fmtClock(work.end)} · {scheduled.length} scheduled · {unplanned.length} in backlog
+            {fmtClock(work.start)}–{fmtClock(work.end)}
+            <span className="plan-sub-dot" />
+            {scheduled.length} scheduled
+            <span className="plan-sub-dot" />
+            {unplanned.length} in backlog
           </p>
         </div>
         <div className="plan-actions">
@@ -281,9 +323,10 @@ export function PlanView() {
       <ChiefOfStaff date={date} />
 
       <div className="plan-body">
+        <div className="plan-timeline-wrap" ref={timelineRef}>
         <div className="plan-timeline" style={{ height: `${dayHeight}px` }}>
           {hours.map((m) => (
-            <div key={m} className="plan-hour" style={{ top: `${(m - work.start) * PX_PER_MIN}px` }}>
+            <div key={m} className="plan-hour" style={{ top: `${toY(m)}px` }}>
               <span className="plan-hour-label">{fmtClock(m)}</span>
               <span className="plan-hour-line" />
             </div>
@@ -293,7 +336,7 @@ export function PlanView() {
             <div
               key={ev.id}
               className="plan-busy"
-              style={{ top: `${(start - work.start) * PX_PER_MIN}px`, height: `${(end - start) * PX_PER_MIN}px` }}
+              style={{ top: `${toY(start)}px`, height: `${toH(end - start)}px` }}
               title={`${ev.title} · ${fmtClock(start)}–${fmtClock(end)}`}
             >
               <span className="plan-busy-title"><i className="fa-solid fa-lock"></i> {ev.title || 'Busy'}</span>
@@ -312,7 +355,7 @@ export function PlanView() {
               <div
                 key={task.id}
                 className={`plan-block prio-${task.priority} ${dragging ? 'is-dragging' : ''} ${task.done ? 'is-done' : ''}`}
-                style={{ top: `${(top - work.start) * PX_PER_MIN}px`, height: `${Math.max((blkEnd - top) * PX_PER_MIN, 28)}px` }}
+                style={{ top: `${toY(top)}px`, height: `${toH(blkEnd - top)}px` }}
                 onClick={() => { if (!dragging) setTaskModalOpen(true, task); }}
                 role="button"
                 tabIndex={0}
@@ -364,6 +407,7 @@ export function PlanView() {
             </div>
           )}
         </div>
+        </div>{/* plan-timeline-wrap */}
 
         <aside className="plan-backlog">
           <h3>Backlog <span className="plan-backlog-count">{unplanned.length}</span></h3>

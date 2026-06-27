@@ -44,18 +44,20 @@ jobs:
           # `npm run tauri signer generate` and store as repo secrets — see SIGNING.md.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # macOS code signing + notarization (optional; requires an Apple Developer account).
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # macOS code signing + notarization.
+          # Optional: tauri-action only signs when APPLE_CERTIFICATE is non-empty.
+          # Leave these secrets unset for unsigned dev/OSS builds.
+          # See SIGNING.md for full setup with an Apple Developer account.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '' }}
+          APPLE_ID: ${{ secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID || '' }}
         with:
-          tagName: v__VERSION__ # The action replaces v__VERSION__ with the actual version
+          tagName: v__VERSION__
           releaseName: "Cognote v__VERSION__"
           releaseBody: "See the assets below to download and install this version. The app auto-updates from this release."
           releaseDraft: true
           prerelease: false
-          # Emit the signed latest.json the in-app updater polls.
           includeUpdaterJson: true

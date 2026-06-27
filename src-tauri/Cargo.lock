@@ -628,7 +628,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "cognote"
+name = "cognate"
 version = "3.0.0"
 dependencies = [
  "chrono",

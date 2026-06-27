@@ -242,6 +242,13 @@ export async function toggleTaskDone(id: string): Promise<void> {
       void notifyTaskComplete(task);
       // Recurring tasks spawn their next occurrence on completion.
       if (task.recurrence && task.recurrence !== 'none') void spawnRecurrence(task);
+      // Clear the in-memory schedule fields so the PlanView no longer renders a
+      // stale block for this task. The DB intentionally keeps scheduled_start as
+      // a historical record; the store must not expose it to the plan renderer.
+      useStore.getState().updateTaskOptimistic(id, {
+        scheduled_start: null,
+        scheduled_end: null,
+      } as Partial<Task>);
     }
 
     // Inverse op flips the done state back; side effects (webhook, recurrence

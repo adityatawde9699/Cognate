@@ -1,5 +1,5 @@
 [package]
-name    = "cognote"
+name    = "cognate"
 version = "3.0.0"
 description = "Cognate — Cross-platform Smart Task Manager"
 authors = []
