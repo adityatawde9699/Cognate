@@ -1,7 +1,7 @@
 [package]
 name    = "cognote"
-version = "0.1.0"
-description = "Cognote — Cross-platform Smart Task Manager"
+version = "3.0.0"
+description = "Cognate — Cross-platform Smart Task Manager"
 authors = []
 edition = "2021"
 rust-version = "1.77.2"
