@@ -40,9 +40,22 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Updater signing (required for auto-update). Generate once with
+          # `npm run tauri signer generate` and store as repo secrets — see SIGNING.md.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # macOS code signing + notarization (optional; requires an Apple Developer account).
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           tagName: v__VERSION__ # The action replaces v__VERSION__ with the actual version
           releaseName: "Cognote v__VERSION__"
-          releaseBody: "See the assets below to download and install this version."
+          releaseBody: "See the assets below to download and install this version. The app auto-updates from this release."
           releaseDraft: true
           prerelease: false
+          # Emit the signed latest.json the in-app updater polls.
+          includeUpdaterJson: true

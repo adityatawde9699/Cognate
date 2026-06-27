@@ -6,10 +6,17 @@ import { toggleTaskDone, removeTask, reorderTasks } from '../services/taskServic
 
 export function Board() {
   const setTaskModalOpen = useStore((s) => s.setTaskModalOpen);
+  const allTasks = useStore((s) => s.currentTasks);
   const visibleTasks = useVisibleTasks();
-  
-  const pending = visibleTasks.filter((t: Task) => !t.done);
-  const done    = visibleTasks.filter((t: Task) => t.done);
+
+  // Top-level tasks only; subtasks are surfaced via the List view + card badge.
+  const pending = visibleTasks.filter((t: Task) => !t.done && !t.parent_id);
+  const done    = visibleTasks.filter((t: Task) => t.done && !t.parent_id);
+
+  const subInfoFor = (id: string) => {
+    const kids = allTasks.filter((t) => t.parent_id === id);
+    return kids.length ? { done: kids.filter((k) => k.done).length, total: kids.length } : undefined;
+  };
 
   // drag state – only IDs needed, no raw Task reference
   const [draggedId, setDraggedId] = useState<string | null>(null);
@@ -70,6 +77,7 @@ export function Board() {
       >
         <TaskCard
           task={task}
+          subInfo={subInfoFor(task.id)}
           onEdit={handleEdit}
           onSelectPomo={handleSelectPomo}
           onToggle={handleToggle}

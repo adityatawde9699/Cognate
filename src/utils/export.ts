@@ -1,7 +1,7 @@
 import { getAllTasks } from '../db';
 import { toast } from './toast';
 
-function downloadStr(content: string, filename: string, type: string) {
+export function downloadStr(content: string, filename: string, type: string) {
   const blob = new Blob([content], { type });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

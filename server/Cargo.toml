@@ -1,0 +1,13 @@
+[package]
+name = "cognate-relay"
+version = "0.1.0"
+edition = "2021"
+description = "A dumb, end-to-end-encrypted sync relay for Cognate. Stores only ciphertext."
+
+[[bin]]
+name = "cognate-relay"
+path = "src/main.rs"
+
+[dependencies]
+tiny_http = "0.12"
+serde_json = "1"

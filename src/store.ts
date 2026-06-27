@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { AiQuery } from './services/aiService';
 
 // Types roughly corresponding to the old `state.js` structure
 export interface Task {
@@ -15,7 +16,61 @@ export interface Task {
   pomodoros_spent: number;
   priority: 'low' | 'medium' | 'high';
   sort_order: number;
+  // Phase 3
+  project_id: string | null;
+  parent_id: string | null;
+  recurrence: Recurrence;
+  milestone_id: string | null;
+  custom_fields: Record<string, string>;
+  // Act 0: soft-delete. Null for live tasks; ISO timestamp when trashed.
+  deleted_at?: string | null;
+  // Act 1: scheduling attributes consumed by the planner.
+  duration_min?: number;
+  scheduled_start?: string | null; // ISO datetime assigned by the planner
+  scheduled_end?: string | null;
+  energy?: 'hi' | 'med' | 'lo';
+  pinned?: boolean;
 }
+
+export type Energy = 'hi' | 'med' | 'lo';
+
+export interface CalendarEvent {
+  id: string;
+  title: string;
+  start: string; // ISO datetime
+  end: string;   // ISO datetime
+  source: string;
+  created_at: string;
+}
+
+export type Recurrence = 'none' | 'daily' | 'weekly' | 'monthly';
+
+export interface Project {
+  id: string;
+  name: string;
+  color: string;
+  created_at: string;
+  sort_order: number;
+}
+
+export interface Milestone {
+  id: string;
+  project_id: string | null;
+  name: string;
+  due: string;
+  created_at: string;
+  sort_order: number;
+}
+
+export type CustomFieldType = 'text' | 'number' | 'url' | 'date' | 'select';
+export interface CustomFieldDef {
+  id: string;
+  name: string;
+  type: CustomFieldType;
+  options?: string[]; // for 'select'
+}
+
+export type CanvasView = 'board' | 'list' | 'table' | 'calendar' | 'timeline';
 
 export type FilterType = 'all' | 'today' | 'high' | string;
 
@@ -24,14 +79,34 @@ interface AppState {
   appError: string | null;
   setAppError: (error: string | null) => void;
 
+  // ── Undo / redo availability (driven by services/history) ──
+  canUndo: boolean;
+  canRedo: boolean;
+  setHistoryState: (canUndo: boolean, canRedo: boolean) => void;
+
   // ── Core task state ─────────────────────────────────
   currentFilter: FilterType;
   currentTasks: Task[];
   searchQuery: string;
+  aiQuery: AiQuery | null;
+  aiQueryLabel: string;
+
+  projects: Project[];
+  setProjects: (projects: Project[]) => void;
+
+  milestones: Milestone[];
+  setMilestones: (milestones: Milestone[]) => void;
+
+  customFieldDefs: CustomFieldDef[];
+  setCustomFieldDefs: (defs: CustomFieldDef[]) => void;
+
+  canvasView: CanvasView;
+  setCanvasView: (view: CanvasView) => void;
 
   setFilter: (filter: FilterType) => void;
   setTasks: (tasks: Task[]) => void;
   setSearchQuery: (query: string) => void;
+  setAiQuery: (query: AiQuery | null, label?: string) => void;
 
   // ── Fine-grained CQRS mutations (optimistic UI) ─────
   addTaskOptimistic: (task: Task) => void;
@@ -51,6 +126,18 @@ interface AppState {
 
   isAnalyticsOpen: boolean;
   setAnalyticsOpen: (isOpen: boolean) => void;
+
+  isGenerateModalOpen: boolean;
+  setGenerateModalOpen: (isOpen: boolean) => void;
+
+  isCommandOpen: boolean;
+  setCommandOpen: (isOpen: boolean) => void;
+
+  isFocusMode: boolean;
+  setFocusMode: (on: boolean) => void;
+
+  templatesMode: 'save' | 'apply' | null;
+  setTemplatesMode: (mode: 'save' | 'apply' | null) => void;
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -58,10 +145,29 @@ export const useStore = create<AppState>((set) => ({
   appError: null,
   setAppError: (error) => set({ appError: error }),
 
+  canUndo: false,
+  canRedo: false,
+  setHistoryState: (canUndo, canRedo) => set({ canUndo, canRedo }),
+
   // ── Core task state ─────────────────────────────────
-  currentFilter: 'all',
+  // Act 1: the Plan ("your day, already laid out") is the landing view.
+  currentFilter: 'plan',
   currentTasks: [],
   searchQuery: '',
+  aiQuery: null,
+  aiQueryLabel: '',
+
+  projects: [],
+  setProjects: (projects: Project[]) => set({ projects }),
+
+  milestones: [],
+  setMilestones: (milestones: Milestone[]) => set({ milestones }),
+
+  customFieldDefs: [],
+  setCustomFieldDefs: (defs: CustomFieldDef[]) => set({ customFieldDefs: defs }),
+
+  canvasView: 'board',
+  setCanvasView: (view: CanvasView) => set({ canvasView: view }),
 
   isTaskModalOpen: false,
   editingTask: null,
@@ -73,9 +179,23 @@ export const useStore = create<AppState>((set) => ({
   isAnalyticsOpen: false,
   setAnalyticsOpen: (isOpen) => set({ isAnalyticsOpen: isOpen }),
 
-  setFilter: (filter: FilterType) => set({ currentFilter: filter }),
+  isGenerateModalOpen: false,
+  setGenerateModalOpen: (isOpen) => set({ isGenerateModalOpen: isOpen }),
+
+  isCommandOpen: false,
+  setCommandOpen: (isOpen) => set({ isCommandOpen: isOpen }),
+
+  isFocusMode: false,
+  setFocusMode: (on) => set({ isFocusMode: on }),
+
+  templatesMode: null,
+  setTemplatesMode: (mode) => set({ templatesMode: mode }),
+
+  // Changing the filter clears any active AI query.
+  setFilter: (filter: FilterType) => set({ currentFilter: filter, aiQuery: null, aiQueryLabel: '' }),
   setTasks: (tasks: Task[]) => set({ currentTasks: tasks }),
   setSearchQuery: (query: string) => set({ searchQuery: query }),
+  setAiQuery: (query, label = '') => set({ aiQuery: query, aiQueryLabel: label }),
 
   // ── Fine-grained CQRS mutations ─────────────────────
   addTaskOptimistic: (task) =>

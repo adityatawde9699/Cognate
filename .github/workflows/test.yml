@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - master
   pull_request:
 
 jobs:
@@ -27,6 +28,20 @@ jobs:
       - name: Run JS tests
         run: npm test
 
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Run e2e tests
+        run: npm run test:e2e
+
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -49,4 +64,14 @@ jobs:
 
       - name: Run Rust tests
         working-directory: src-tauri
+        run: cargo test
+
+      # The E2E sync relay is a separate, dependency-light crate (server/).
+      # It must be linted and tested on its own so the sync spine stays green.
+      - name: Check relay linting
+        working-directory: server
+        run: cargo clippy -- -D warnings
+
+      - name: Run relay tests
+        working-directory: server
         run: cargo test

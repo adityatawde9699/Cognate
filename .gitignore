@@ -34,3 +34,22 @@ src-tauri/gen/
 
 # macOS
 .DS_Store
+
+# Python
+.venv/
+
+# Playwright e2e
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+
+# Tauri updater signing keys — NEVER commit the private key
+src-tauri/.tauri/
+
+# Relay server build artifacts
+server/target
+
+# Relay durable store (runtime data)
+server/relay-data.json
+server/relay-data.json.tmp

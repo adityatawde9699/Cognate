@@ -1,154 +1,198 @@
-# Cognote
+# Cognate
 
 ![License](https://img.shields.io/github/license/adityatawde9699/Cognate)
 ![Tests](https://github.com/adityatawde9699/Cognate/actions/workflows/test.yml/badge.svg)
 ![Release](https://github.com/adityatawde9699/Cognate/actions/workflows/release.yml/badge.svg)
-![Platforms](https://img.shields.io/badge/platform-windows%20%7C%20macos%20%7C%20linux-blue)
+![Platforms](https://img.shields.io/badge/platform-windows%20%7C%20macos%20%7C%20linux%20%7C%20web-blue)
 
-Cognote is a cross-platform desktop task management application built with Tauri 2, React 19, and SQLite. It provides a local-first task board with a Pomodoro timer, automated priority scoring, tag-based filtering, and optional outbound notification delivery to Slack, Discord, and Telegram via webhook and bot APIs. The application runs natively on Windows, macOS, and Linux, embedding the frontend inside a Tauri WebView with a Rust backend that handles timer state, IPC commands, and data persistence through a local SQLite database.
+**Cognate is the planner that plans your day — privately.**
+
+It isn't another to-do list. A deterministic Rust scheduler lays out your day as
+calendar- and energy-aware **time blocks**, re-planning itself when a meeting
+lands or work slips, and explaining each placement in plain English. The AI that
+helps can run on **your own machine** (local Ollama / llama.cpp). Your data lives
+**on your device**, syncs **end-to-end encrypted** to every other device through a
+dumb relay that can't read it, and — because that sync spine is a CRDT — sharing a
+project turns it into a **real-time, role-based team workspace** almost for free.
+
+> One verb: **plan**. See [`plan.md`](plan.md) for the full product thesis and
+> roadmap (Acts 0–5).
+
+---
 
 ## Table of Contents
+- [What makes it different](#what-makes-it-different)
 - [Features](#features)
 - [Tech Stack](#tech-stack)
 - [Architecture](#architecture)
+- [The sync relay](#the-sync-relay)
 - [Setup & Installation](#setup--installation)
 - [Usage](#usage)
+- [Testing](#testing)
 - [Project Structure](#project-structure)
-- [Known Limitations](#known-limitations)
-- [Future Improvements](#future-improvements)
+- [Status & honest limitations](#status--honest-limitations)
+- [License · Contributing · Security](#license--contributing--security)
+
+---
+
+## What makes it different
+
+**Auto-planning × privacy × bring-your-own-model × offline** — a combination no
+incumbent ships:
+
+- **Motion** auto-plans, but cloud-only, no privacy, no offline.
+- **Todoist / Notion / TickTick** don't auto-plan at all.
+- **Cognate** does all of it: open the app and your day is already laid out,
+  re-flowing on disruption, on a model and machine you control, working on a plane.
+
+The scheduler is **deterministic Rust** (fast, offline, explainable). **AI is an
+advisor, not the decider** — it estimates durations, infers energy, writes the
+rationale, and enriches natural-language capture, so planning still works with no
+API key and no network.
 
 ---
 
 ## Features
 
-- **Task board** — Two-column view (Pending / Completed) with drag-and-drop reordering persisted to the database
-- **Task CRUD** — Create, read, update, and delete tasks including title, description, tags, deadline, importance (1–5), and effort (1–5)
-- **CQRS Persistence Pipeline** — Robust state synchronization between SQLite and Zustand using a Command Query Responsibility Segregation (CQRS) approach with fully optimistic UI updates and auto-rollbacks on database failures.
-- **Automated priority scoring** — Rust command (`calc_priority`) computes a weighted score from importance, effort, and deadline proximity; classifies tasks as `low`, `medium`, or `high`; JavaScript fallback available for browser-only runs
-- **Pomodoro timer** — 25-minute countdown managed entirely in Rust (`toggle_pomodoro`, `reset_pomodoro`) with per-second tick events emitted to the frontend; completed sessions increment `pomodoros_spent` on the linked task
-- **Sidebar filters** — Per-view filters: All Tasks, Due Today, High Priority, and tag-based filters derived dynamically from task data
-- **Full-text search** — Client-side search across task title, description, and tags via Zustand store
-- **Analytics panel** — Bar chart (Chart.js) showing task completions for the last 7 days; priority breakdown display; completion streak counter; focus hours derived from Pomodoro count (partial: chart data is currently static stub, not wired to `getStats()`)
-- **Data export** — Download all tasks as CSV or JSON from the Analytics panel
-- **Settings panel** — Configurable Pomodoro work/break durations stored in SQLite; auto-start break toggle
-- **Webhook integrations** — Outbound notifications to Slack (Incoming Webhook), Discord (Incoming Webhook), and Telegram (Bot API) configured in Settings
-- **Calendar OAuth — Experimental** — `start_oauth` Tauri command generates OAuth 2.0 authorization URLs for Google Calendar and Microsoft Outlook; the OAuth callback handling (token exchange, calendar sync) is not implemented; the command opens the browser to the provider login page only
-- **System tray** — Tray icon with "Show Cognote" and "Quit" context menu items; left-click restores the window
-- **Keyboard shortcuts** — `N` new task, `/` focus search, `1`/`2`/`3` switch filters, `T` toggle theme, `Escape` close modal
-- **Theme toggle** — Light/dark theme switching via `useTheme` hook
-- **localStorage fallback** — All database operations fall back to `localStorage` when running outside Tauri (browser/Vite dev server)
-- **Desktop notifications** — `tauri-plugin-notification` is registered; notification dispatch is not wired to any application event in the current codebase
-- **Seed data** — On first launch, six example tasks are inserted with representative priorities, tags, and deadlines
-- **Automated CI/CD** — Pre-configured GitHub Actions pipelines automatically perform testing, formatting checks, and build cross-platform release binaries for Windows, macOS, and Linux.
+### The Planner (the wedge)
+- **Auto-plan your day/week** — a deterministic scheduler (`planner.rs`, mirrored
+  in TS) places tasks against your real calendar, respecting deadlines, priority,
+  estimated duration, an energy curve, working hours, and meetings.
+- **"Today / Plan" hero view** — the default landing: your day as time blocks over
+  the calendar, with an inline rationale for each ("Report → 2pm because the client
+  call owns your morning"). Drag a block → it pins and the rest re-solves.
+- **Auto-reflow** — a slipped block or a new meeting triggers a re-plan + notify.
+- **Closed-loop energy model** — Cognate learns *when you actually focus* from your
+  completed, focused history (Pomodoro outcomes at their scheduled hour) and feeds
+  that personal energy curve back into the planner. The more you use it, the better
+  it plans.
+- **Calendar busy-time** — subscribe to an `.ics` URL or paste `.ics` text; or
+  connect **Google / Outlook free-busy** over OAuth 2.0 + PKCE (read-only).
+
+### Capture
+- **Natural-language quick-add** — `⌘K` → "call Sam tmrw 5pm 30m #work !!" becomes a
+  fully-scheduled, pinned task. A pure, offline parser extracts the date, time,
+  duration, tags, and priority; an optional "Smart quick-add" AI pass fills any gaps.
+- **Rich task model** — title, description, tags, deadline, importance/effort,
+  projects, milestones, subtasks, recurring tasks, custom fields, 5 views
+  (Board / List / Table / Calendar / Timeline), Pomodoro & Focus mode.
+
+### Sync & privacy
+- **Local-first CRDT op-log** — every mutation appends an immutable, causally-ordered
+  operation (Hybrid Logical Clock + LWW); SQLite is a projection of it.
+- **End-to-end-encrypted sync** — a passphrase derives an AES-GCM key and an opaque
+  room id; the relay stores only ciphertext and **cannot read or merge your data**.
+- **PWA companion** — the web build is installable on a phone and works offline,
+  sharing the exact same core and syncing through the relay.
+- **Encrypted recovery kit** — export all your sync/share secrets sealed under a
+  recovery passphrase; restore on a new device.
+
+### Teams (multiplayer falls out of the sync spine)
+- **Share a project** = share a CRDT doc key. Each share gets its **own** key + relay
+  room, isolated from the rest of your workspace.
+- **Roles & RBAC** — viewer / commenter / editor / owner, enforced **cryptographically**:
+  every op is ECDSA-signed and admitted only if its signer's role permits it. A
+  compromised relay can't forge or tamper with edits.
+- **Comments, assignees, presence, activity feed**, and **near-real-time** updates
+  (relay long-poll → edits land in ~a second).
+- **Team auto-planning** — balance a project's open work across the roster by capacity,
+  then schedule each member's day. The planner moat becomes a team moat.
+
+### AI (own your model)
+- Multi-provider via one backend command: **Claude, OpenAI-compatible, OpenRouter,
+  Groq, xAI, Gemini, and local Ollama / llama.cpp / self-hosted**.
+- **One-click "Go fully private"** points planning, advice, and quick-add at a local
+  model — nothing leaves your device.
+- Helpers: improve a description, break into subtasks, suggest priority/tags, estimate
+  scheduling, advise the plan, weekly report.
+
+### Trust & polish (Act 0 + Act 5)
+- **Undo/redo + Trash** (soft-delete + restore), automatic timestamped **backups** +
+  one-click restore, boot-time integrity check.
+- **Signed auto-update** for real distribution; secrets in the **OS keychain** (never
+  plaintext).
+- **Proactive chief-of-staff** — a morning brief and an overcommitment nudge ("move X")
+  on the Plan, plus a once-a-day brief notification.
+- **60-second first-run** — paste a calendar, get a planned day immediately.
+- **i18n** (English, Español, Deutsch, Français) with browser auto-detection.
+- **A11y + performance** — focus traps, keyboard nav, code-split heavy views.
 
 ---
 
 ## Tech Stack
 
-### Runtime
-| Component | Version |
+| Layer | Choice |
 |---|---|
-| Tauri | 2.x |
-| Rust | ≥ 1.77.2 |
-| Node.js | LTS (project does not pin a version) |
-
-### Languages
-- TypeScript 5.x (frontend logic and React components)
-- JavaScript (ES modules — `db.js`, `state.js`, `format.js`, `toast.js`)
-- Rust 2021 edition (Tauri backend and IPC commands)
-- SQL (SQLite schema and parameterized queries)
-
-### Frontend Framework & Libraries
-| Package | Role |
-|---|---|
-| React 19 | UI framework |
-| Vite 7 | Dev server and bundler |
-| Zustand 5 | Client-side state management |
-| Chart.js 4 | Analytics bar chart |
-| `@fontsource/inter` | Bundled typeface |
-| `@fortawesome/fontawesome-free` | Icon set |
-
-### Backend (Rust crates)
-| Crate | Role |
-|---|---|
-| `tauri 2` | App shell, IPC, event bus, tray |
-| `tauri-plugin-sql` (SQLite) | SQLite driver with migration support |
-| `tauri-plugin-log` | Structured logging at `Info` level and above |
-| `tauri-plugin-notification` | Native OS notifications (registered, not wired) |
-| `tauri-plugin-shell` | Opens external URLs from Rust commands |
-| `tauri-plugin-oauth` | OAuth localhost redirect server |
-| `reqwest 0.12` | HTTP client for webhook delivery |
-| `tokio 1` (full) | Async runtime for the Pomodoro loop and HTTP calls |
-| `serde` / `serde_json` | Serialization |
-| `chrono 0.4` | Date arithmetic for deadline scoring |
-
-### Database
-- SQLite via `tauri-plugin-sql`; database file: `cognote.db` in the Tauri app data directory
-- Single migration (`001_init.sql`) creates `tasks` and `app_state` tables
-
-### Development Tools
-| Tool | Role |
-|---|---|
-| Vitest 4 | JavaScript unit tests |
-| `@tauri-apps/cli` | Tauri dev/build commands |
-| TypeScript compiler | Type checking |
-| Vite | HMR dev server on port 1420 |
+| Shell | **Tauri 2** (Rust backend + WebView), also a **PWA** in the browser |
+| Frontend | **React 19**, **Vite 7**, **Zustand 5**, Chart.js (lazy) |
+| Fonts | Space Grotesk (display), Geist + Geist Mono (body/data) |
+| Backend | Rust 2021 — Tauri commands, `tauri-plugin-sql` (SQLite), `-notification`, `-shell`, `-oauth`, `-updater`; `reqwest`, `tokio`, `serde` |
+| Crypto | WebCrypto — PBKDF2 → AES-GCM (E2E), ECDSA P-256 (op signing) |
+| Storage | SQLite (`tauri-plugin-sql`, migrations `001`–`006`); `localStorage` fallback in the browser |
+| Sync relay | a separate, dependency-light Rust crate (`server/`) — `tiny_http` + `serde_json` |
+| Tests | Vitest (unit/integration + property), Playwright (e2e), `cargo test` (both crates), clippy `-D warnings` |
 
 ---
 
 ## Architecture
 
-Cognote follows a two-process architecture as required by Tauri: a Rust process (the backend) and a WebView process (the frontend). The two processes communicate exclusively through Tauri's IPC mechanism.
+Four load-bearing decisions (see [`plan.md`](plan.md) → *Architecture decisions*):
+
+1. **Scheduler in Rust, deterministic; AI is advisor.** Speed, offline, trust — AI
+   failures degrade to a still-useful plan.
+2. **CRDT op-log is the source of truth; SQLite is a projection; the relay is a dumb
+   E2E relay.** One engine yields offline + multi-device + multiplayer; privacy is
+   structural, not a setting.
+3. **One platform-agnostic TS core** (`store` + `services`); only the storage/IO
+   adapter (`db.js`) differs per platform → desktop / web / PWA share the logic.
+4. **Test pyramid is non-negotiable** — e2e + integration + units gate CI.
 
 ```
-┌─────────────────── WebView (Vite + React 19) ───────────────────┐
-│                                                                  │
-│  App.tsx                                                         │
-│  ├── Titlebar          ← custom window chrome (decorations=false)│
-│  ├── Sidebar           ← filter nav + stats + tag list          │
-│  ├── Board             ← Pending / Completed columns + DnD      │
-│  │   └── TaskCard      ← individual task display                │
-│  ├── Pomodoro          ← timer chip (drives invoke calls)        │
-│  ├── Analytics         ← Chart.js panel + CSV/JSON export        │
-│  ├── TaskModal         ← create / edit form                      │
-│  └── SettingsModal     ← pomo config + webhook inputs + OAuth    │
-│                                                                  │
-│  store.ts (Zustand)    ← UI state + CQRS task mutations         │
-│  taskService.ts        ← CQRS operations connecting UI with db  │
-│  db.js                 ← SQLite abstraction + localStorage shim  │
-└──────────────┬───────────────────────────────────────────────────┘
-               │  invoke() / listen()  (Tauri IPC)
-┌──────────────▼───────────────────── Rust Backend ───────────────┐
-│  lib.rs                                                          │
-│  ├── app_ready()       ← returns CARGO_PKG_VERSION              │
-│  ├── calc_priority()   ← weighted score → low/medium/high       │
-│  ├── toggle_pomodoro() ← starts async Tokio loop, emits ticks   │
-│  ├── reset_pomodoro()  ← resets PomoState to 25:00              │
-│  └── integrations.rs                                             │
-│      ├── send_notification() ← HTTP POST to Slack/Discord/TG    │
-│      └── start_oauth()       ← generates OAuth URL (stub)       │
-│                                                                  │
-│  Plugins: tauri-plugin-sql (SQLite), tauri-plugin-log,          │
-│           tauri-plugin-notification, tauri-plugin-shell,         │
-│           tauri-plugin-oauth                                     │
-└─────────────────────────────────────────────────────────────────┘
-               │
-          SQLite (cognote.db)
-          ├── tasks      (13 columns)
-          └── app_state  (key/value store for settings and seeded flag)
+┌──────────────── WebView (React 19) / PWA / Browser ─────────────────┐
+│  PlanView (default)  Board·List·Table·Calendar·Timeline             │
+│  CommandPalette (⌘K NL quick-add)   TaskModal   SharedProjects      │
+│  ChiefOfStaff banner   Onboarding   i18n                            │
+│                                                                     │
+│  store.ts (Zustand)         ← platform-agnostic UI state            │
+│  services/                  ← the portable core                     │
+│    planService · planner mirror · energyModel · chiefOfStaff        │
+│    taskService (CQRS choke point)                                   │
+│    oplog · oplogStore · projector · syncService   ← CRDT spine      │
+│    crypto · identity · collab · shareService      ← E2E + RBAC      │
+│    relayService · relayTransport · presence · activity              │
+│    aiService · nlQuickAdd · quickAddService · privateAi             │
+│  db.js                      ← SQLite (Tauri) / localStorage (web)   │
+└───────────────┬──────────────────────────────┬─────────────────────┘
+        invoke()/listen() (Tauri IPC)     fetch / relay_fetch
+┌───────────────▼──────────────┐   ┌──────────▼──────────────────────┐
+│  Rust backend (src-tauri)    │   │  Sync relay (server/, separate)  │
+│  planner.rs  plan_day/plan_team│  │  ciphertext-only store-&-forward │
+│  calc_priority · pomodoro    │   │  rooms → blobs · version · poll  │
+│  ai_generate · oauth_*       │   │  bearer auth · rate limit · disk │
+│  secrets (keychain) · backup │   │  worker pool + long-poll (≈1s)   │
+│  integrations · relay_fetch  │   └──────────────────────────────────┘
+│  SQLite (migrations 001–006) │
+└──────────────────────────────┘
 ```
 
-**Data flow for task creation (CQRS & Optimistic UI):**
-1. User submits the Task Modal form in the WebView.
-2. `taskService.addTask()` is called. It immediately saves a snapshot of the current tasks and performs an optimistic update in the Zustand store.
-3. The app asynchronously writes to SQLite via `db.js` `createTask()` which also invokes `calc_priority` in Rust.
-4. If the database insertion succeeds, the Zustand store is reconciled with the new authoritative DB record. If it fails, the store is rolled back to the prior snapshot and an error is displayed.
+---
 
-**Pomodoro flow:**
-1. Frontend calls `invoke('toggle_pomodoro')`.
-2. Rust spawns a Tokio async task that decrements `PomoState.time_left` every second and emits `pomo-tick` events.
-3. The `Pomodoro` React component listens to `pomo-tick` via `listen()` and updates the display.
-4. On completion, Rust emits `pomo-finished`; the frontend dispatches a local `CustomEvent` for audio or further handling.
+## The sync relay
+
+`server/` is a **separate, tiny Rust crate** — *not* part of the app build. It's a
+dumb end-to-end-encrypted store-and-forward service: it buckets sealed blobs by an
+opaque room id and a device id, exposes a version counter + long-poll for
+near-real-time fan-out, and **never holds keys or sees plaintext**. It supports an
+optional bearer token, per-IP rate limiting, and write-through disk persistence.
+
+```bash
+cd server
+cargo run            # listens on 127.0.0.1:8787 by default
+cargo test           # unit tests (routing, auth, rate limit, durability, long-poll)
+```
+
+Configure it in the app under **Settings → Live sync** (relay URL + a strong
+passphrase; the passphrase never leaves your device). See [`server/README.md`](server/README.md).
 
 ---
 
@@ -158,227 +202,134 @@ Cognote follows a two-process architecture as required by Tauri: a Rust process 
 
 | Requirement | Notes |
 |---|---|
-| Rust toolchain | Install via [rustup.rs](https://rustup.rs). Minimum: 1.77.2 |
-| Microsoft C++ Build Tools | Windows only. Required for the Rust linker (`link.exe`) |
-| Node.js | LTS release recommended |
-| npm | Included with Node.js |
-| WebView2 runtime | Windows only. Usually pre-installed on Windows 10/11 |
+| Rust toolchain | [rustup.rs](https://rustup.rs), ≥ 1.77.2 |
+| Node.js | LTS recommended; `npm install` |
+| Linux deps | `libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf` |
+| Windows | "Desktop development with C++" (for `link.exe`) + WebView2 runtime |
 
-On **Windows**, if `link.exe` is not found during `cargo build`, install the "Desktop development with C++" workload from [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/).
-
-### Environment Variables
-
-The following variables are read at runtime by the Rust backend. The application will substitute placeholder strings if they are absent; OAuth flows will not function without them.
-
-| Variable | Required For | Default if Absent |
-|---|---|---|
-| `GOOGLE_CLIENT_ID` | Google Calendar OAuth | `"YOUR_CLIENT_ID"` |
-| `MICROSOFT_CLIENT_ID` | Microsoft Outlook OAuth | `"YOUR_CLIENT_ID"` |
-
-Set these in your shell environment or a `.env` file before running `npm run tauri dev`. Note: Vite forwards only variables prefixed with `VITE_` or `TAURI_ENV_*` to the frontend; the two variables above are read directly by Rust via `std::env::var`.
-
-### Installation
+### Run
 
 ```bash
-# 1. Clone the repository
-git clone <repository-url>
-cd cognote   # or the repository directory name
-
-# 2. Install JavaScript dependencies
+git clone https://github.com/adityatawde9699/Cognate
+cd Cognate
 npm install
 
-# 3. (Optional) Verify Rust toolchain
-cargo --version   # must be ≥ 1.77.2
-
-# 4. Launch the application in development mode
-npm run tauri dev
+npm run tauri dev     # desktop app (Vite on :1420 + Cargo)
+# or
+npm run dev           # browser / PWA only (localStorage fallback)
 ```
 
-`npm run tauri dev` runs Vite on port 1420 and Cargo in parallel. The Tauri window opens automatically when both are ready.
-
-### Building for Distribution
+### Build
 
 ```bash
-npm run tauri build
+npm run tauri build   # desktop bundles → src-tauri/target/release/bundle/
+npm run build         # static web/PWA build → dist/ (installable, offline-capable)
 ```
 
-Output bundles (installer, `.exe`, `.dmg`, `.AppImage` depending on platform) are written to `src-tauri/target/release/bundle/`.
+### Optional environment
 
-### Database
+OAuth calendar connect is desktop-only and needs **your own** provider client id
+(read-only free/busy). Provider app verification is an external step.
 
-The SQLite database (`cognote.db`) is created automatically on first launch by `tauri-plugin-sql` using the migration in `src-tauri/migrations/001_init.sql`. No manual database setup is required. The file location is determined by Tauri's app data directory convention for the target OS.
+| Variable | For |
+|---|---|
+| `GOOGLE_CLIENT_ID` | Google Calendar free/busy |
+| `MICROSOFT_CLIENT_ID` | Outlook / Microsoft 365 free/busy |
+
+The relay reads `RELAY_ADDR`, `RELAY_DATA`, `RELAY_TOKEN`, `RELAY_RATE_LIMIT`,
+`RELAY_RATE_WINDOW`, `RELAY_WORKERS`.
 
 ---
 
 ## Usage
 
-### Running in Development
+- **Plan** — open the app (lands on **Plan**) → **Auto-plan** lays out your day; drag
+  a block to pin + re-solve. Connect a calendar in **Settings → Calendar**.
+- **Capture** — `⌘K`, type naturally ("ship deck friday 90m #work"), Enter.
+- **Sync** — **Settings → Live sync**: run the relay, enter its URL + a shared
+  passphrase on each device. Edits converge conflict-free, ciphertext-only.
+- **Share** — **Settings → Shared projects**: share a project → copy the invite; a
+  teammate joins, you grant a role, and you assign/comment in near-real-time.
+- **Go private** — **Settings → AI → Go fully private (Ollama)**: all AI runs locally.
+
+### Keyboard shortcuts
+`⌘K` command palette / NL quick-add · `N` new task · `/` search · `1/2/3` filters ·
+`T` theme · `Esc` close · `Ctrl/⌘+Z` undo.
+
+---
+
+## Testing
 
 ```bash
-npm run tauri dev
+npm test                       # Vitest: unit + integration + property tests
+npm run test:e2e               # Playwright: drives the app in a real browser
+(cd src-tauri && cargo test)   # Rust: planner, priority, team plan, integrations
+(cd server   && cargo test)    # Rust: relay routing, auth, rate limit, long-poll
 ```
 
-The Vite dev server starts on `http://localhost:1420`. The Tauri window opens and connects to it. Hot module replacement is active for frontend changes. Rust changes trigger a Tauri restart.
-
-### Running Frontend Only (Browser)
-
-```bash
-npm run dev
-```
-
-Opens the frontend in a browser at `http://localhost:1420`. In this mode, SQLite is unavailable and all data is stored in `localStorage` under the key `cn_tasks_v2`. Tauri IPC calls are bypassed through the `IS_TAURI` guard in `db.js`.
-
-### Running Tests
-
-```bash
-npm test
-```
-
-Runs Vitest tests. Currently two test files exist:
-
-- `tests/calcPriority.test.js` — 4 unit tests covering the JavaScript priority scoring fallback logic
-- `src/store.test.ts` — Zustand store tests (file present; content not shown in this analysis)
-
-### Keyboard Shortcuts
-
-| Key | Action |
-|---|---|
-| `N` | Open new task modal |
-| `/` | Focus search input |
-| `1` | Show all tasks |
-| `2` | Show tasks due today |
-| `3` | Show high-priority tasks |
-| `T` | Toggle light/dark theme |
-| `Escape` | Close active modal / blur input |
-
-### Webhook Integration
-
-In Settings, enter a webhook URL for Discord or Slack, or a bot token plus chat ID for Telegram. These values are stored in the `app_state` SQLite table. Notifications are sent by invoking the Rust `send_notification` command, which performs an HTTP POST via `reqwest`. There is no in-app trigger that automatically calls this command; it must be invoked programmatically.
-
-### Data Export
-
-From the Analytics panel, click **CSV** or **JSON** to download all tasks. The export reads directly from the active database or `localStorage` fallback.
+CI (`.github/workflows/test.yml`) runs all four plus clippy `-D warnings` on both
+crates. Current suite: **~200 Vitest · 17 Playwright e2e · 13 + 10 Rust**, all green.
+The CRDT merge, RBAC admission, crypto, scheduler, energy model, and NL parser are
+property-/unit-tested; cross-device sync and the first-run flow are covered e2e.
 
 ---
 
 ## Project Structure
 
 ```
-cognote/
-├── index.html                  # Vite HTML entry point
-├── package.json                # npm scripts and JS dependencies
-├── tsconfig.json               # TypeScript configuration
-├── vite.config.js              # Vite + Tauri dev server configuration
-├── vitest.config.js            # Vitest test runner configuration
+Cognate/
+├── plan.md                     # the product thesis + roadmap (Acts 0–5)
+├── index.html · vite.config.js · vitest.config.js · playwright.config.ts
+├── public/                     # PWA manifest + service worker + icons
+├── e2e/                        # Playwright specs (smoke, plan, sync, onboarding…)
 │
-├── src/                        # Frontend source (TypeScript + React)
-│   ├── main.tsx                # React DOM entry; mounts <App />
-│   ├── App.tsx                 # Root component; layout composition
-│   ├── store.ts                # Zustand store (UI state + task mutations)
-│   ├── db.js                   # SQLite/localStorage abstraction layer
-│   ├── db.d.ts                 # TypeScript declarations for db.js
-│   ├── logger.js               # Tauri log plugin wrapper
-│   ├── style.css               # Global styles (~39 KB)
-│   ├── vite-env.d.ts           # Vite environment type shim
-│   ├── store.test.ts           # Zustand store unit tests
-│   │
-│   ├── components/
-│   │   ├── Board.tsx           # Two-column task board with drag-and-drop
-│   │   ├── TaskCard.tsx        # Individual task card (display + actions)
-│   │   ├── Sidebar.tsx         # Navigation, filters, stats, tag list
-│   │   ├── Pomodoro.tsx        # Timer chip wired to Rust via IPC events
-│   │   ├── Analytics.tsx       # Chart.js bar chart + export buttons
-│   │   ├── Titlebar.tsx        # Custom window chrome
-│   │   ├── Toast.tsx           # React-managed toast notifications
-│   │   └── Modals/
-│   │       ├── TaskModal.tsx   # Create/edit task form
-│   │       └── SettingsModal.tsx  # Pomodoro config, webhooks, OAuth
-│   │
-│   ├── hooks/
-│   │   ├── useShortcuts.ts     # Global keyboard shortcut bindings
-│   │   ├── useTasks.ts         # Task-loading and DB hydration hook
-│   │   ├── useTheme.ts         # Theme persistence hook
-│   │   └── useVisibleTasks.ts  # Memoized hook for filtered/searched tasks
-│   │
-│   ├── services/
-│   │   └── taskService.ts      # CQRS operations connecting UI with db.js
-│   │
-│   └── utils/
-│       ├── export.ts           # CSV and JSON export functions
-│       ├── audio.ts            # Audio playback utilities
-│       ├── format.js           # Date/time formatting helpers
-│       └── toast.ts            # Global toast trigger linked to Toast.tsx
+├── src/                        # platform-agnostic core + React UI
+│   ├── App.tsx · main.tsx · store.ts · i18n.ts
+│   ├── db.js / db.d.ts         # SQLite (Tauri) / localStorage (web) adapter
+│   ├── components/             # PlanView, Board, SharedProjects, ChiefOfStaff,
+│   │   │                       #   Onboarding, CommandPalette, Settings/*, Modals/*
+│   ├── hooks/                  # useAutoReflow, useAutoSync, useAutoShareSync,
+│   │   │                       #   useMorningBrief, usePomodoroConfig, …
+│   ├── services/               # the engine (see Architecture)
+│   │   ├── planService · energyModel · chiefOfStaff · teamPlanService
+│   │   ├── oplog · oplogStore · projector · syncService
+│   │   ├── crypto · identity · collab · collabProjection · shareService
+│   │   ├── relayService · relayTransport · presenceService · activity
+│   │   ├── recoveryService · oauthCalendarService · calendarSyncService
+│   │   └── aiService · nlQuickAdd · quickAddService · privateAi · onboardingService
+│   └── utils/                  # secrets (keychain), pwa, notify, export, toast
 │
-├── tests/
-│   └── calcPriority.test.js    # Unit tests for JS priority scoring
+├── src-tauri/                  # Rust backend
+│   ├── migrations/             # 001_init … 006_oplog
+│   └── src/                    # lib.rs, planner.rs, ai.rs, integrations.rs,
+│                               #   secrets.rs, backup.rs, planner.rs
 │
-└── src-tauri/                  # Rust backend (Tauri)
-    ├── Cargo.toml              # Rust package manifest and dependencies
-    ├── Cargo.lock              # Dependency lock file
-    ├── build.rs                # Tauri build script
-    ├── tauri.conf.json         # Tauri app configuration (window, CSP, bundle)
-    ├── capabilities/
-    │   └── default.json        # Tauri capability permissions manifest
-    ├── migrations/
-    │   └── 001_init.sql        # Initial SQLite schema (tasks + app_state)
-    ├── icons/                  # App icons for all platforms
-    └── src/
-        ├── main.rs             # Binary entry point (calls lib::run())
-        ├── lib.rs              # Plugin registration, IPC commands, tray setup
-        └── integrations.rs     # Webhook dispatch and OAuth URL generation
+└── server/                     # the E2E sync relay (separate Rust crate)
 ```
 
 ---
 
-## Known Limitations
+## Status & honest limitations
 
-- **Analytics chart uses static data.** The `Analytics` component renders a hardcoded dataset (`[1, 5, 2, 8, 3, 0, 4]`) instead of values from `getStats()`. The stat counters in the analytics panel display `0` unconditionally. The `getStats()` function in `db.js` is correctly implemented but not connected to the component.
+Acts 0–5 of [`plan.md`](plan.md) are substantially built and tested. The residuals
+are deliberate or external, not unwritten features:
 
-- **OAuth is incomplete.** `start_oauth` generates an authorization URL and opens it in the browser, but does not implement the PKCE code exchange, token storage, or any calendar read/write operations. Connecting Google Calendar or Outlook from Settings initiates browser navigation only.
-
-- **Desktop notifications are not triggered.** `tauri-plugin-notification` is registered in the plugin chain, but no application event (task completion, Pomodoro end, deadline) currently calls into it.
-
-- **Pomodoro duration ignores settings.** The timer is hardcoded to 25 minutes in both the Rust backend (`PomoState { time_left: 25 * 60 }`) and the React component (`25 * 60`). Settings panel fields for work/short-break/long-break durations are saved to the database but are not read by the timer logic.
-
-- **Webhook invocation has no in-app trigger.** The `send_notification` Rust command exists and functions, but no UI action in the current codebase calls it automatically. Manual invocation via Tauri devtools or code modification is required.
-
-- **Test coverage requires expansion.** While the Zustand store has solid unit tests for mutations and error states, and the JS priority scoring is tested, there is still missing coverage for React components, database operations, and Rust commands.
-
-- **SQLite JSON1 dependency.** Tag filtering uses the `json_each()` function, which requires SQLite 3.38 or later. This is satisfied by modern Tauri-bundled SQLite builds but is an implicit requirement not documented anywhere in the project.
-
-- **Webhook tokens stored in plaintext.** Discord webhooks, Slack webhooks, and Telegram bot tokens are stored as plain text strings in the SQLite `app_state` table with no encryption.
-
-- **Window decorations disabled by default.** `"decorations": false` in `tauri.conf.json` removes the OS title bar. The custom `Titlebar` component provides window drag functionality, but native OS window management behaviors (snap, maximize gestures) may differ by platform.
+- **Calendar OAuth needs your own client id** + provider app verification (external);
+  the PKCE flow, token refresh, and free/busy mapping are code-complete and tested.
+- **Mobile is a PWA**, not a native app (installable + offline; the plan's stated
+  "(or PWA)" route).
+- **Collaboration is near-real-time** (relay long-poll, ~1s), not a persistent
+  websocket.
+- **SQLite is a synced projection of the op-log**, not a full read-cutover (a
+  re-architecture would require op-log-ifying every entity type).
+- The hosted relay/AI are **not a paid tier** — you bring your own API key (or run a
+  local model) and self-host or run the relay yourself.
 
 ---
 
-## Future Improvements
+## License · Contributing · Security
 
-- Wire `getStats()` return values to the `Analytics` component to display live chart data and accurate stat counters.
-- Complete the OAuth calendar integration: implement PKCE token exchange, secure token storage, and calendar event read/write via the Google Calendar and Microsoft Graph APIs.
-- Read saved Pomodoro duration settings in both the Rust timer state and the React component at startup rather than using hardcoded values.
-- Add an in-app trigger for desktop notifications on Pomodoro completion and task deadline.
-- Add a mechanism (e.g., a dedicated "notify" button on a task card) that calls `send_notification` with configured webhook targets.
-- Expand test coverage: add component tests using a React testing library, store integration tests, and Rust unit tests for `calc_priority` edge cases.
-- Encrypt sensitive settings (webhook URLs, bot tokens) using the OS keychain or a Tauri secrets plugin rather than plaintext SQLite storage.
-- Add a `rust-toolchain.toml` file to pin the Rust version for reproducible builds across contributor environments.
-
----
-
-## Screenshots / Demo
-
-No screenshots or demo recordings are included in the repository. Add application screenshots to a `/docs/screenshots/` directory and link them here.
-
----
-
-## License
-
-See [LICENSE.txt](LICENSE.txt) for full license terms.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
-
-## Security
-
-See [SECURITY.md](SECURITY.md) for the security policy and vulnerability reporting process.
+- License: see [LICENSE.txt](LICENSE.txt).
+- Contributing: see [CONTRIBUTING.md](CONTRIBUTING.md).
+- Security policy & reporting: see [SECURITY.md](SECURITY.md). Code signing &
+  release setup: see [SIGNING.md](SIGNING.md).

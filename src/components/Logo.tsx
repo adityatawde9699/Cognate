@@ -1,19 +1,89 @@
 export function Logo({ className }: { className?: string }) {
   return (
-    <svg 
+    <svg
       className={className}
-      viewBox="0 0 400 120" 
-      fill="none" 
+      viewBox="0 0 400 120"
+      fill="none"
       xmlns="http://www.w3.org/2000/svg"
     >
+      {/* ── Icon mark: geometric C + checkmark ─────── */}
+      <defs>
+        <linearGradient id="cg-accent" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="var(--accent, #34d399)" />
+          <stop offset="100%" stopColor="var(--accent-strong, #10b981)" />
+        </linearGradient>
+        <linearGradient id="cg-glow" x1="20%" y1="0%" x2="80%" y2="100%">
+          <stop offset="0%" stopColor="#6ee7b7" />
+          <stop offset="100%" stopColor="#059669" />
+        </linearGradient>
+      </defs>
+
       <g id="Logo-Mark">
-        <path d="M65 30C52.5 30 42 38.5 38 50H48C51.5 44 57.5 40 65 40C73.8 40 81 47.2 81 56C81 64.8 73.8 72 65 72C57.5 72 51.5 68 48 62H38C42 73.5 52.5 82 65 82C79.4 82 91 70.4 91 56C91 41.6 79.4 30 65 30Z" fill="var(--text, #1B2B44)"/>
-        <path d="M40 50C28.9 50 20 58.9 20 70C20 81.1 28.9 90 40 90C47.5 90 54 86 57.5 80L49 75C47 78.5 43.8 80 40 80C34.5 80 30 75.5 30 70C30 64.5 34.5 60 40 60C43.8 60 47 61.5 49 65L57.5 60C54 54 47.5 50 40 50Z" fill="var(--accent, #D35400)"/>
-        <path d="M40 75L45 80L65 60L60 55L45 70L40 65V75Z" fill="var(--accent, #D35400)"/>
+        {/* Outer C shape */}
+        <path
+          d="M60 18 L82 30 L82 42 L72 36 L48 36 C36 36 28 46 28 58 C28 70 36 80 48 80 L72 80 L72 74 L82 86 L60 98 L36 86 C24 78 16 68 16 58 C16 48 24 38 36 30 Z"
+          fill="url(#cg-accent)"
+          opacity="0.9"
+        />
+        {/* Checkmark integrated into C opening */}
+        <path
+          d="M52 68 L62 78 L88 48 L80 42 L62 64 L56 58 Z"
+          fill="url(#cg-glow)"
+        />
       </g>
+
+      {/* ── Wordmark ──────────────────────────────── */}
       <g id="Text">
-        <text x="105" y="75" fontFamily="Inter, sans-serif" fontWeight="700" fontSize="52" fill="var(--text, #1B2B44)">Cognate</text>
+        <text
+          x="108"
+          y="75"
+          fontFamily="'Space Grotesk Variable', system-ui, sans-serif"
+          fontWeight="700"
+          fontSize="48"
+          letterSpacing="-1.5"
+          fill="var(--text, #fafafa)"
+        >
+          Cognate
+        </text>
       </g>
+    </svg>
+  );
+}
+
+/** Standalone icon (no text) — for use as a small brand mark */
+export function LogoIcon({ className, size = 28 }: { className?: string; size?: number }) {
+  return (
+    <svg
+      className={className}
+      width={size}
+      height={size}
+      viewBox="0 0 100 100"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <defs>
+        <linearGradient id="ci-accent" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="var(--accent, #34d399)" />
+          <stop offset="100%" stopColor="var(--accent-strong, #10b981)" />
+        </linearGradient>
+        <linearGradient id="ci-glow" x1="20%" y1="0%" x2="80%" y2="100%">
+          <stop offset="0%" stopColor="#6ee7b7" />
+          <stop offset="100%" stopColor="#059669" />
+        </linearGradient>
+      </defs>
+      {/* Rounded dark square background */}
+      <rect x="4" y="4" width="92" height="92" rx="20" fill="var(--bg-2, #1c1c21)" />
+      {/* C shape */}
+      <path
+        d="M50 20 L68 28 L68 38 L60 34 L42 34 C33 34 26 42 26 50 C26 58 33 66 42 66 L60 66 L60 62 L68 72 L50 80 L34 72 C25 66 20 58 20 50 C20 42 25 34 34 28 Z"
+        fill="url(#ci-accent)"
+        opacity="0.92"
+      />
+      {/* Checkmark */}
+      <path
+        d="M44 56 L52 64 L74 40 L68 35 L52 54 L48 48 Z"
+        fill="url(#ci-glow)"
+      />
     </svg>
   );
 }

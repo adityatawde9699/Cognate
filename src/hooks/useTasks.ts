@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useStore } from '../store';
-import { loadAllTasks } from '../services/taskService';
+import { loadAllTasks, loadProjects, loadMilestones } from '../services/taskService';
+import { loadCustomFieldDefs } from '../services/customFields';
 
 /**
  * Custom hook to initialize the database, load tasks on mount,
@@ -26,4 +27,11 @@ export function useTasks() {
       mounted = false;
     };
   }, [currentFilter]);
+
+  // Load projects, milestones, and custom-field defs once at startup.
+  useEffect(() => {
+    loadProjects();
+    loadMilestones();
+    loadCustomFieldDefs();
+  }, []);
 }

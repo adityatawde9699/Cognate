@@ -6,12 +6,14 @@ describe('useStore Zustand Tests', () => {
     {
       id: '1', title: 'Task 1', description: '', tags: ['work'], deadline: '',
       importance: 3, effort: 3, done: false, created_at: '', completed_at: null,
-      pomodoros_spent: 0, priority: 'high', sort_order: 1
+      pomodoros_spent: 0, priority: 'high', sort_order: 1,
+      project_id: null, parent_id: null, recurrence: 'none', milestone_id: null, custom_fields: {}
     },
     {
       id: '2', title: 'Task 2', description: 'Sample', tags: ['home'], deadline: '',
       importance: 1, effort: 1, done: true, created_at: '', completed_at: null,
-      pomodoros_spent: 0, priority: 'low', sort_order: 2
+      pomodoros_spent: 0, priority: 'low', sort_order: 2,
+      project_id: null, parent_id: null, recurrence: 'none', milestone_id: null, custom_fields: {}
     }
   ];
 
@@ -58,7 +60,8 @@ describe('useStore Zustand Tests', () => {
     const newTask: Task = {
       id: '3', title: 'Task 3', description: '', tags: [], deadline: '',
       importance: 2, effort: 2, done: false, created_at: '', completed_at: null,
-      pomodoros_spent: 0, priority: 'medium', sort_order: 3
+      pomodoros_spent: 0, priority: 'medium', sort_order: 3,
+      project_id: null, parent_id: null, recurrence: 'none', milestone_id: null, custom_fields: {}
     };
     useStore.getState().addTaskOptimistic(newTask);
     expect(useStore.getState().currentTasks.length).toBe(3);

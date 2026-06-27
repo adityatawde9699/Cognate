@@ -6,6 +6,7 @@ import { useState } from 'react';
 
 interface Props {
   task: Task;
+  subInfo?: { done: number; total: number };
   onEdit: (task: Task) => void;
   pomoTaskId?: string | null;
   onSelectPomo: (task: Task) => void;
@@ -14,7 +15,7 @@ interface Props {
   onDragStart?: () => void;
 }
 
-export function TaskCard({ task, onEdit, pomoTaskId, onSelectPomo, onToggle, onDelete, onDragStart }: Props) {
+export function TaskCard({ task, subInfo, onEdit, pomoTaskId, onSelectPomo, onToggle, onDelete, onDragStart }: Props) {
   const [isHovered, setIsHovered] = useState(false);
   const isPomoSel = pomoTaskId === task.id && !task.done;
   const isOverdueTask = isOverdue(task.deadline) && !task.done;
@@ -36,7 +37,7 @@ export function TaskCard({ task, onEdit, pomoTaskId, onSelectPomo, onToggle, onD
 
   return (
     <div 
-      className={`task-card ${task.done ? 'done-card' : ''}`}
+      className={`task-card prio-${task.priority} ${task.done ? 'done-card' : ''} ${isOverdueTask ? 'is-overdue' : ''}`}
       data-id={task.id}
       draggable={!task.done}
       onDragStart={handleDragStart}
@@ -45,9 +46,19 @@ export function TaskCard({ task, onEdit, pomoTaskId, onSelectPomo, onToggle, onD
       onMouseLeave={() => setIsHovered(false)}
     >
       <div className="card-top">
-        <div 
-          className={`card-check ${task.done ? 'checked' : ''}`} 
+        <div
+          className={`card-check ${task.done ? 'checked' : ''}`}
           onClick={handleToggle}
+          role="checkbox"
+          aria-checked={task.done}
+          aria-label={task.done ? `Mark "${task.title}" not done` : `Mark "${task.title}" done`}
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              onToggle(task);
+            }
+          }}
         >
           <i className="fa-solid fa-check"></i>
         </div>
@@ -84,22 +95,36 @@ export function TaskCard({ task, onEdit, pomoTaskId, onSelectPomo, onToggle, onD
 
       <div className="card-footer">
         <span className={`p-badge ${task.priority}`}>
+          <span className="p-dot"></span>
           {P_LABEL[task.priority] || task.priority}
         </span>
-        
+
+        {subInfo && (
+          <span className="sub-badge" title={`${subInfo.done} of ${subInfo.total} subtasks done`}>
+            <i className="fa-solid fa-list-ul"></i> {subInfo.done}/{subInfo.total}
+          </span>
+        )}
+
+        {task.recurrence && task.recurrence !== 'none' && (
+          <span className="recur-badge" title={`Repeats ${task.recurrence}`}>
+            <i className="fa-solid fa-repeat"></i>
+          </span>
+        )}
+
         {task.tags?.map(t => t.trim()).filter(Boolean).map(t => (
-          <span key={t} className="tag">{t}</span>
+          <span key={t} className="tag"><span className="tag-hash">#</span>{t}</span>
         ))}
-        
+
         {task.deadline && (
           <span className={`deadline-lbl ${isOverdueTask ? 'overdue' : ''}`}>
             <i className="fa-regular fa-calendar"></i> {fmtDate(task.deadline)}
           </span>
         )}
-        
+
         {task.pomodoros_spent > 0 && (
-          <div className="pomo-dots">
-            {Array.from({ length: Math.min(task.pomodoros_spent, 8) }).map((_, i) => (
+          <div className="pomo-dots" title={`${task.pomodoros_spent} pomodoros`}>
+            <i className="fa-solid fa-stopwatch"></i>
+            {Array.from({ length: Math.min(task.pomodoros_spent, 6) }).map((_, i) => (
               <div key={i} className="pomo-dot"></div>
             ))}
           </div>
