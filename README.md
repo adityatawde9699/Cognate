@@ -15,8 +15,6 @@ helps can run on **your own machine** (local Ollama / llama.cpp). Your data live
 dumb relay that can't read it, and — because that sync spine is a CRDT — sharing a
 project turns it into a **real-time, role-based team workspace** almost for free.
 
-> One verb: **plan**. See [`plan.md`](plan.md) for the full product thesis and
-> roadmap (Acts 0–5).
 
 ---
 
