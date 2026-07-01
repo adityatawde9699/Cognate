@@ -159,7 +159,6 @@ npm run build         # PWA → dist/
 | **Native Mobile** | 🔜 | iOS app (today: PWA) |
 | **Marketplace** | 🔜 | Custom integrations, workflows, plugins |
 
-See [plan.md](plan.md) for the full product vision (Acts 0–5).
 
 ---
 
