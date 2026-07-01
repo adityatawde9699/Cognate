@@ -4,34 +4,34 @@
    Writes: Optimistic Zustand update → async DB → rollback on failure
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 
-import { useStore, Task, Recurrence } from '../store';
 import {
-  getAllTasks,
-  createTask as dbCreateTask,
-  updateTask as dbUpdateTask,
-  deleteTask as dbDeleteTask,
-  softDeleteTask as dbSoftDeleteTask,
-  restoreTask as dbRestoreTask,
-  getTrash as dbGetTrash,
-  emptyTrash as dbEmptyTrash,
-  toggleTask as dbToggleTask,
-  updateSortOrders as dbUpdateSortOrders,
-  addPomodoro as dbAddPomodoro,
-  getProjects as dbGetProjects,
-  createProject as dbCreateProject,
-  updateProject as dbUpdateProject,
-  deleteProject as dbDeleteProject,
-  getMilestones as dbGetMilestones,
-  createMilestone as dbCreateMilestone,
-  updateMilestone as dbUpdateMilestone,
-  deleteMilestone as dbDeleteMilestone,
-  getLocalDateString,
-  initDb,
+    addPomodoro as dbAddPomodoro,
+    createMilestone as dbCreateMilestone,
+    createProject as dbCreateProject,
+    createTask as dbCreateTask,
+    deleteMilestone as dbDeleteMilestone,
+    deleteProject as dbDeleteProject,
+    deleteTask as dbDeleteTask,
+    emptyTrash as dbEmptyTrash,
+    getMilestones as dbGetMilestones,
+    getProjects as dbGetProjects,
+    getTrash as dbGetTrash,
+    restoreTask as dbRestoreTask,
+    softDeleteTask as dbSoftDeleteTask,
+    toggleTask as dbToggleTask,
+    updateMilestone as dbUpdateMilestone,
+    updateProject as dbUpdateProject,
+    updateSortOrders as dbUpdateSortOrders,
+    updateTask as dbUpdateTask,
+    getAllTasks,
+    getLocalDateString,
+    initDb,
 } from '../db';
-import { notifyTaskComplete } from './webhookService';
-import { record, undo as historyUndo, redo as historyRedo } from './history';
-import { logTaskUpsert, logTaskSoftDelete, logTaskRestore, logTaskDelete, backfillFromTasks } from './oplogStore';
+import { Recurrence, Task, useStore } from '../store';
+import { redo as historyRedo, undo as historyUndo, record } from './history';
 import { ensureIdentity } from './identity';
+import { backfillFromTasks, logTaskDelete, logTaskRestore, logTaskSoftDelete, logTaskUpsert } from './oplogStore';
+import { notifyTaskComplete } from './webhookService';
 
 export interface TaskInput {
   title: string;

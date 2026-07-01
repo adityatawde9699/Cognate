@@ -1,27 +1,27 @@
-import { useEffect, useRef, useMemo, useState } from 'react';
-import { useStore, type Task, type CalendarEvent } from '../store';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  planDay,
-  enrichScheduling,
-  getWorkHours,
-  fmtClock,
-  minutesOf,
-  isoAt,
-  DEFAULT_WORK_START,
-  DEFAULT_WORK_END,
-} from '../services/planService';
-import { syncCalendarUrl, importBusyText, setCalendarUrl } from '../services/calendarSyncService';
-import { toggleTaskDone } from '../services/taskService';
-import {
-  getCalendarEvents,
-  createCalendarEvent,
-  deleteCalendarEvent,
-  updateScheduling,
-  setSchedule,
+    createCalendarEvent,
+    deleteCalendarEvent,
+    getCalendarEvents,
+    setSchedule,
+    updateScheduling,
 } from '../db';
 import { advisePlan } from '../services/aiService';
-import { ChiefOfStaff } from './ChiefOfStaff';
+import { importBusyText, setCalendarUrl, syncCalendarUrl } from '../services/calendarSyncService';
+import {
+    DEFAULT_WORK_END,
+    DEFAULT_WORK_START,
+    enrichScheduling,
+    fmtClock,
+    getWorkHours,
+    isoAt,
+    minutesOf,
+    planDay,
+} from '../services/planService';
+import { toggleTaskDone } from '../services/taskService';
+import { useStore, type CalendarEvent, type Task } from '../store';
 import { toast } from '../utils/toast';
+import { ChiefOfStaff } from './ChiefOfStaff';
 
 // Padding reserved at top/bottom of the timeline canvas (px)
 const PAD_TOP = 10;
