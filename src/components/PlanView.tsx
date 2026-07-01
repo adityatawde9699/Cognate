@@ -96,7 +96,6 @@ export function PlanView() {
       tasks
         .filter(
           (t) =>
-            !t.done &&
             !t.deleted_at &&
             t.scheduled_start &&
             String(t.scheduled_start).slice(0, 10) === date

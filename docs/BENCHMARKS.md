@@ -54,7 +54,7 @@ The deterministic scheduler in `planner.rs` is the core of Cognate. These benchm
 
 ## Comparison with Incumbents
 
-| Feature | Cognate | Motion | Todoist |
+| Feature | Cognate | Notion | Todoist |
 |---|---|---|---|
 | Auto-plan latency | 14 ms | 300+ ms (cloud) | N/A |
 | Works offline | ✅ (full) | ❌ | ❌ |

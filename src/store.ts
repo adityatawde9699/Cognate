@@ -222,10 +222,6 @@ export const useStore = create<AppState>((set) => ({
           ...t,
           done: nowDone,
           completed_at: nowDone ? new Date().toISOString() : null,
-          // Clear the schedule block immediately when marking done so the PlanView
-          // stops rendering a stale block for this task. The DB keeps the value as
-          // a historical record; the store must not expose it to the plan renderer.
-          ...(nowDone ? { scheduled_start: null, scheduled_end: null } : {}),
         };
       }),
     })),
