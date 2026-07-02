@@ -7,14 +7,14 @@
 //! input (`plan`), so it's fast, offline, private, and unit-testable. The AI
 //! layer only *enriches* (durations, energy, prose); it never decides.
 //!
-//! Times are minutes-from-midnight (e.g. 540 = 09:00) for a single date.
+//! Times are minutes-from-midnight (e.g. 360 = 06:00) for a single date.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 const DEFAULT_DURATION: u32 = 30;
-const DEFAULT_WORK_START: u32 = 9 * 60; // 09:00
-const DEFAULT_WORK_END: u32 = 17 * 60; // 17:00
+const DEFAULT_WORK_START: u32 = 6 * 60; // 06:00
+const DEFAULT_WORK_END: u32 = 23 * 60; // 23:00
 
 fn default_energy() -> String { "med".into() }
 fn default_priority() -> String { "medium".into() }
@@ -484,8 +484,8 @@ mod tests {
     fn req(tasks: Vec<PlanTask>, busy: Vec<BusyBlock>) -> PlanRequest {
         PlanRequest {
             date: "2026-06-24".into(),
-            work_start_min: 540,  // 09:00
-            work_end_min: 1020,   // 17:00
+            work_start_min: DEFAULT_WORK_START,
+            work_end_min: DEFAULT_WORK_END,
             tasks,
             busy,
             energy_curve: vec![],
@@ -502,15 +502,15 @@ mod tests {
         let busy = vec![BusyBlock { start_min: 660, end_min: 780, title: "Block".into() }];
         let mk = |curve: Vec<u8>| PlanRequest {
             date: "2026-06-24".into(),
-            work_start_min: 540,
-            work_end_min: 1020,
+            work_start_min: DEFAULT_WORK_START,
+            work_end_min: DEFAULT_WORK_END,
             tasks: vec![task("hi", 60, "", "medium", "hi")],
             busy: busy.clone(),
             energy_curve: curve,
         };
         // Learned afternoon peak → afternoon window; default circadian → morning.
-        assert!(plan(&mk(curve)).blocks[0].start_min >= 780);
-        assert_eq!(plan(&mk(vec![])).blocks[0].start_min, 540);
+        assert!(plan(&mk(curve)).blocks[0].start_min >= (DEFAULT_WORK_START + 420));
+        assert_eq!(plan(&mk(vec![])).blocks[0].start_min, DEFAULT_WORK_START);
     }
 
     fn overlaps(a: (u32, u32), b: (u32, u32)) -> bool {
@@ -525,13 +525,13 @@ mod tests {
         );
         let out = plan(&r);
         for b in &out.blocks {
-            assert!(b.start_min >= 540 && b.end_min <= 1020, "block outside work hours: {b:?}");
+            assert!(b.start_min >= DEFAULT_WORK_START && b.end_min <= DEFAULT_WORK_END, "block outside work hours: {b:?}");
         }
     }
 
     #[test]
     fn no_overlaps_among_blocks_or_busy() {
-        let busy = vec![BusyBlock { start_min: 600, end_min: 660, title: "Standup".into() }];
+        let busy = vec![BusyBlock { start_min: DEFAULT_WORK_START + 240, end_min: DEFAULT_WORK_START + 300, title: "Standup".into() }];
         let r = req(
             vec![
                 task("a", 90, "", "high", "med"),
@@ -569,11 +569,11 @@ mod tests {
 
     #[test]
     fn busy_blocks_are_avoided() {
-        let busy = vec![BusyBlock { start_min: 540, end_min: 600, title: "Call".into() }];
+        let busy = vec![BusyBlock { start_min: DEFAULT_WORK_START, end_min: DEFAULT_WORK_START + 60, title: "Call".into() }];
         let r = req(vec![task("a", 60, "", "high", "med")], busy);
         let out = plan(&r);
         let a = &out.blocks.iter().find(|b| b.task_id == "a").unwrap();
-        assert!(a.start_min >= 600, "task must start after the busy block");
+        assert!(a.start_min >= DEFAULT_WORK_START + 60, "task must start after the busy block");
         assert!(a.reason.contains("right after"), "rationale should mention the meeting: {}", a.reason);
     }
 
@@ -581,11 +581,11 @@ mod tests {
     fn pinned_tasks_keep_their_slot() {
         let mut p = task("pinned", 60, "", "low", "med");
         p.pinned = true;
-        p.pinned_start_min = Some(780); // 13:00
+        p.pinned_start_min = Some(DEFAULT_WORK_START + 420); // 13:00 relative to day start
         let r = req(vec![p, task("a", 60, "", "high", "med")], vec![]);
         let out = plan(&r);
         let pinned = out.blocks.iter().find(|b| b.task_id == "pinned").unwrap();
-        assert_eq!((pinned.start_min, pinned.end_min), (780, 840));
+        assert_eq!((pinned.start_min, pinned.end_min), (DEFAULT_WORK_START + 420, DEFAULT_WORK_START + 480));
         assert_eq!(pinned.reason, "Pinned to this time");
         // The other task must not collide with the pinned slot.
         let a = out.blocks.iter().find(|b| b.task_id == "a").unwrap();
@@ -611,8 +611,9 @@ mod tests {
             .map(|i| task(&format!("t{i}"), 60, "", "medium", "med"))
             .collect();
         let out = plan(&req(tasks, vec![]));
-        assert_eq!(out.blocks.len(), 8);
-        assert_eq!(out.unscheduled.len(), 2);
+        let capacity = ((DEFAULT_WORK_END - DEFAULT_WORK_START) / 60) as usize;
+        assert_eq!(out.blocks.len(), std::cmp::min(tasks.len(), capacity));
+        assert_eq!(out.unscheduled.len(), tasks.len().saturating_sub(capacity));
     }
 
     #[test]
@@ -635,7 +636,7 @@ mod tests {
     }
 
     fn tmember(actor: &str) -> TeamMember {
-        TeamMember { actor: actor.into(), work_start_min: Some(540), work_end_min: Some(1020), busy: vec![], capacity_min: None }
+        TeamMember { actor: actor.into(), work_start_min: Some(DEFAULT_WORK_START), work_end_min: Some(DEFAULT_WORK_END), busy: vec![], capacity_min: None }
     }
     fn ttask(id: &str, dur: u32, assignee: Option<&str>) -> TeamPlanTask {
         TeamPlanTask { task: task(id, dur, "", "medium", "med"), assignee: assignee.map(|s| s.into()) }
@@ -660,7 +661,7 @@ mod tests {
     fn team_honours_explicit_assignment_and_flags_overload() {
         let req = TeamPlanRequest {
             date: "2026-06-25".into(),
-            members: vec![TeamMember { actor: "A".into(), work_start_min: Some(540), work_end_min: Some(1020), busy: vec![], capacity_min: Some(120) }],
+            members: vec![TeamMember { actor: "A".into(), work_start_min: Some(DEFAULT_WORK_START), work_end_min: Some(DEFAULT_WORK_END), busy: vec![], capacity_min: Some(120) }],
             tasks: vec![ttask("t1", 90, Some("A")), ttask("t2", 90, Some("A"))],
         };
         let out = plan_team(&req);
