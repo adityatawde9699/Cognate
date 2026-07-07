@@ -606,14 +606,15 @@ mod tests {
 
     #[test]
     fn overflow_is_reported_unscheduled() {
-        // 8h of capacity (09–17) but ~10h of work.
-        let tasks: Vec<PlanTask> = (0..10)
+        // 17h of capacity (06–23) but 20h of work.
+        let total = 20usize;
+        let tasks: Vec<PlanTask> = (0..total)
             .map(|i| task(&format!("t{i}"), 60, "", "medium", "med"))
             .collect();
         let out = plan(&req(tasks, vec![]));
         let capacity = ((DEFAULT_WORK_END - DEFAULT_WORK_START) / 60) as usize;
-        assert_eq!(out.blocks.len(), std::cmp::min(tasks.len(), capacity));
-        assert_eq!(out.unscheduled.len(), tasks.len().saturating_sub(capacity));
+        assert_eq!(out.blocks.len(), std::cmp::min(total, capacity));
+        assert_eq!(out.unscheduled.len(), total.saturating_sub(capacity));
     }
 
     #[test]

@@ -39,6 +39,25 @@
         "active": true,
         "createUpdaterArtifacts": true,
         "targets": "all",
+        "category": "Productivity",
+        "publisher": "Aditya Tawde",
+        "copyright": "© 2026 Aditya Tawde",
+        "shortDescription": "Local-first autopilot day planner",
+        "longDescription": "Cognate is a local-first planner that turns your task inbox into a time-blocked day. Tasks, plans, Pomodoro focus, and insights — stored on your device, private by default.",
+        "homepage": "https://github.com/adityatawde9699/Cognate",
+        "linux": {
+            "deb": {
+                "section": "utils"
+            }
+        },
+        "macOS": {
+            "minimumSystemVersion": "10.15"
+        },
+        "windows": {
+            "nsis": {
+                "installMode": "currentUser"
+            }
+        },
         "icon": [
             "icons/32x32.png",
             "icons/128x128.png",

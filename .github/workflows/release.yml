@@ -56,7 +56,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID || '' }}
         with:
           tagName: v__VERSION__
-          releaseName: "Cognote v__VERSION__"
+          releaseName: "Cognate v__VERSION__"
           releaseBody: "See the assets below to download and install this version. The app auto-updates from this release."
           releaseDraft: true
           prerelease: false
