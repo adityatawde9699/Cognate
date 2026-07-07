@@ -44,16 +44,13 @@ jobs:
           # `npm run tauri signer generate` and store as repo secrets — see SIGNING.md.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # macOS code signing + notarization.
-          # Optional: tauri-action only signs when APPLE_CERTIFICATE is non-empty.
-          # Leave these secrets unset for unsigned dev/OSS builds.
-          # See SIGNING.md for full setup with an Apple Developer account.
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE || '' }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '' }}
-          APPLE_ID: ${{ secrets.APPLE_ID || '' }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD || '' }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID || '' }}
+          # macOS code signing + notarization (optional — needs a paid Apple
+          # Developer cert; see SIGNING.md). These env vars must NOT be defined
+          # at all for unsigned builds: the Tauri bundler treats an empty
+          # APPLE_CERTIFICATE as present and fails importing it. When you have
+          # a cert, add the APPLE_* secrets and re-add the env lines:
+          #   APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD,
+          #   APPLE_SIGNING_IDENTITY, APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID
         with:
           tagName: v__VERSION__
           releaseName: "Cognate v__VERSION__"
