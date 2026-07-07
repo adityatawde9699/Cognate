@@ -63,9 +63,16 @@ export function PlanView() {
   const [note, setNote] = useState('');
   const [briefing, setBriefing] = useState(false);
   // Measured inner height of the timeline container (px). Drives pxPerMin so
-  // the full work day always fits without scrolling.
+  // the day fills the container when it can, and scrolls when it can't.
   const [containerH, setContainerH] = useState(0);
   const timelineRef = useRef<HTMLDivElement>(null);
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const [nowMin, setNowMin] = useState(() => new Date().getHours() * 60 + new Date().getMinutes());
+
+  useEffect(() => {
+    const id = setInterval(() => setNowMin(new Date().getHours() * 60 + new Date().getMinutes()), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     getWorkHours().then(setWork);
@@ -127,18 +134,34 @@ export function PlanView() {
   const hours: number[] = [];
   for (let m = work.start; m <= work.end; m += 60) hours.push(m);
 
-  // pxPerMin fills the measured container exactly — no overflow, no scroll.
+  // pxPerMin fills the measured container when the day fits, but never drops
+  // below a floor that keeps a 30-minute block legible — long days scroll
+  // instead of crushing blocks into each other.
   // Fall back to 1.4 before the first measurement arrives.
+  const MIN_PX_PER_MIN = 1.1;
   const workMinutes = work.end - work.start;
   const pxPerMin = containerH > 0
-    ? Math.max(0.6, (containerH - PAD_TOP - PAD_BOT) / workMinutes)
+    ? Math.max(MIN_PX_PER_MIN, (containerH - PAD_TOP - PAD_BOT) / workMinutes)
     : 1.4;
 
   // Pixel helpers — all positioned children share these.
   const toY  = (min: number) => PAD_TOP + (min - work.start) * pxPerMin;
-  const toH  = (mins: number) => Math.max(mins * pxPerMin, 28);
-  // Total canvas height exactly matches the container so no scrollbar appears.
-  const dayHeight = containerH > 0 ? containerH : workMinutes * 1.4 + PAD_TOP + PAD_BOT;
+  const toH  = (mins: number) => Math.max(mins * pxPerMin, 24);
+  // True canvas height; equals the container when the day fits, else scrolls.
+  const dayHeight = Math.round(workMinutes * pxPerMin + PAD_TOP + PAD_BOT);
+
+  const isToday = date === todayStr();
+  const showNow = isToday && nowMin >= work.start && nowMin <= work.end;
+
+  // Keep the interesting part of the day in view: first block, else "now".
+  const firstStart = scheduled.length ? scheduled[0].start : null;
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el || el.scrollHeight <= el.clientHeight) return;
+    const anchor = firstStart ?? (showNow ? nowMin : work.start);
+    el.scrollTop = Math.max(0, PAD_TOP + (anchor - work.start) * pxPerMin - 24);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firstStart, date, containerH, work.start]);
 
   const handleAutoPlan = async () => {
     setPlanning(true);
@@ -323,13 +346,20 @@ export function PlanView() {
 
       <div className="plan-body">
         <div className="plan-timeline-wrap" ref={timelineRef}>
-        <div className="plan-timeline" style={{ height: `${dayHeight}px` }}>
+        <div className="plan-timeline" ref={scrollerRef}>
+        <div className="plan-canvas" style={{ height: `${dayHeight}px` }}>
           {hours.map((m) => (
-            <div key={m} className="plan-hour" style={{ top: `${toY(m)}px` }}>
+            <div key={m} className={`plan-hour ${showNow && Math.floor(nowMin / 60) === Math.floor(m / 60) ? 'is-now' : ''}`} style={{ top: `${toY(m)}px` }}>
               <span className="plan-hour-label">{fmtClock(m)}</span>
               <span className="plan-hour-line" />
             </div>
           ))}
+
+          {showNow && (
+            <div className="plan-now" style={{ top: `${toY(nowMin)}px` }} aria-hidden="true">
+              <span className="plan-now-dot" />
+            </div>
+          )}
 
           {busyToday.map(({ ev, start, end }) => (
             <div
@@ -350,11 +380,12 @@ export function PlanView() {
             const dragging = drag?.id === task.id;
             const top = dragging ? drag!.curMin : start;
             const blkEnd = dragging ? drag!.curMin + drag!.dur : end;
+            const h = toH(blkEnd - top);
             return (
               <div
                 key={task.id}
-                className={`plan-block prio-${task.priority} ${dragging ? 'is-dragging' : ''} ${task.done ? 'is-done' : ''}`}
-                style={{ top: `${toY(top)}px`, height: `${toH(blkEnd - top)}px` }}
+                className={`plan-block prio-${task.priority} ${h < 46 ? 'is-compact' : ''} ${dragging ? 'is-dragging' : ''} ${task.done ? 'is-done' : ''}`}
+                style={{ top: `${toY(top)}px`, height: `${Math.max(h - 2, 22)}px` }}
                 onClick={() => { if (!dragging) setTaskModalOpen(true, task); }}
                 role="button"
                 tabIndex={0}
@@ -397,6 +428,8 @@ export function PlanView() {
               </div>
             );
           })}
+
+        </div>{/* plan-canvas */}
 
           {scheduled.length === 0 && busyToday.length === 0 && (
             <div className="plan-empty">

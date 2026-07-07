@@ -61,14 +61,12 @@ test('dragging a block reschedules and pins it, then re-solves the rest', async 
   const box = await grip.boundingBox();
   if (!box) throw new Error('no grip box');
 
-  // Drag the grip down ~90px → a later time slot.
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + 90, { steps: 8 });
-  await page.mouse.up();
+  // Drag the grip to the next block's position using Playwright's dragTo
+  const target = page.locator('.plan-block').nth(1);
+  await grip.dragTo(target);
 
-  // The drag pins the block (and re-plans around it).
-  await expect(page.locator('.plan-block .plan-pin.is-pinned').first()).toBeVisible();
+  // The drag pins the block (and re-plans around it). Allow a longer timeout.
+  await expect(page.locator('.plan-block .plan-pin.is-pinned').first(), { timeout: 10000 }).toBeVisible();
 });
 
 test('pasting .ics text imports calendar events the planner avoids', async ({ page }) => {

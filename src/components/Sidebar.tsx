@@ -119,10 +119,19 @@ export function Sidebar() {
       </div>
 
       <div className="sidebar-dock">
+        <Pomodoro />
+
         <div className="dock-links">
           <button className="dock-link" onClick={() => setAnalyticsOpen(true)}>
             <i className="fa-solid fa-chart-pie"></i>
             <span>Insights</span>
+          </button>
+          <button
+            className={`dock-link ${currentFilter === 'trash' ? 'active' : ''}`}
+            onClick={() => setFilter('trash')}
+          >
+            <i className="fa-solid fa-trash-can"></i>
+            <span>Trash</span>
           </button>
           <button className="dock-link" onClick={() => setSettingsModalOpen(true)}>
             <i className="fa-solid fa-gear"></i>
@@ -130,26 +139,21 @@ export function Sidebar() {
           </button>
         </div>
 
-        <button
-          className={`dock-link ${currentFilter === 'trash' ? 'active' : ''}`}
-          onClick={() => setFilter('trash')}
-        >
-          <i className="fa-solid fa-trash-can"></i>
-          <span>Trash</span>
-        </button>
-
-        <Pomodoro />
-
-        <button className="btn-generate" onClick={() => setGenerateModalOpen(true)}>
-          <i className="fa-solid fa-wand-magic-sparkles"></i>
-          <span>Generate tasks</span>
-        </button>
-
-        <button className="btn-add" onClick={() => setTaskModalOpen(true)}>
-          <i className="fa-solid fa-plus"></i>
-          <span>New Task</span>
-          <kbd className="shortcut-key">N</kbd>
-        </button>
+        <div className="dock-cta">
+          <button className="btn-add" onClick={() => setTaskModalOpen(true)}>
+            <i className="fa-solid fa-plus"></i>
+            <span>New task</span>
+            <kbd className="shortcut-key">N</kbd>
+          </button>
+          <button
+            className="btn-generate"
+            onClick={() => setGenerateModalOpen(true)}
+            title="Generate tasks with AI"
+            aria-label="Generate tasks with AI"
+          >
+            <i className="fa-solid fa-wand-magic-sparkles"></i>
+          </button>
+        </div>
       </div>
     </aside>
   );

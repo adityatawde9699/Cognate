@@ -1,0 +1,590 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cognate — your day, already planned</title>
+<meta name="description" content="Cognate turns a pile of tasks and a calendar into a time-blocked day — solved offline in deterministic Rust, synced end-to-end encrypted, yours forever.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<meta property="og:title" content="Cognate — your day, already planned">
+<meta property="og:description" content="The local-first planner that plans your day. Deterministic solver, E2E-encrypted sync, private AI.">
+<style>
+/* ---------- fonts (the app's own faces, served locally) ---------- */
+@font-face{
+  font-family:"Space Grotesk";
+  src:url("fonts/space-grotesk-latin-wght-normal.woff2") format("woff2-variations");
+  font-weight:300 700;font-style:normal;font-display:swap;
+}
+@font-face{
+  font-family:"Geist";
+  src:url("fonts/geist-latin-wght-normal.woff2") format("woff2-variations");
+  font-weight:100 900;font-style:normal;font-display:swap;
+}
+@font-face{
+  font-family:"Geist Mono";
+  src:url("fonts/geist-mono-latin-wght-normal.woff2") format("woff2-variations");
+  font-weight:100 900;font-style:normal;font-display:swap;
+}
+
+/* ---------- tokens (mirrors src/style.css) ---------- */
+:root{
+  --ink:#09090b;
+  --graphite:#131316;
+  --raised:#1c1c21;
+  --bone:#fafafa;
+  --zinc:#a1a1aa;
+  --zinc-d:#71717a;
+  --line:rgba(255,255,255,.08);
+  --line-soft:rgba(255,255,255,.05);
+  --emerald:#34d399;
+  --emerald-deep:#10b981;
+  --emerald-muted:rgba(52,211,153,.13);
+  --emerald-glow:rgba(52,211,153,.28);
+  --display:"Space Grotesk",system-ui,sans-serif;
+  --body:"Geist",system-ui,sans-serif;
+  --mono:"Geist Mono",ui-monospace,monospace;
+  --railw:clamp(84px,9vw,116px);
+  --maxw:1120px;
+}
+
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+
+body{
+  background:
+    repeating-linear-gradient(to bottom, transparent 0 95px, rgba(255,255,255,.022) 95px 96px),
+    var(--ink);
+  color:var(--bone);
+  font-family:var(--body);
+  font-size:16.5px;
+  line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+  overflow-x:hidden;
+}
+
+::selection{background:var(--emerald);color:var(--ink)}
+a{color:inherit}
+:focus-visible{outline:2px solid var(--emerald);outline-offset:3px;border-radius:2px}
+
+.mono{font-family:var(--mono)}
+
+/* ---------- header ---------- */
+header{
+  max-width:var(--maxw);margin:0 auto;
+  padding:26px 24px 22px;
+  display:flex;align-items:center;gap:28px;
+}
+.wordmark{
+  display:flex;align-items:center;gap:11px;
+  font-family:var(--display);font-weight:600;font-size:1.14rem;
+  letter-spacing:.01em;text-decoration:none;
+}
+.wordmark img{width:26px;height:26px;display:block}
+nav{display:flex;gap:24px;margin-left:auto;align-items:center}
+nav a.sect{
+  font-family:var(--mono);font-size:.78rem;color:var(--zinc);
+  text-decoration:none;letter-spacing:.02em;
+}
+nav a.sect:hover{color:var(--bone)}
+nav a.sect b{color:var(--emerald);font-weight:500;margin-right:6px}
+.btn{
+  display:inline-block;font-family:var(--display);font-weight:600;
+  font-size:.95rem;text-decoration:none;border-radius:10px;
+  padding:11px 22px;letter-spacing:.01em;
+}
+.btn-primary{
+  background:var(--emerald);color:var(--ink);
+  box-shadow:0 4px 24px var(--emerald-glow);
+  transition:background .18s,transform .18s;
+}
+.btn-primary:hover{background:var(--emerald-deep);transform:translateY(-1px)}
+.btn-ghost{
+  border:1px solid var(--line);color:var(--zinc);
+  transition:border-color .18s,color .18s;
+}
+.btn-ghost:hover{border-color:var(--emerald);color:var(--bone)}
+nav .btn{padding:9px 18px;font-size:.88rem}
+
+/* ---------- the day grid: rail + content ---------- */
+main{max-width:var(--maxw);margin:0 auto;position:relative}
+
+.block{
+  display:grid;
+  grid-template-columns:var(--railw) minmax(0,1fr);
+}
+.rail{
+  border-right:1px solid var(--line);
+  position:relative;
+  padding:0 18px 0 24px;
+}
+.rail .tstamp{
+  position:sticky;top:28px;
+  display:block;text-align:right;
+  font-family:var(--mono);font-size:.82rem;color:var(--zinc-d);
+  padding-top:4px;
+}
+.block.on .tstamp{color:var(--emerald)}
+/* tick mark on the rail at each block start */
+.rail::before{
+  content:"";position:absolute;right:-4px;top:9px;
+  width:7px;height:7px;border-radius:50%;
+  background:var(--ink);border:1.5px solid var(--zinc-d);
+}
+.block.on .rail::before{border-color:var(--emerald);background:var(--emerald-muted)}
+
+.content{padding:8px 24px 96px 44px;min-width:0}
+
+/* the travelling "now" marker */
+#now{
+  position:absolute;z-index:3;
+  left:calc(var(--railw) - 4px);top:0;
+  width:9px;height:9px;border-radius:50%;
+  background:var(--emerald);
+  box-shadow:0 0 0 4px var(--emerald-muted),0 0 14px var(--emerald-glow);
+  transform:translate(-4px,-4px);
+  pointer-events:none;
+}
+#now span{
+  position:absolute;right:16px;top:-6px;
+  font-family:var(--mono);font-size:.72rem;color:var(--emerald);
+  background:var(--ink);padding:1px 5px;border-radius:4px;
+  white-space:nowrap;
+}
+
+/* ---------- block furniture ---------- */
+.eyebrow{
+  font-family:var(--mono);font-size:.78rem;color:var(--zinc);
+  letter-spacing:.02em;margin-bottom:18px;
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+}
+.eyebrow .t-inline{display:none;color:var(--emerald)}
+.eyebrow .dur{color:var(--zinc-d)}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}
+.dot.hi{background:var(--emerald)}
+.dot.mid{background:linear-gradient(90deg,var(--emerald) 50%,transparent 50%);border:1px solid var(--emerald)}
+.dot.lo{border:1px solid var(--zinc-d)}
+
+h1,h2{font-family:var(--display);font-weight:600;letter-spacing:-.02em;line-height:1.08}
+h1{font-size:clamp(2.7rem,6.2vw,4.5rem);max-width:13ch}
+h2{font-size:clamp(1.7rem,3.4vw,2.4rem);max-width:24ch;margin-bottom:16px}
+.lede,.blurb{color:var(--zinc);max-width:58ch}
+.lede{font-size:clamp(1.02rem,1.6vw,1.2rem);margin:22px 0 30px}
+.blurb{margin-bottom:26px}
+.blurb b, .lede b{color:var(--bone);font-weight:560}
+
+/* ---------- hero ---------- */
+#hero .content{padding-top:40px}
+.cta-row{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.cta-note{font-family:var(--mono);font-size:.75rem;color:var(--zinc-d);margin-bottom:56px}
+
+/* the solve demo */
+.solve{
+  display:grid;grid-template-columns:minmax(0,5fr) 34px minmax(0,7fr);
+  gap:18px;align-items:start;
+}
+.pane{
+  background:var(--graphite);border:1px solid var(--line);
+  border-radius:14px;padding:18px 18px 14px;
+}
+.pane h3{
+  font-family:var(--mono);font-weight:500;font-size:.72rem;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--zinc-d);
+  margin-bottom:14px;display:flex;justify-content:space-between;gap:8px;
+}
+.pane h3 em{font-style:normal;color:var(--emerald);text-transform:none;letter-spacing:.02em}
+
+.inbox li{
+  list-style:none;font-family:var(--mono);font-size:.8rem;color:var(--zinc);
+  padding:8px 2px;border-bottom:1px dashed var(--line-soft);
+  display:flex;gap:9px;align-items:baseline;
+}
+.inbox li:last-child{border-bottom:0}
+.inbox .chk{color:var(--zinc-d);flex:none}
+.inbox li.done{animation:fadeline .4s both;animation-delay:var(--d)}
+.inbox li.done .chk{animation:tick .4s both;animation-delay:var(--d)}
+@keyframes fadeline{to{color:var(--zinc-d);text-decoration:line-through;text-decoration-color:rgba(52,211,153,.5)}}
+@keyframes tick{to{color:var(--emerald)}}
+
+.solve-arrow{
+  align-self:center;text-align:center;color:var(--emerald);
+  font-family:var(--mono);font-size:1.1rem;padding-top:8px;
+}
+
+.plan .row{
+  display:grid;grid-template-columns:52px minmax(0,1fr);gap:12px;
+  align-items:stretch;margin-bottom:7px;
+}
+.plan .row time{
+  font-family:var(--mono);font-size:.72rem;color:var(--zinc-d);
+  padding-top:9px;text-align:right;
+}
+.plan .card{
+  border:1px solid var(--line);border-left:3px solid var(--emerald);
+  background:var(--raised);border-radius:8px;
+  padding:7px 12px;font-size:.82rem;
+  display:flex;align-items:center;gap:10px;min-height:36px;
+}
+.plan .card .meta{margin-left:auto;font-family:var(--mono);font-size:.68rem;color:var(--zinc-d);white-space:nowrap}
+.plan .card.busy{
+  border-left-color:var(--zinc-d);color:var(--zinc);
+  background:repeating-linear-gradient(45deg,transparent 0 5px,rgba(255,255,255,.03) 5px 10px),var(--graphite);
+}
+.plan .card.brk{border-left-color:var(--zinc-d);border-left-style:dotted;color:var(--zinc)}
+.plan .row{opacity:0;transform:translateY(-7px)}
+.plan .row.place{animation:settle .45s cubic-bezier(.2,.7,.3,1) both;animation-delay:var(--d)}
+@keyframes settle{to{opacity:1;transform:none}}
+.solve-caption{
+  grid-column:1/-1;font-family:var(--mono);font-size:.73rem;color:var(--zinc-d);
+  margin-top:6px;
+}
+.solve-caption b{color:var(--emerald);font-weight:500}
+
+@media (prefers-reduced-motion:reduce){
+  .plan .row{opacity:1;transform:none;animation:none}
+  .inbox li.done,.inbox li.done .chk{animation:none;color:var(--zinc-d)}
+  .inbox li.done{text-decoration:line-through}
+  .inbox li.done .chk{color:var(--emerald)}
+  .btn-primary:hover{transform:none}
+  #now{transition:none}
+}
+
+/* ---------- spec list (engine block) ---------- */
+.spec{border-top:1px solid var(--line);max-width:640px}
+.spec>div{
+  display:grid;grid-template-columns:172px minmax(0,1fr);gap:18px;
+  padding:15px 2px;border-bottom:1px solid var(--line);
+}
+.spec dt{font-family:var(--mono);font-size:.78rem;color:var(--emerald);padding-top:2px}
+.spec dd{color:var(--zinc);font-size:.94rem}
+.spec dd b{color:var(--bone);font-weight:560}
+
+/* ---------- lunch (the protected block) ---------- */
+#lunch .content{
+  padding-top:26px;padding-bottom:64px;
+}
+.protected{
+  border:1px dashed var(--line);border-radius:14px;
+  background:repeating-linear-gradient(45deg,transparent 0 7px,rgba(255,255,255,.02) 7px 14px);
+  padding:44px 34px;max-width:640px;
+}
+.protected p{color:var(--zinc);max-width:44ch}
+.protected p b{color:var(--bone);font-weight:560}
+.protected .tag{
+  font-family:var(--mono);font-size:.72rem;color:var(--emerald);
+  border:1px solid rgba(52,211,153,.35);border-radius:99px;
+  padding:3px 10px;display:inline-block;margin-bottom:16px;
+  background:var(--emerald-muted);
+}
+
+/* ---------- cipher panel (sync block) ---------- */
+.cipher{
+  display:grid;grid-template-columns:1fr 1fr;gap:1px;
+  background:var(--line);border:1px solid var(--line);
+  border-radius:14px;overflow:hidden;max-width:760px;
+}
+.cipher>div{background:var(--graphite);padding:18px 20px}
+.cipher h3{
+  font-family:var(--mono);font-weight:500;font-size:.7rem;
+  letter-spacing:.08em;text-transform:uppercase;margin-bottom:12px;
+}
+.cipher .you h3{color:var(--emerald)}
+.cipher .them h3{color:var(--zinc-d)}
+.cipher pre{
+  font-family:var(--mono);font-size:.74rem;line-height:1.7;
+  white-space:pre-wrap;word-break:break-all;color:var(--zinc);
+}
+.cipher .you pre .k{color:var(--zinc-d)}
+.cipher .you pre .v{color:var(--bone)}
+.cipher .them pre{color:var(--zinc-d)}
+.cipher-caption{font-family:var(--mono);font-size:.73rem;color:var(--zinc-d);margin-top:12px;max-width:760px}
+.cipher-caption b{color:var(--emerald);font-weight:500}
+
+/* ---------- team loads ---------- */
+.loads{max-width:640px;border:1px solid var(--line);border-radius:14px;background:var(--graphite);padding:20px 22px}
+.loads .lrow{display:grid;grid-template-columns:74px minmax(0,1fr) 92px;gap:14px;align-items:center;padding:9px 0}
+.loads .who{font-family:var(--mono);font-size:.78rem;color:var(--bone)}
+.loads .bar{height:9px;border-radius:99px;background:var(--line-soft);overflow:hidden;position:relative}
+.loads .bar i{position:absolute;inset:0;right:auto;background:var(--emerald);border-radius:99px;opacity:.85}
+.loads .lrow.over .bar i{background:repeating-linear-gradient(45deg,var(--emerald) 0 6px,var(--emerald-deep) 6px 12px)}
+.loads .amt{font-family:var(--mono);font-size:.7rem;color:var(--zinc-d);text-align:right;white-space:nowrap}
+.loads .lrow.over .amt{color:var(--bone)}
+.loads .act{
+  margin-top:14px;padding-top:16px;border-top:1px solid var(--line);
+  display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+}
+.loads .act .fakebtn{
+  font-family:var(--display);font-weight:600;font-size:.82rem;
+  background:var(--emerald);color:var(--ink);border-radius:8px;padding:7px 14px;
+}
+.loads .act span{font-family:var(--mono);font-size:.72rem;color:var(--zinc-d)}
+
+/* ---------- quick-add parse (private AI block) ---------- */
+.qa{max-width:640px}
+.qa .in{
+  background:var(--graphite);border:1px solid var(--line);border-radius:12px;
+  padding:14px 18px;font-family:var(--mono);font-size:.85rem;
+  display:flex;gap:10px;align-items:baseline;
+}
+.qa .in .caret{color:var(--emerald)}
+.qa .out{display:flex;gap:9px;flex-wrap:wrap;margin-top:12px;align-items:center}
+.qa .chip{
+  font-family:var(--mono);font-size:.72rem;color:var(--bone);
+  border:1px solid var(--line);border-radius:99px;padding:4px 11px;
+  background:var(--raised);
+}
+.qa .chip b{color:var(--emerald);font-weight:500;margin-right:5px}
+.qa .parsed{font-family:var(--mono);font-size:.7rem;color:var(--zinc-d);margin-left:2px}
+
+/* ---------- shutdown ---------- */
+#shutdown .content{padding-bottom:72px}
+.proof{
+  font-family:var(--mono);font-size:.76rem;color:var(--zinc-d);
+  margin-top:34px;display:flex;gap:10px 26px;flex-wrap:wrap;
+}
+.proof span::before{content:"✓ ";color:var(--emerald)}
+
+/* ---------- footer ---------- */
+footer{
+  border-top:1px solid var(--line);
+  max-width:var(--maxw);margin:0 auto;
+  padding:30px 24px 44px;
+  display:flex;gap:16px 32px;align-items:baseline;flex-wrap:wrap;
+  font-family:var(--mono);font-size:.76rem;color:var(--zinc-d);
+}
+footer a{color:var(--zinc);text-decoration:none}
+footer a:hover{color:var(--bone)}
+footer .fin{margin-left:auto}
+footer .fin b{color:var(--emerald);font-weight:500}
+
+/* ---------- responsive ---------- */
+@media (max-width:880px){
+  .solve{grid-template-columns:1fr}
+  .solve-arrow{transform:rotate(90deg);padding:0}
+  .cipher{grid-template-columns:1fr}
+}
+@media (max-width:720px){
+  .block{display:block}
+  .rail{display:none}
+  #now{display:none}
+  .content{padding:8px 20px 72px}
+  .eyebrow .t-inline{display:inline}
+  nav a.sect{display:none}
+  header{gap:16px}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <a class="wordmark" href="#hero"><img src="favicon.svg" alt="" width="26" height="26">Cognate</a>
+  <nav aria-label="Sections">
+    <a class="sect" href="#engine"><b>09:00</b>Engine</a>
+    <a class="sect" href="#sync"><b>14:00</b>Sync</a>
+    <a class="sect" href="#team"><b>16:00</b>Team</a>
+    <a class="sect" href="#private"><b>19:00</b>Private&nbsp;AI</a>
+    <a class="sect" href="https://github.com/adityatawde9699/Cognate">GitHub</a>
+    <a class="btn btn-primary" href="https://github.com/adityatawde9699/Cognate/releases">Download</a>
+  </nav>
+</header>
+
+<main>
+  <div id="now" aria-hidden="true"><span>06:00</span></div>
+
+  <!-- 06:00 · hero -->
+  <section class="block" id="hero">
+    <div class="rail"><span class="tstamp">06:00</span></div>
+    <div class="content">
+      <p class="eyebrow"><span class="t-inline">06:00</span><span class="dot hi" aria-hidden="true"></span>morning brief <span class="dur">· your day, solved before you sit down</span></p>
+      <h1>Your day. Already planned.</h1>
+      <p class="lede">Cognate takes a pile of tasks and a calendar and solves them into a time-blocked day — <b>offline, in deterministic Rust, on your machine</b>. The AI advises. The solver decides. Your data never leaves.</p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="https://github.com/adityatawde9699/Cognate/releases">Download for desktop</a>
+        <a class="btn btn-ghost" href="https://github.com/adityatawde9699/Cognate">Read the source</a>
+      </div>
+      <p class="cta-note">windows · macos · linux · installable web app — open source, no account, no server required</p>
+
+      <div class="solve" aria-label="Demo: an inbox of tasks solved into a scheduled day">
+        <div class="pane">
+          <h3>Inbox <em>5 unplanned</em></h3>
+          <ul class="inbox">
+            <li class="done" style="--d:.55s"><span class="chk">✓</span>finish planner docs 2h !! #work</li>
+            <li class="done" style="--d:.85s"><span class="chk">✓</span>review Sam's PR 45m #work</li>
+            <li class="done" style="--d:1.15s"><span class="chk">✓</span>call landlord 5pm 15m !</li>
+            <li class="done" style="--d:1.45s"><span class="chk">✓</span>book flights to Pune 20m</li>
+            <li class="done" style="--d:1.75s"><span class="chk">✓</span>gym 1h #health</li>
+          </ul>
+        </div>
+        <div class="solve-arrow" aria-hidden="true">→</div>
+        <div class="pane plan">
+          <h3>Today <em>planned</em></h3>
+          <div class="row place" style="--d:.55s"><time>08:00</time><div class="card">Deep work — planner docs<span class="meta">2h · ● hi</span></div></div>
+          <div class="row place" style="--d:.7s"><time>10:00</time><div class="card busy">Standup<span class="meta">calendar</span></div></div>
+          <div class="row place" style="--d:.85s"><time>10:30</time><div class="card">Review Sam's PR<span class="meta">45m</span></div></div>
+          <div class="row place" style="--d:1s"><time>12:30</time><div class="card brk">Lunch — protected<span class="meta">45m</span></div></div>
+          <div class="row place" style="--d:1.15s"><time>14:00</time><div class="card busy">1:1 with Maya<span class="meta">calendar</span></div></div>
+          <div class="row place" style="--d:1.3s"><time>15:00</time><div class="card">Book flights to Pune<span class="meta">20m · ○ lo</span></div></div>
+          <div class="row place" style="--d:1.45s"><time>17:00</time><div class="card">Call landlord<span class="meta">pinned 17:00</span></div></div>
+          <div class="row place" style="--d:1.6s"><time>18:00</time><div class="card">Gym<span class="meta">1h</span></div></div>
+        </div>
+        <p class="solve-caption"><b>solved offline</b> — around your meetings, matched to your energy curve. a meeting moves? the day re-flows, with a rationale.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 09:00 · the engine -->
+  <section class="block" id="engine">
+    <div class="rail"><span class="tstamp">09:00</span></div>
+    <div class="content">
+      <p class="eyebrow">09:00 — 11:00 <span class="dot hi" aria-hidden="true"></span>deep work <span class="dur">· the planner engine</span></p>
+      <h2>A solver, not a suggestion.</h2>
+      <p class="blurb">Most planners give you an empty grid and wish you luck. Cognate treats your day as a constraint problem and <b>solves it deterministically</b> — same inputs, same plan, explainable to the minute. No model in the loop, nothing to hallucinate your Tuesday.</p>
+      <dl class="spec">
+        <div><dt>planner.rs</dt><dd>The scheduler is <b>native Rust</b>, mirrored in TypeScript for the web build. It places every task by priority, deadline, and estimated effort.</dd></div>
+        <div><dt>energy_curve</dt><dd>Cognate <b>learns when you actually focus</b> from your completion and pomodoro history, and gives your hardest work to your best hours.</dd></div>
+        <div><dt>calendar.ics</dt><dd>Meetings from Google, Outlook, or any .ics feed are <b>hard walls</b>. The plan flows around them, never over them.</dd></div>
+        <div><dt>auto_reflow</dt><dd>A meeting lands, a task slips, you drag a block — the day <b>re-solves instantly</b> and tells you what moved and why.</dd></div>
+        <div><dt>pinned</dt><dd>Some things are sacred. <b>Pin a block</b> and the solver plans everything else around it.</dd></div>
+      </dl>
+    </div>
+  </section>
+
+  <!-- 12:30 · lunch, protected -->
+  <section class="block" id="lunch">
+    <div class="rail"><span class="tstamp">12:30</span></div>
+    <div class="content">
+      <div class="protected">
+        <span class="tag">protected block</span>
+        <p class="eyebrow" style="margin-bottom:10px">12:30 — 13:15 <span class="dot lo" aria-hidden="true"></span>lunch</p>
+        <p><b>Nothing is scheduled here.</b> Cognate plans around your breaks, not over them — the solver treats rest as a constraint, same as a meeting. This page keeps the block free too. Go eat.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 14:00 · sync -->
+  <section class="block" id="sync">
+    <div class="rail"><span class="tstamp">14:00</span></div>
+    <div class="content">
+      <p class="eyebrow">14:00 — 15:30 <span class="dot mid" aria-hidden="true"></span>sync <span class="dur">· every device, zero trust</span></p>
+      <h2>The relay can't read your week.</h2>
+      <p class="blurb">Every change is an entry in a <b>CRDT operation log</b>, sealed with a passphrase that exists only on your devices. Phones, laptops, offline edits — everything converges without conflicts. The relay in the middle is a few hundred lines of Rust, <b>stores only ciphertext</b>, and you can host it yourself.</p>
+      <div class="cipher">
+        <div class="you">
+          <h3>On your device</h3>
+          <pre><span class="k">entity</span>  <span class="v">task:9f2c</span>
+<span class="k">field</span>   <span class="v">title</span>
+<span class="k">value</span>   <span class="v">"Call landlord"</span>
+<span class="k">clock</span>   <span class="v">2026-07-07T09:12:03.412Z · a41f</span></pre>
+        </div>
+        <div class="them">
+          <h3>On the relay</h3>
+          <pre>aG9uZXN0bHkgbm90aGluZyB0byBz
+ZWUgaGVyZSBqdXN0IEFFUy0yNTYt
+R0NNIG92ZXIgUEJLREYyIGtleXMu
+IGdvIHBsYW4geW91ciBkYXku4pyU</pre>
+        </div>
+      </div>
+      <p class="cipher-caption"><b>wrong passphrase reads noise</b> — proven in tests, not promised in marketing. sync is optional; cognate is complete on one machine.</p>
+    </div>
+  </section>
+
+  <!-- 16:00 · team -->
+  <section class="block" id="team">
+    <div class="rail"><span class="tstamp">16:00</span></div>
+    <div class="content">
+      <p class="eyebrow">16:00 — 17:00 <span class="dot mid" aria-hidden="true"></span>collaboration <span class="dur">· share a project, not your workspace</span></p>
+      <h2>An invite is a key, not an account.</h2>
+      <p class="blurb">Sharing a project hands a teammate <b>the key to that project's encrypted log</b> — nothing else. Roles are enforced by cryptographic signatures, not server rules: revoke an editor and their future edits simply stop verifying. Comments, assignees, and presence ride the same log. Then the moat: <b>the solver plans the whole team</b> — it balances unassigned work into each member's real hours.</p>
+      <div class="loads" aria-label="Team workload after balancing">
+        <div class="lrow"><span class="who">aditya</span><div class="bar"><i style="width:88%"></i></div><span class="amt">5h 20m / 6h</span></div>
+        <div class="lrow"><span class="who">maya</span><div class="bar"><i style="width:64%"></i></div><span class="amt">3h 50m / 6h</span></div>
+        <div class="lrow over"><span class="who">sam</span><div class="bar"><i style="width:100%"></i></div><span class="amt">6h 15m / 6h ·  over</span></div>
+        <div class="act"><span class="fakebtn">Balance workload</span><span>→ 4 tasks reassigned · sam back under capacity</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 19:00 · private AI -->
+  <section class="block" id="private">
+    <div class="rail"><span class="tstamp">19:00</span></div>
+    <div class="content">
+      <p class="eyebrow">19:00 — 19:30 <span class="dot lo" aria-hidden="true"></span>advisory hours <span class="dur">· ai on your terms</span></p>
+      <h2>The AI advises. It never decides.</h2>
+      <p class="blurb">Type a thought and a <b>deterministic parser</b> — no network, no model — schedules it. AI is optional garnish on top: bring your own API key, or click once and run a local model through Ollama. <b>There is no hosted tier</b>, because there is nothing of yours on anyone's server to charge for.</p>
+      <div class="qa">
+        <div class="in"><span class="caret">›</span>call Sam tmrw 5pm 30m #work !!</div>
+        <div class="out">
+          <span class="chip"><b>title</b>Call Sam</span>
+          <span class="chip"><b>when</b>tomorrow 17:00 · pinned</span>
+          <span class="chip"><b>for</b>30m</span>
+          <span class="chip"><b>tag</b>#work</span>
+          <span class="chip"><b>priority</b>high</span>
+          <span class="parsed">parsed offline in a pure function</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 22:30 · shutdown -->
+  <section class="block" id="shutdown">
+    <div class="rail"><span class="tstamp">22:30</span></div>
+    <div class="content">
+      <p class="eyebrow">22:30 — 23:00 <span class="dot lo" aria-hidden="true"></span>shutdown ritual</p>
+      <h2>End the day empty.</h2>
+      <p class="blurb">Tomorrow is already planned — it will be waiting when you open the lid. Cognate is <b>free, open source, and local-first</b>: if the project vanished tomorrow, your data is a SQLite file on your own disk.</p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="https://github.com/adityatawde9699/Cognate/releases">Download Cognate</a>
+        <a class="btn btn-ghost" href="https://github.com/adityatawde9699/Cognate#quick-start">Quick start</a>
+      </div>
+      <div class="proof">
+        <span>200+ unit tests</span>
+        <span>17 end-to-end flows</span>
+        <span>undo everything</span>
+        <span>automatic backups</span>
+        <span>deterministic to the minute</span>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <a href="https://github.com/adityatawde9699/Cognate">github</a>
+  <a href="https://github.com/adityatawde9699/Cognate/blob/master/docs/ARCHITECTURE.md">architecture</a>
+  <a href="https://github.com/adityatawde9699/Cognate/blob/master/docs/RELAY.md">self-host the relay</a>
+  <a href="https://github.com/adityatawde9699/Cognate/blob/master/SECURITY.md">security</a>
+  <a href="https://github.com/adityatawde9699/Cognate/blob/master/LICENSE.txt">license</a>
+  <span class="fin">23:00 · <b>day complete</b> — cognate</span>
+</footer>
+
+<script>
+/* the "now" marker: page scroll = time of day, 06:00 → 23:00 */
+(function(){
+  var now=document.getElementById('now');
+  if(!now) return;
+  var label=now.querySelector('span'), main=document.querySelector('main'), raf=0;
+  function fmt(min){
+    var h=Math.floor(min/60), m=Math.round(min%60);
+    return (h<10?'0':'')+h+':'+(m<10?'0':'')+m;
+  }
+  function update(){
+    raf=0;
+    var r=main.getBoundingClientRect();
+    var total=r.height-window.innerHeight*0.35;
+    var p=Math.min(1,Math.max(0,(-r.top+window.innerHeight*0.3)/total));
+    now.style.top=(p*(r.height-40))+'px';
+    label.textContent=fmt(360+p*(1380-360)); /* 06:00 → 23:00 */
+  }
+  function queue(){ if(!raf) raf=requestAnimationFrame(update); }
+  addEventListener('scroll',queue,{passive:true});
+  addEventListener('resize',queue,{passive:true});
+  update();
+  /* highlight the block the marker is inside */
+  var blocks=[].slice.call(document.querySelectorAll('.block'));
+  var io=new IntersectionObserver(function(es){
+    es.forEach(function(e){ e.target.classList.toggle('on',e.isIntersecting); });
+  },{rootMargin:'-30% 0px -55% 0px'});
+  blocks.forEach(function(b){ io.observe(b); });
+})();
+</script>
+</body>
+</html>

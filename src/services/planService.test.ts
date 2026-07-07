@@ -3,6 +3,8 @@ import {
   planLocally,
   detectDisruption,
   nowMinutes,
+  DEFAULT_WORK_START,
+  DEFAULT_WORK_END,
   type PlanRequest,
   type PlanTask,
   type BusyBlock,
@@ -13,14 +15,14 @@ function task(id: string, dur: number, deadline: string, prio: PlanTask['priorit
   return { id, title: id, duration_min: dur, energy, deadline, priority: prio, importance: 3, pinned: false, pinned_start_min: null };
 }
 function req(tasks: PlanTask[], busy: BusyBlock[] = []): PlanRequest {
-  return { date: '2026-06-24', work_start_min: 540, work_end_min: 1020, tasks, busy };
+  return { date: '2026-06-24', work_start_min: DEFAULT_WORK_START, work_end_min: DEFAULT_WORK_END, tasks, busy };
 }
 const overlaps = (a: [number, number], b: [number, number]) => a[0] < b[1] && b[0] < a[1];
 
 describe('planLocally (TS mirror of the Rust scheduler)', () => {
   it('keeps every block inside working hours', () => {
     const out = planLocally(req([task('a', 60, '', 'high', 'med'), task('b', 120, '', 'low', 'med')]));
-    for (const b of out.blocks) expect(b.start_min >= 540 && b.end_min <= 1020).toBe(true);
+    for (const b of out.blocks) expect(b.start_min >= DEFAULT_WORK_START && b.end_min <= DEFAULT_WORK_END).toBe(true);
   });
 
   it('produces no overlaps with other blocks or busy time', () => {
@@ -41,26 +43,27 @@ describe('planLocally (TS mirror of the Rust scheduler)', () => {
   });
 
   it('routes around busy calendar blocks and explains it', () => {
-    const out = planLocally(req([task('a', 60, '', 'high', 'med')], [{ start_min: 540, end_min: 600, title: 'Call' }]));
+    const out = planLocally(req([task('a', 60, '', 'high', 'med')], [{ start_min: DEFAULT_WORK_START, end_min: DEFAULT_WORK_START + 60, title: 'Call' }]));
     const a = out.blocks.find((b) => b.task_id === 'a')!;
-    expect(a.start_min).toBeGreaterThanOrEqual(600);
+    expect(a.start_min).toBeGreaterThanOrEqual(DEFAULT_WORK_START + 60);
     expect(a.reason).toContain('right after');
   });
 
   it('keeps pinned tasks fixed and routes others around them', () => {
-    const pinned: PlanTask = { ...task('pinned', 60, '', 'low', 'med'), pinned: true, pinned_start_min: 780 };
+    const pinned: PlanTask = { ...task('pinned', 60, '', 'low', 'med'), pinned: true, pinned_start_min: DEFAULT_WORK_START + 420 };
     const out = planLocally(req([pinned, task('a', 60, '', 'high', 'med')]));
     const p = out.blocks.find((b) => b.task_id === 'pinned')!;
-    expect([p.start_min, p.end_min]).toEqual([780, 840]);
+    expect([p.start_min, p.end_min]).toEqual([DEFAULT_WORK_START + 420, DEFAULT_WORK_START + 480]);
     const a = out.blocks.find((b) => b.task_id === 'a')!;
-    expect(overlaps([a.start_min, a.end_min], [780, 840])).toBe(false);
+    expect(overlaps([a.start_min, a.end_min], [DEFAULT_WORK_START + 420, DEFAULT_WORK_START + 480])).toBe(false);
   });
 
   it('reports overflow as unscheduled', () => {
     const tasks = Array.from({ length: 10 }, (_, i) => task(`t${i}`, 60, '', 'medium', 'med'));
     const out = planLocally(req(tasks));
-    expect(out.blocks.length).toBe(8);
-    expect(out.unscheduled.length).toBe(2);
+    const capacity = ((DEFAULT_WORK_END - DEFAULT_WORK_START) / 60) as number;
+    expect(out.blocks.length).toBe(Math.min(tasks.length, capacity));
+    expect(out.unscheduled.length).toBe(Math.max(0, tasks.length - capacity));
   });
 
   it('honours a learned energy curve over the default circadian one (Act 4)', () => {
@@ -74,10 +77,10 @@ describe('planLocally (TS mirror of the Rust scheduler)', () => {
     const hi = task('hi', 60, '', 'medium', 'hi'); // high-energy work
 
     const learned = planLocally({ ...req([hi], busy), energy_curve: curve });
-    expect(learned.blocks[0].start_min).toBeGreaterThanOrEqual(780); // chose the learned afternoon peak
+    expect(learned.blocks[0].start_min).toBeGreaterThanOrEqual(DEFAULT_WORK_START + 420); // chose the learned afternoon peak
 
     const fixed = planLocally(req([hi], busy));
-    expect(fixed.blocks[0].start_min).toBe(540); // default circadian → morning peak
+    expect(fixed.blocks[0].start_min).toBe(DEFAULT_WORK_START); // default circadian → morning peak
   });
 });
 
@@ -95,29 +98,29 @@ function event(title: string, startMin: number, endMin: number): CalendarEvent {
 describe('detectDisruption (auto-reflow trigger)', () => {
   it('returns null when the plan still holds', () => {
     const tasks = [scheduled('a', 600, 660)];
-    expect(detectDisruption(tasks, [], DATE, 540)).toBeNull();
+    expect(detectDisruption(tasks, [], DATE, DEFAULT_WORK_START)).toBeNull();
   });
 
   it('flags a calendar event that lands on planned work', () => {
     const tasks = [scheduled('a', 600, 660)];
     const events = [event('Surprise sync', 615, 645)];
-    const d = detectDisruption(tasks, events, DATE, 540);
+    const d = detectDisruption(tasks, events, DATE, DEFAULT_WORK_START);
     expect(d?.reason).toContain('Surprise sync');
   });
 
   it('flags a block that has fully elapsed (a slip)', () => {
-    const tasks = [scheduled('a', 540, 600)]; // 9–10am
-    const d = detectDisruption(tasks, events_none(), DATE, 660); // now 11am
+    const tasks = [scheduled('a', DEFAULT_WORK_START, DEFAULT_WORK_START + 60)];
+    const d = detectDisruption(tasks, events_none(), DATE, DEFAULT_WORK_START + 120); // now two hours later
     expect(d?.reason).toContain('running over');
   });
 
   it('ignores completed blocks that have elapsed', () => {
-    const tasks = [scheduled('a', 540, 600, true)];
-    expect(detectDisruption(tasks, [], DATE, 660)).toBeNull();
+    const tasks = [scheduled('a', DEFAULT_WORK_START, DEFAULT_WORK_START + 60, true)];
+    expect(detectDisruption(tasks, [], DATE, DEFAULT_WORK_START + 120)).toBeNull();
   });
 
   it('only considers today', () => {
-    const other = { ...scheduled('a', 540, 600), scheduled_start: '2026-06-23T09:00:00', scheduled_end: '2026-06-23T10:00:00' } as Task;
+    const other = { ...scheduled('a', DEFAULT_WORK_START, DEFAULT_WORK_START + 60), scheduled_start: '2026-06-23T09:00:00', scheduled_end: '2026-06-23T10:00:00' } as Task;
     expect(detectDisruption([other], [], DATE, 660)).toBeNull();
   });
 });

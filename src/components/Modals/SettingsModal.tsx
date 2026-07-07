@@ -1,25 +1,24 @@
-import { useState, useEffect, useRef } from 'react';
-import { useStore } from '../../store';
+import { useEffect, useRef, useState } from 'react';
+import { dedupeTasks, getAllTasks, getSetting, IS_TAURI, setSetting } from '../../db';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
-import { getSetting, setSetting, IS_TAURI } from '../../db';
-import { getSecret, setSecret } from '../../utils/secrets';
+import { getCalendarUrl, importBusyText, setCalendarUrl, syncCalendarUrl } from '../../services/calendarSyncService';
 import { saveCustomFieldDefs } from '../../services/customFields';
-import { getAllTasks, dedupeTasks } from '../../db';
-import { loadAllTasks } from '../../services/taskService';
 import { exportIcs, importIcsText } from '../../services/icalService';
-import { getCalendarUrl, setCalendarUrl, syncCalendarUrl, importBusyText } from '../../services/calendarSyncService';
-import { parseImport, importTasks } from '../../services/importService';
+import { importTasks, parseImport } from '../../services/importService';
+import { enablePrivateAi } from '../../services/privateAi';
 import { exportBundle, importBundle } from '../../services/syncService';
-import { SharedProjects } from '../SharedProjects';
+import { loadAllTasks } from '../../services/taskService';
+import type { CustomFieldType } from '../../store';
+import { useStore } from '../../store';
+import { downloadStr } from '../../utils/export';
+import { getSecret, setSecret } from '../../utils/secrets';
+import { toast } from '../../utils/toast';
 import { BackupsSection } from '../Settings/BackupsSection';
-import { UpdatesSection } from '../Settings/UpdatesSection';
-import { LiveSyncSettings } from '../Settings/LiveSyncSettings';
 import { CalendarAccount } from '../Settings/CalendarAccount';
 import { LanguageSelect } from '../Settings/LanguageSelect';
-import { enablePrivateAi } from '../../services/privateAi';
-import { downloadStr } from '../../utils/export';
-import { toast } from '../../utils/toast';
-import type { CustomFieldType } from '../../store';
+import { LiveSyncSettings } from '../Settings/LiveSyncSettings';
+import { UpdatesSection } from '../Settings/UpdatesSection';
+import { SharedProjects } from '../SharedProjects';
 
 /** "09:00" ⇄ minutes-since-midnight, for the work-hours inputs. */
 function timeToMin(s: string): number {
@@ -94,6 +93,9 @@ export function SettingsModal() {
 
   const [workStart, setWorkStart] = useState('09:00');
   const [workEnd, setWorkEnd] = useState('17:00');
+  const [useCustomWork, setUseCustomWork] = useState(true);
+  const [wakeStart, setWakeStart] = useState('06:00');
+  const [wakeEnd, setWakeEnd] = useState('23:00');
   const [calUrl, setCalUrl] = useState('');
   const [calBusy, setCalBusy] = useState(false);
   const [calMsg, setCalMsg] = useState('');
@@ -121,8 +123,11 @@ export function SettingsModal() {
       getSetting('ai_model', '').then(setAiModel);
       getSetting('quickadd_ai', '0').then((v: string) => setQuickAddAi(v === '1'));
 
-      getSetting('work_start_min', '540').then((v: string) => setWorkStart(minToTime(Number(v) || 540)));
-      getSetting('work_end_min', '1020').then((v: string) => setWorkEnd(minToTime(Number(v) || 1020)));
+      getSetting('use_custom_work_hours', '1').then((v: string) => setUseCustomWork(v === '1'));
+      getSetting('work_start_min', '360').then((v: string) => setWorkStart(minToTime(Number(v) || 360)));
+      getSetting('work_end_min', '1380').then((v: string) => setWorkEnd(minToTime(Number(v) || 1380)));
+      getSetting('wake_start_min', '360').then((v: string) => setWakeStart(minToTime(Number(v) || 360)));
+      getSetting('wake_end_min', '1380').then((v: string) => setWakeEnd(minToTime(Number(v) || 1380)));
       getCalendarUrl().then(setCalUrl);
 
       getSetting('notify_enabled', '1').then((v: string) => setNotifyEnabled(v === '1'));
@@ -154,6 +159,19 @@ export function SettingsModal() {
     setCalMsg('');
     await setSetting('work_start_min', String(s));
     await setSetting('work_end_min', String(e));
+    // Mark that the user explicitly configured work hours so the planner uses them.
+    await setSetting('use_custom_work_hours', '1');
+    window.dispatchEvent(new CustomEvent('settings-changed'));
+  };
+
+  const saveWakeSleep = async (wakeStr: string, sleepStr: string) => {
+    const s = timeToMin(wakeStr);
+    const e = timeToMin(sleepStr);
+    if (e <= s) { setCalMsg('Sleep time must be after wake time.'); return; }
+    setCalMsg('');
+    await setSetting('wake_start_min', String(s));
+    await setSetting('wake_end_min', String(e));
+    // When the user updates wake/sleep we don't automatically enable custom work hours.
     window.dispatchEvent(new CustomEvent('settings-changed'));
   };
 
@@ -288,7 +306,7 @@ export function SettingsModal() {
               handleUpdateSetting('pomo_long_break_mins', e.target.value);
             }} min="1" max="60" />
           </div>
-          
+
           <div className="form-group row switch-row">
             <label>Auto-start Breaks</label>
             <label className="switch">
@@ -493,14 +511,40 @@ export function SettingsModal() {
           <h3>Calendar &amp; Planning</h3>
 
           <div className="form-group row">
-            <label>Work day starts</label>
-            <input type="time" value={workStart} onChange={(e) => { setWorkStart(e.target.value); saveWorkHours(e.target.value, workEnd); }} />
+            <label>Use custom work hours</label>
+            <label className="switch">
+              <input type="checkbox" checked={useCustomWork} onChange={async (e) => {
+                setUseCustomWork(e.target.checked);
+                await setSetting('use_custom_work_hours', e.target.checked ? '1' : '0');
+                window.dispatchEvent(new CustomEvent('settings-changed'));
+              }} />
+              <span className="slider"></span>
+            </label>
           </div>
-          <div className="form-group row">
-            <label>Work day ends</label>
-            <input type="time" value={workEnd} onChange={(e) => { setWorkEnd(e.target.value); saveWorkHours(workStart, e.target.value); }} />
-          </div>
-          <small className="form-hint">The planner only schedules work inside these hours.</small>
+          {useCustomWork ? (
+            <>
+              <div className="form-group row">
+                <label>Work day starts</label>
+                <input type="time" value={workStart} onChange={(e) => { setWorkStart(e.target.value); saveWorkHours(e.target.value, workEnd); }} />
+              </div>
+              <div className="form-group row">
+                <label>Work day ends</label>
+                <input type="time" value={workEnd} onChange={(e) => { setWorkEnd(e.target.value); saveWorkHours(workStart, e.target.value); }} />
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="form-group row">
+                <label>Wake time</label>
+                <input type="time" value={wakeStart} onChange={(e) => { setWakeStart(e.target.value); saveWakeSleep(e.target.value, wakeEnd); }} />
+              </div>
+              <div className="form-group row">
+                <label>Sleep time</label>
+                <input type="time" value={wakeEnd} onChange={(e) => { setWakeEnd(e.target.value); saveWakeSleep(wakeStart, e.target.value); }} />
+              </div>
+            </>
+          )}
+          <small className="form-hint">The planner schedules tasks across your available waking day unless you opt into custom work hours.</small>
 
           <div className="form-group">
             <label>Calendar subscription (.ics URL)</label>

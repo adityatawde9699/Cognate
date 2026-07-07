@@ -9,7 +9,7 @@ import { toast } from '../utils/toast';
 const WORK = 25 * 60;
 const ARC_LEN = 267.04; // π·r, r = 85
 
-const AVA = ['#16794f', '#0e7490', '#9333ea', '#b45309', '#be123c', '#4338ca'];
+const AVA = ['#16794f', '#0e7490', '#0f766e', '#b45309', '#be123c', '#4d7c0f'];
 
 function initials(s: string) {
   const parts = s.trim().split(/\s+/);
@@ -106,7 +106,7 @@ export function Dashboard() {
         </div>
         <div className="dash-head-actions">
           <button className="btn-primary" onClick={() => setTaskModalOpen(true)}>
-            <i className="fa-solid fa-plus"></i> Add Task
+            <i className="fa-solid fa-plus"></i> New task
           </button>
           <button className="btn-ghost-pill" onClick={() => setAnalyticsOpen(true)}>
             <i className="fa-solid fa-chart-simple"></i> Insights
@@ -178,7 +178,7 @@ export function Dashboard() {
         <section className="panel panel-projects">
           <div className="panel-hd">
             <h3>Tasks</h3>
-            <button className="pill-new" onClick={() => setTaskModalOpen(true)}>+ New</button>
+            <button className="pill-new" onClick={() => setTaskModalOpen(true)}>+ New task</button>
           </div>
           <ul className="proj-list">
             {projectList.length === 0 && <li className="proj-empty">No active tasks.</li>}
@@ -201,7 +201,7 @@ export function Dashboard() {
         <section className="panel panel-activity">
           <div className="panel-hd">
             <h3>Recent Activity</h3>
-            <button className="pill-new" onClick={() => setTaskModalOpen(true)}>+ Add Task</button>
+            <button className="pill-new" onClick={() => setTaskModalOpen(true)}>+ New task</button>
           </div>
           <ul className="act-list">
             {recent.length === 0 && <li className="proj-empty">Nothing here yet.</li>}

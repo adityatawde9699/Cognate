@@ -11,15 +11,15 @@
 
 import {
   IS_TAURI,
-  getSetting,
-  setSchedule,
   clearDaySchedules,
   getCalendarEvents,
+  getSetting,
+  setSchedule,
   updateScheduling,
 } from '../db';
+import { useStore, type CalendarEvent, type Energy, type Task } from '../store';
 import { estimateScheduling } from './aiService';
 import { learnEnergyCurve } from './energyModel';
-import { useStore, type Task, type Energy, type CalendarEvent } from '../store';
 
 export interface PlanTask {
   id: string;
@@ -48,8 +48,10 @@ export interface PlanBlock { task_id: string; start_min: number; end_min: number
 export interface PlanUnscheduled { task_id: string; reason: string }
 export interface PlanResult { blocks: PlanBlock[]; unscheduled: PlanUnscheduled[] }
 
-export const DEFAULT_WORK_START = 9 * 60;  // 09:00
-export const DEFAULT_WORK_END = 17 * 60;   // 17:00
+// Defaults for the planner when the user hasn't opted into custom work hours.
+// We treat the broad waking day as the default planning horizon (06:00–23:00).
+export const DEFAULT_WORK_START = 6 * 60;  // 06:00
+export const DEFAULT_WORK_END = 23 * 60;   // 23:00
 const DEFAULT_DURATION = 30;
 
 /** Map a 1–5 effort estimate to a default block length. */
@@ -75,9 +77,19 @@ export function fmtClock(min: number): string {
 }
 
 export async function getWorkHours(): Promise<{ start: number; end: number }> {
-  const start = Number(await getSetting('work_start_min', String(DEFAULT_WORK_START))) || DEFAULT_WORK_START;
-  const end = Number(await getSetting('work_end_min', String(DEFAULT_WORK_END))) || DEFAULT_WORK_END;
-  return { start, end };
+  // If the user explicitly enabled custom work hours, use them. Otherwise
+  // fall back to the user's wake/sleep settings (or the broad defaults).
+  const useCustom = (await getSetting('use_custom_work_hours', '0')) === '1';
+  if (useCustom) {
+    const start = Number(await getSetting('work_start_min', String(DEFAULT_WORK_START))) || DEFAULT_WORK_START;
+    const end = Number(await getSetting('work_end_min', String(DEFAULT_WORK_END))) || DEFAULT_WORK_END;
+    return { start, end };
+  }
+
+  // Use wake/sleep bounds when work hours are not explicitly set.
+  const wake = Number(await getSetting('wake_start_min', String(DEFAULT_WORK_START))) || DEFAULT_WORK_START;
+  const sleep = Number(await getSetting('wake_end_min', String(DEFAULT_WORK_END))) || DEFAULT_WORK_END;
+  return { start: wake, end: sleep };
 }
 
 // ── Deterministic scheduler (TS mirror of src-tauri/src/planner.rs) ──

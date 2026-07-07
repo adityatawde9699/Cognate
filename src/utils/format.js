@@ -3,7 +3,7 @@
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 'use strict';
 
-export const P_LABEL = { high: '🔴 High', medium: '🟡 Medium', low: '🟢 Low' };
+export const P_LABEL = { high: 'High', medium: 'Medium', low: 'Low' };
 export const P_COLOR = { high: 'var(--danger)', medium: 'var(--accent)', low: 'var(--success)' };
 
 export function fmtDate(iso) {
