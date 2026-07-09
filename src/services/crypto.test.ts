@@ -34,7 +34,11 @@ describe('E2E crypto', () => {
   it('detects tampering (GCM auth) ', async () => {
     const key = await deriveKey('s3cret');
     const blob = await seal(key, { x: 1 });
-    const tampered: SealedBlob = { ...blob, ct: blob.ct.slice(0, -4) + (blob.ct.endsWith('A') ? 'B' : 'A') + blob.ct.slice(-3) };
+    // Flip a byte in the raw ciphertext (not the base64 text) so the mutation
+    // is guaranteed to differ, regardless of what character happened to be there.
+    const bytes = Uint8Array.from(atob(blob.ct), (c) => c.charCodeAt(0));
+    bytes[0] ^= 0xff;
+    const tampered: SealedBlob = { ...blob, ct: btoa(String.fromCharCode(...bytes)) };
     await expect(open(key, tampered)).rejects.toThrow();
   });
 
