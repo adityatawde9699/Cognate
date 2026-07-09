@@ -633,7 +633,7 @@ IGdvIHBsYW4geW91ciBkYXku4pyU</pre>
       var urls={
         windows: find(/setup\.exe$/i) || find(/\.exe$/i) || find(/\.msi$/i),
         mac: find(/\.dmg$/i),
-        linux: find(/\.AppImage$/i)
+        linux: find(/\.deb$/i) || find(/\.AppImage$/i)
       };
       osButtons.forEach(function(b){
         var u=urls[b.dataset.os];
