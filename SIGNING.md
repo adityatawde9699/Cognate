@@ -29,16 +29,31 @@ Then add GitHub repo secrets (Settings → Secrets and variables → Actions):
 > ⚠️ If you lose the private key or password you can't ship verifiable updates —
 > existing installs would have to be reinstalled manually. Back it up securely.
 
-## 2. macOS / Windows OS code signing (optional)
+**Current key (as of 2026-07-07):** the keypair was regenerated with no
+password after the original private key's password was lost. The private key
+lives at `src-tauri/.tauri/cognote-updater.key` (gitignored) with a matching
+empty `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secret already set on the repo. The
+old, password-protected key is kept as `cognote-updater.key.bak-passworded`
+for reference only — it no longer matches the pubkey in `tauri.conf.json` and
+cannot sign releases. v3.0.2 was the first release built and published with
+the new key; every asset's `.sig` was verified against the new pubkey.
 
-Add the relevant secrets the release workflow already references:
+## 2. macOS / Windows OS code signing (optional, currently unconfigured)
+
+The `APPLE_*` env vars are **not** currently set in `.github/workflows/release.yml` —
+they were removed on purpose. Tauri's bundler treats an empty-but-present
+`APPLE_CERTIFICATE` as "sign this" and fails importing it, so the vars must be
+absent entirely rather than set to empty strings. Builds ship unsigned for OS
+(but still updater-signed); macOS users see a Gatekeeper "unidentified
+developer" warning on first launch (right-click → Open).
+
+To enable it once you have a paid Apple Developer account, re-add these lines
+to the `env:` block in `release.yml` and set the matching repo secrets:
 
 - macOS: `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`,
   `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`.
 - Windows: configure a code-signing certificate per the Tauri Windows signing
   guide and wire it into the bundle config.
-
-Leave them unset to ship unsigned-for-OS (but updater-signed) builds.
 
 ## Releasing
 
