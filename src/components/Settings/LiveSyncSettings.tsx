@@ -70,6 +70,21 @@ export function LiveSyncSettings() {
     <div className="settings-section">
       <h3>Live sync <span className="opt-tag">end-to-end encrypted</span></h3>
 
+      {on && (
+        <div className="sync-active-banner">
+          <div className="sync-active-inner">
+            <i className="fa-solid fa-circle-dot sync-active-dot"></i>
+            <div>
+              <strong>Sync is active</strong>
+              <p>Your tasks are being pushed to <code>{url}</code> every 3 minutes.</p>
+            </div>
+          </div>
+          <button className="btn-ghost is-danger" onClick={turnOff} disabled={busy}>
+            <i className="fa-solid fa-link-slash"></i> Disable sync
+          </button>
+        </div>
+      )}
+
       <div className="form-group">
         <label>Relay URL</label>
         <input
@@ -84,8 +99,9 @@ export function LiveSyncSettings() {
           placeholder="a strong shared secret" autoComplete="off"
         />
         <small className="form-hint">
-          Stored in your OS keychain and never sent to the relay. Use the same passphrase on every device —
-          it derives the encryption key and the room id. Choose a strong one; there is no recovery.
+          Stored in your OS keychain and never sent to the relay. Your room is scoped to this device —
+          only YOUR other devices with the same passphrase will sync. Other people with the same passphrase
+          cannot access your data.
         </small>
       </div>
       <div className="form-group">
@@ -95,7 +111,7 @@ export function LiveSyncSettings() {
           placeholder="only if your relay requires one" autoComplete="off"
         />
         <small className="form-hint">
-          A shared bearer token for a hosted/gated relay. Not a decryption key — the relay still can’t read your tasks.
+          A shared bearer token for a hosted/gated relay. Not a decryption key — the relay still can't read your tasks.
         </small>
       </div>
 
@@ -116,7 +132,7 @@ export function LiveSyncSettings() {
       </div>
       {msg && <small className="form-hint">{msg}</small>}
       <small className="form-hint">
-        The relay stores only ciphertext — it can’t read your tasks. Edits merge conflict-free (CRDT),
+        The relay stores only ciphertext — it can't read your tasks. Edits merge conflict-free (CRDT),
         so devices converge even after working offline.
       </small>
     </div>

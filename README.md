@@ -81,6 +81,80 @@ The AI advises but doesn't decide. All planning runs **offline in deterministic 
 
 ---
 
+## Installation
+
+Cognate is available for Windows, macOS, and Linux.
+
+> [!NOTE]
+> Cognate is currently an open-source project. The Windows executable is not yet code-signed, and the macOS application is not yet notarized. Your operating system may display security warnings during installation. This does not necessarily indicate that the application is malicious.
+
+### Windows
+**SmartScreen warning**
+
+When opening Cognate for the first time, Windows Defender SmartScreen may display:
+> Windows protected your PC
+
+This happens because Cognate is currently unsigned.
+To continue:
+1. Click **More info**
+2. Click **Run anyway**
+
+You only need to do this once.
+
+### macOS
+**"Cognate is damaged and can't be opened"**
+
+macOS Gatekeeper may prevent Cognate from opening because the application is not yet notarized.
+
+**Option 1 (recommended)**
+1. Right-click `Cognate.app`
+2. Select **Open**
+3. Click **Open** again.
+
+**Option 2**
+Remove the quarantine attribute via terminal:
+```bash
+xattr -dr com.apple.quarantine /Applications/Cognate.app
+```
+*(or if running from Downloads: `xattr -dr com.apple.quarantine ~/Downloads/Cognate.app`)*
+Then launch Cognate normally.
+
+### Linux
+No additional installation steps are required.
+If the AppImage is not executable:
+```bash
+chmod +x Cognate.AppImage
+./Cognate.AppImage
+```
+
+### Verify Download
+Every release includes SHA-256 checksums. Example:
+```bash
+sha256sum Cognate_0.1.0_x64_en-US.msi
+```
+Compare the output with the checksum listed on the GitHub Release page.
+
+### Frequently Asked Questions
+
+**Is Cognate safe?**
+Yes. Cognate is open source. The source code is publicly available and every release is built from that repository. Current releases are not yet digitally signed, which is why Windows and macOS display security warnings.
+
+**Why isn't the app signed?**
+Code signing certificates require paid developer accounts. As an independent open-source project, Cognate currently distributes unsigned builds while development is ongoing. Signing and notarization are planned for a future release.
+
+**The app won't start**
+Please include the following when opening an issue:
+- Operating system and version
+- Cognate version
+- Installation method
+- Screenshots of any error messages
+- Log files (if available)
+
+### Reporting Issues
+Please report installation issues on GitHub and include: OS version, CPU architecture (x64 / ARM64), Cognate version, steps to reproduce, and screenshots.
+
+---
+
 ## How It Works
 
 **At its core, Cognate is a deterministic scheduler written in Rust.**

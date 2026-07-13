@@ -11,7 +11,7 @@ const ANTHROPIC_URL: &str = "https://api.anthropic.com/v1/messages";
 #[serde(rename_all = "camelCase")]
 pub struct AiArgs {
     pub api_key: String,
-    /// "anthropic" | "openai" | "openrouter" | "groq" | "xai" | "gemini" | "ollama" | "custom"
+    /// "anthropic" | "openai" | "openrouter" | "groq" | "xai" | "gemini" | "deepseek" | "ollama" | "custom"
     pub provider: Option<String>,
     /// Overrides the provider's default base URL (required for "custom").
     pub base_url: Option<String>,
@@ -29,6 +29,7 @@ fn default_base_url(provider: &str) -> Option<&'static str> {
         "groq" => Some("https://api.groq.com/openai/v1"),
         "xai" => Some("https://api.x.ai/v1"),
         "gemini" => Some("https://generativelanguage.googleapis.com/v1beta/openai"),
+        "deepseek" => Some("https://api.deepseek.com/v1"),
         "ollama" => Some("http://localhost:11434/v1"),
         "llamacpp" => Some("http://localhost:8080/v1"),
         _ => None,
@@ -157,7 +158,7 @@ async fn anthropic(
     Ok(text)
 }
 
-// ── OpenAI-compatible (OpenAI, OpenRouter, Groq, xAI, Gemini, Ollama, llama.cpp, custom) ──
+// ── OpenAI-compatible (OpenAI, OpenRouter, Groq, xAI, Gemini, DeepSeek, Ollama, llama.cpp, custom) ──
 
 #[derive(Debug, Deserialize)]
 struct OpenAiResponse { choices: Vec<OpenAiChoice> }

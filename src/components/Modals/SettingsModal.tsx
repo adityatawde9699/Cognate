@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { dedupeTasks, getAllTasks, getSetting, IS_TAURI, setSetting } from '../../db';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
 import { getCalendarUrl, importBusyText, setCalendarUrl, syncCalendarUrl } from '../../services/calendarSyncService';
@@ -40,6 +40,24 @@ function pickFile(accept: string, cb: (text: string, name: string) => void) {
   inp.click();
 }
 
+interface SettingsSectionProps {
+  id?: string;
+  featured?: boolean;
+  className?: string;
+  children: ReactNode;
+}
+
+function SettingsSection({ id, featured = false, className = '', children }: SettingsSectionProps) {
+  return (
+    <div
+      id={id}
+      className={`settings-section${featured ? ' settings-section-featured' : ''}${className ? ` ${className}` : ''}`}
+    >
+      {children}
+    </div>
+  );
+}
+
 interface ProviderMeta { label: string; model: string; base: string; needsKey: boolean; keyHint?: string }
 const PROVIDERS: Record<string, ProviderMeta> = {
   anthropic: { label: 'Anthropic (Claude)', model: 'claude-opus-4-8', base: '', needsKey: true, keyHint: 'console.anthropic.com' },
@@ -48,6 +66,7 @@ const PROVIDERS: Record<string, ProviderMeta> = {
   groq:      { label: 'Groq', model: 'llama-3.3-70b-versatile', base: 'https://api.groq.com/openai/v1', needsKey: true, keyHint: 'console.groq.com' },
   xai:       { label: 'xAI (Grok)', model: 'grok-2-latest', base: 'https://api.x.ai/v1', needsKey: true, keyHint: 'console.x.ai' },
   gemini:    { label: 'Google Gemini', model: 'gemini-2.0-flash', base: 'https://generativelanguage.googleapis.com/v1beta/openai', needsKey: true, keyHint: 'aistudio.google.com' },
+  deepseek:  { label: 'DeepSeek', model: 'deepseek-chat', base: 'https://api.deepseek.com/v1', needsKey: true, keyHint: 'platform.deepseek.com' },
   ollama:    { label: 'Ollama (local)', model: 'llama3.1', base: 'http://localhost:11434/v1', needsKey: false },
   llamacpp:  { label: 'llama.cpp (local)', model: 'local-model', base: 'http://localhost:8080/v1', needsKey: false },
   custom:    { label: 'Custom / self-hosted', model: '', base: 'https://your-server/v1', needsKey: false },
@@ -57,6 +76,7 @@ export function SettingsModal() {
   const { isSettingsModalOpen, setSettingsModalOpen } = useStore();
   const customFieldDefs = useStore((s) => s.customFieldDefs);
   const panelRef = useRef<HTMLDivElement>(null);
+  const [activeTab, setActiveTab] = useState('general');
   useFocusTrap(panelRef, isSettingsModalOpen);
   const [cfName, setCfName] = useState('');
   const [cfType, setCfType] = useState<CustomFieldType>('text');
@@ -140,6 +160,9 @@ export function SettingsModal() {
   if (!isSettingsModalOpen) return null;
 
   const meta = PROVIDERS[aiProvider] || PROVIDERS.anthropic;
+  const aiMode = aiProvider === 'ollama' || aiProvider === 'llamacpp' || aiProvider === 'custom' ? 'Local' : 'Cloud';
+
+
 
   const handleUpdateSetting = async (key: string, value: string) => {
     await setSetting(key, value);
@@ -271,19 +294,53 @@ export function SettingsModal() {
   };
 
   return (
-    <div ref={panelRef} className={`side-panel ${isSettingsModalOpen ? 'open' : ''}`} role="dialog" aria-modal="true" aria-label="Settings">
+    <div ref={panelRef} className={`side-panel settings-panel ${isSettingsModalOpen ? 'open' : ''}`} role="dialog" aria-modal="true" aria-label="Settings">
       <div className="panel-header">
-        <h2>Settings</h2>
+        <div className="panel-title-block">
+          <h2>Settings</h2>
+          <p>Fine-tune Cognate once, then stay in flow.</p>
+        </div>
         <button className="btn-icon" onClick={() => setSettingsModalOpen(false)}>
           <i className="fa-solid fa-xmark"></i>
         </button>
       </div>
 
-      <div className="panel-body">
-
-        <LanguageSelect />
-
-        <div className="settings-section">
+      <div className="settings-layout">
+        <div className="settings-sidebar">
+          <button className={`tag-nav-btn ${activeTab === 'general' ? 'active' : ''}`} onClick={() => setActiveTab('general')}><i className="fa-solid fa-sliders tn-hash"></i> General</button>
+          <button className={`tag-nav-btn ${activeTab === 'ai' ? 'active' : ''}`} onClick={() => setActiveTab('ai')}><i className="fa-solid fa-sparkles tn-hash"></i> AI Assistant</button>
+          <button className={`tag-nav-btn ${activeTab === 'calendar' ? 'active' : ''}`} onClick={() => setActiveTab('calendar')}><i className="fa-regular fa-calendar tn-hash"></i> Calendar</button>
+          <button className={`tag-nav-btn ${activeTab === 'integrations' ? 'active' : ''}`} onClick={() => setActiveTab('integrations')}><i className="fa-solid fa-plug tn-hash"></i> Integrations</button>
+          <button className={`tag-nav-btn ${activeTab === 'sync' ? 'active' : ''}`} onClick={() => setActiveTab('sync')}><i className="fa-solid fa-cloud-arrow-up tn-hash"></i> Sync & Team</button>
+        </div>
+        <div className="settings-content panel-body">
+          {activeTab === 'general' && (
+            <>
+              <LanguageSelect />
+              <div className="settings-hero">
+          <div>
+            <p className="settings-kicker">Workspace preferences</p>
+            <h3>Shape timers, AI, sync, and integrations from one place.</h3>
+            <p className="settings-hero-text">
+              Keep the layout tidy, choose your AI provider, and keep Cognate aligned with the way you work.
+            </p>
+          </div>
+          <div className="settings-hero-meta">
+            <div className="settings-pill">
+              <span>AI</span>
+              <strong>{meta.label}</strong>
+            </div>
+            <div className="settings-pill">
+              <span>Key</span>
+              <strong>{aiKey ? 'Stored' : meta.needsKey ? 'Add one' : 'Optional'}</strong>
+            </div>
+            <div className="settings-pill">
+              <span>Mode</span>
+              <strong>{aiMode}</strong>
+            </div>
+          </div>
+        </div>
+              <SettingsSection id="timer">
           <h3>Timer</h3>
           <div className="form-group row">
             <label>Work Session (m)</label>
@@ -317,9 +374,39 @@ export function SettingsModal() {
               <span className="slider"></span>
             </label>
           </div>
-        </div>
+        </SettingsSection>
+              <SettingsSection id="notifications">
+          <h3>Notifications</h3>
+          <div className="form-group row switch-row">
+            <label>Desktop notifications</label>
+            <label className="switch">
+              <input type="checkbox" checked={notifyEnabled} onChange={e => {
+                setNotifyEnabled(e.target.checked);
+                handleUpdateSetting('notify_enabled', e.target.checked ? '1' : '0');
+              }} />
+              <span className="slider"></span>
+            </label>
+          </div>
+          <small className="form-hint">Focus-session end and tasks due today / overdue.</small>
+        </SettingsSection>
+              <SettingsSection id="housekeeping">
+          <h3>Housekeeping</h3>
+          <button className="btn-soft" onClick={removeDuplicates}>
+            <i className="fa-solid fa-broom"></i> Remove duplicate tasks
+          </button>
+          {dedupeMsg && <small className="form-hint">{dedupeMsg}</small>}
+          <small className="form-hint">
+            Cleans up exact-duplicate tasks (e.g. from an earlier seeding bug), keeping the most-complete copy.
+            Distinct tasks and anything in Trash are left untouched.
+          </small>
+        </SettingsSection>
+              <UpdatesSection />
+            </>
+          )}
 
-        <div className="settings-section">
+          {activeTab === 'ai' && (
+            <>
+              <SettingsSection id="ai" featured>
           <h3>AI Assistant</h3>
 
           <div className="form-group">
@@ -392,122 +479,13 @@ export function SettingsModal() {
           <small className="form-hint">
             When on, ⌘K quick-add uses AI to fill anything the fast parser misses. Off = fully deterministic + offline.
           </small>
-        </div>
-
-        <div className="settings-section">
-          <h3>Notifications</h3>
-          <div className="form-group row switch-row">
-            <label>Desktop notifications</label>
-            <label className="switch">
-              <input type="checkbox" checked={notifyEnabled} onChange={e => {
-                setNotifyEnabled(e.target.checked);
-                handleUpdateSetting('notify_enabled', e.target.checked ? '1' : '0');
-              }} />
-              <span className="slider"></span>
-            </label>
-          </div>
-          <small className="form-hint">Focus-session end and tasks due today / overdue.</small>
-        </div>
-
-        <div className="settings-section">
-          <h3>Custom Fields</h3>
-          {customFieldDefs.length > 0 && (
-            <div className="cf-list">
-              {customFieldDefs.map((f) => (
-                <div className="cf-item" key={f.id}>
-                  <span className="cf-name">{f.name}</span>
-                  <span className="cf-type">{f.type}</span>
-                  <button className="cf-del" onClick={() => removeCustomField(f.id)} title="Remove">
-                    <i className="fa-solid fa-xmark"></i>
-                  </button>
-                </div>
-              ))}
-            </div>
+        </SettingsSection>
+            </>
           )}
-          <div className="cf-add">
-            <input type="text" placeholder="Field name" value={cfName} onChange={(e) => setCfName(e.target.value)} />
-            <select value={cfType} onChange={(e) => setCfType(e.target.value as CustomFieldType)}>
-              <option value="text">Text</option>
-              <option value="number">Number</option>
-              <option value="url">URL</option>
-              <option value="date">Date</option>
-              <option value="select">Select</option>
-            </select>
-            <button className="btn-soft" onClick={addCustomField}><i className="fa-solid fa-plus"></i> Add</button>
-          </div>
-          {cfType === 'select' && (
-            <input className="cf-options" type="text" placeholder="Options, comma-separated" value={cfOptions} onChange={(e) => setCfOptions(e.target.value)} />
-          )}
-          <small className="form-hint">Custom fields appear in the task editor and the Table view.</small>
-        </div>
 
-        <div className="settings-section">
-          <h3>Integrations</h3>
-
-          <div className="form-group">
-            <label>Discord Webhook</label>
-            <input type="url" value={discordHook} onChange={e => {
-              setDiscordHook(e.target.value);
-              handleUpdateSecret('int_discord', e.target.value);
-            }} placeholder="https://discord.com/api/webhooks/..." />
-          </div>
-
-          <div className="form-group">
-            <label>Slack Webhook</label>
-            <input type="url" value={slackHook} onChange={e => {
-              setSlackHook(e.target.value);
-              handleUpdateSecret('int_slack', e.target.value);
-            }} placeholder="https://hooks.slack.com/services/..." />
-          </div>
-
-          <div className="form-group row switch-row">
-            <label>Post to webhooks when a task is completed</label>
-            <label className="switch">
-              <input type="checkbox" checked={webhookOnComplete} onChange={e => {
-                setWebhookOnComplete(e.target.checked);
-                handleUpdateSetting('webhook_on_complete', e.target.checked ? '1' : '0');
-              }} />
-              <span className="slider"></span>
-            </label>
-          </div>
-
-          <div className="form-group row switch-row">
-            <label>Deadline alerts to webhooks (due today / overdue)</label>
-            <label className="switch">
-              <input type="checkbox" checked={webhookDeadlines} onChange={e => {
-                setWebhookDeadlines(e.target.checked);
-                handleUpdateSetting('webhook_deadlines', e.target.checked ? '1' : '0');
-              }} />
-              <span className="slider"></span>
-            </label>
-          </div>
-
-          <div className="form-group row switch-row">
-            <label>Daily digest to webhooks</label>
-            <label className="switch">
-              <input type="checkbox" checked={webhookDigest} onChange={e => {
-                setWebhookDigest(e.target.checked);
-                handleUpdateSetting('webhook_digest', e.target.checked ? '1' : '0');
-              }} />
-              <span className="slider"></span>
-            </label>
-          </div>
-
-          <div className="oauth-buttons">
-            <button className="btn-oauth google" onClick={() => startOAuth('google')}>
-              <i className="fa-brands fa-google"></i> Connect Google Calendar
-            </button>
-            <button className="btn-oauth outlook" onClick={() => startOAuth('microsoft')}>
-              <i className="fa-brands fa-microsoft"></i> Connect Outlook Calendar
-            </button>
-          </div>
-        </div>
-
-        <BackupsSection />
-
-        <UpdatesSection />
-
-        <div className="settings-section">
+          {activeTab === 'calendar' && (
+            <>
+              <SettingsSection id="calendar">
           <h3>Calendar &amp; Planning</h3>
 
           <div className="form-group row">
@@ -575,25 +553,112 @@ export function SettingsModal() {
           )}
 
           <CalendarAccount />
-        </div>
+        </SettingsSection>
+            </>
+          )}
 
-        <div className="settings-section">
-          <h3>Housekeeping</h3>
-          <button className="btn-soft" onClick={removeDuplicates}>
-            <i className="fa-solid fa-broom"></i> Remove duplicate tasks
-          </button>
-          {dedupeMsg && <small className="form-hint">{dedupeMsg}</small>}
-          <small className="form-hint">
-            Cleans up exact-duplicate tasks (e.g. from an earlier seeding bug), keeping the most-complete copy.
-            Distinct tasks and anything in Trash are left untouched.
-          </small>
-        </div>
+          {activeTab === 'integrations' && (
+            <>
+              <SettingsSection id="customFields">
+          <h3>Custom Fields</h3>
+          {customFieldDefs.length > 0 && (
+            <div className="cf-list">
+              {customFieldDefs.map((f) => (
+                <div className="cf-item" key={f.id}>
+                  <span className="cf-name">{f.name}</span>
+                  <span className="cf-type">{f.type}</span>
+                  <button className="cf-del" onClick={() => removeCustomField(f.id)} title="Remove">
+                    <i className="fa-solid fa-xmark"></i>
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="cf-add">
+            <input type="text" placeholder="Field name" value={cfName} onChange={(e) => setCfName(e.target.value)} />
+            <select value={cfType} onChange={(e) => setCfType(e.target.value as CustomFieldType)}>
+              <option value="text">Text</option>
+              <option value="number">Number</option>
+              <option value="url">URL</option>
+              <option value="date">Date</option>
+              <option value="select">Select</option>
+            </select>
+            <button className="btn-soft" onClick={addCustomField}><i className="fa-solid fa-plus"></i> Add</button>
+          </div>
+          {cfType === 'select' && (
+            <input className="cf-options" type="text" placeholder="Options, comma-separated" value={cfOptions} onChange={(e) => setCfOptions(e.target.value)} />
+          )}
+          <small className="form-hint">Custom fields appear in the task editor and the Table view.</small>
+        </SettingsSection>
+              <SettingsSection id="integrations">
+          <h3>Integrations</h3>
 
-        <LiveSyncSettings />
+          <div className="form-group">
+            <label>Discord Webhook</label>
+            <input type="url" value={discordHook} onChange={e => {
+              setDiscordHook(e.target.value);
+              handleUpdateSecret('int_discord', e.target.value);
+            }} placeholder="https://discord.com/api/webhooks/..." />
+          </div>
 
-        <SharedProjects />
+          <div className="form-group">
+            <label>Slack Webhook</label>
+            <input type="url" value={slackHook} onChange={e => {
+              setSlackHook(e.target.value);
+              handleUpdateSecret('int_slack', e.target.value);
+            }} placeholder="https://hooks.slack.com/services/..." />
+          </div>
 
-        <div className="settings-section">
+          <div className="form-group row switch-row">
+            <label>Post to webhooks when a task is completed</label>
+            <label className="switch">
+              <input type="checkbox" checked={webhookOnComplete} onChange={e => {
+                setWebhookOnComplete(e.target.checked);
+                handleUpdateSetting('webhook_on_complete', e.target.checked ? '1' : '0');
+              }} />
+              <span className="slider"></span>
+            </label>
+          </div>
+
+          <div className="form-group row switch-row">
+            <label>Deadline alerts to webhooks (due today / overdue)</label>
+            <label className="switch">
+              <input type="checkbox" checked={webhookDeadlines} onChange={e => {
+                setWebhookDeadlines(e.target.checked);
+                handleUpdateSetting('webhook_deadlines', e.target.checked ? '1' : '0');
+              }} />
+              <span className="slider"></span>
+            </label>
+          </div>
+
+          <div className="form-group row switch-row">
+            <label>Daily digest to webhooks</label>
+            <label className="switch">
+              <input type="checkbox" checked={webhookDigest} onChange={e => {
+                setWebhookDigest(e.target.checked);
+                handleUpdateSetting('webhook_digest', e.target.checked ? '1' : '0');
+              }} />
+              <span className="slider"></span>
+            </label>
+          </div>
+
+          <div className="oauth-buttons">
+            <button className="btn-oauth google" onClick={() => startOAuth('google')}>
+              <i className="fa-brands fa-google"></i> Connect Google Calendar
+            </button>
+            <button className="btn-oauth outlook" onClick={() => startOAuth('microsoft')}>
+              <i className="fa-brands fa-microsoft"></i> Connect Outlook Calendar
+            </button>
+          </div>
+        </SettingsSection>
+            </>
+          )}
+
+          {activeTab === 'sync' && (
+            <>
+              <LiveSyncSettings />
+              <SharedProjects />
+              <SettingsSection id="deviceSync">
           <h3>Device sync <span className="opt-tag">beta</span></h3>
           <div className="sync-grid">
             <button className="btn-soft" onClick={exportSyncBundle} disabled={syncBusy}>
@@ -608,9 +673,8 @@ export function SettingsModal() {
             Move your tasks between devices with a portable, conflict-free bundle. Edits merge automatically —
             no server, no account. (End-to-end-encrypted live sync is coming.)
           </small>
-        </div>
-
-        <div className="settings-section">
+        </SettingsSection>
+              <SettingsSection id="sync">
           <h3>Sync &amp; Import</h3>
           <div className="sync-grid">
             <button className="btn-soft" onClick={exportCalendar}>
@@ -627,8 +691,11 @@ export function SettingsModal() {
             Export deadlines to any calendar (Google / Outlook / Apple) via .ics.
             Import tasks from Todoist, Trello, CSV, or JSON exports.
           </small>
+        </SettingsSection>
+              <BackupsSection />
+            </>
+          )}
         </div>
-
       </div>
     </div>
   );

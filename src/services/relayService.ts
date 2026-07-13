@@ -89,6 +89,10 @@ export async function syncNow(): Promise<SyncResult> {
   const cfg = await getConfig();
   if (!cfg) throw new Error('Sync is not set up. Add a relay URL and passphrase in Settings.');
   const key = await deriveKey(cfg.passphrase);
+  // Room is derived from the passphrase alone — every device that shares the
+  // same passphrase lands in the same room. This is intentional: it's how
+  // personal multi-device sync works. Anyone with the passphrase can read
+  // and merge ops (but the relay itself never can — it only sees ciphertext).
   const room = await deriveRoomId(cfg.passphrase);
 
   const pushed = await pushLocal(cfg, key, room);
