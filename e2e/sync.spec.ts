@@ -23,6 +23,7 @@ test('a task syncs from one device to another through a bundle', async ({ browse
   await expect(pageA.locator('.task-card', { hasText: marker })).toBeVisible();
 
   await pageA.locator('.dock-link', { hasText: 'Settings' }).click();
+  await pageA.locator('.tag-nav-btn', { hasText: 'Sync' }).click();
   const downloadPromise = pageA.waitForEvent('download');
   await pageA.getByRole('button', { name: 'Export sync bundle' }).click();
   const download = await downloadPromise;
@@ -37,6 +38,7 @@ test('a task syncs from one device to another through a bundle', async ({ browse
   await expect(pageB.locator('.task-card', { hasText: marker })).toHaveCount(0); // not here yet
 
   await pageB.locator('.dock-link', { hasText: 'Settings' }).click();
+  await pageB.locator('.tag-nav-btn', { hasText: 'Sync' }).click();
   pageB.once('filechooser', (fc) =>
     fc.setFiles({ name: 'bundle.json', mimeType: 'application/json', buffer: Buffer.from(bundle) })
   );
