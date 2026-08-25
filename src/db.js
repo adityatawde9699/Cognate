@@ -18,7 +18,7 @@ export function safeParseJSON(str, fallback) {
     try {
         return JSON.parse(str);
     } catch (e) {
-        console.warn('[db.js] JSON parse error:', e.message, '| Raw string:', str);
+        console.warn('[db.js] JSON parse error:', e.message);
         return fallback;
     }
 }

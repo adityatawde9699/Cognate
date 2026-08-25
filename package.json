@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "verify:build": "node scripts/verify-build.mjs",
     "preview": "vite preview",
     "test": "vitest run",
     "test:e2e": "playwright test",

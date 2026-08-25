@@ -39,6 +39,11 @@ jobs:
       - name: Install JS dependencies
         run: npm ci
 
+      - name: Build frontend and verify artifact isolation
+        run: |
+          npm run build
+          npm run verify:build
+
       - name: Build and Package Tauri App
         uses: tauri-apps/tauri-action@v0
         env:

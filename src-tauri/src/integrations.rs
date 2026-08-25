@@ -129,8 +129,8 @@ pub async fn start_oauth(provider: String) -> Result<String, String> {
      // A mock implementation of the port binding for the plugin.
      // The frontend would listen to the tauri://oauth plugin events.
      tauri_plugin_oauth::start(move |url| {
-        // The URL is passed back to the frontend via an event
-        println!("Received auth code via URL: {}", url);
+        // Do not log the callback URL: it can contain a one-time auth code.
+        println!("Received OAuth callback ({} bytes)", url.len());
     })
     .map_err(|e| e.to_string())?;
 

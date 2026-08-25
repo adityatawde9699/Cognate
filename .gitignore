@@ -10,6 +10,7 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+*.tsbuildinfo
 *.local
 
 # Editor directories and files
@@ -27,6 +28,13 @@ dist-ssr
 .env
 .env.*
 !.env.example
+
+# Local runtime data — never include in source or release inputs
+*.db
+*.sqlite
+*.sqlite3
+backups/
+exports/
 
 # Rust / Tauri
 src-tauri/target/
