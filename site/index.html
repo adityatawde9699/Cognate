@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cognate — your day, already planned</title>
-<meta name="description" content="Cognate turns a pile of tasks and a calendar into a time-blocked day — solved offline in deterministic Rust, synced end-to-end encrypted, yours forever.">
+<meta name="description" content="Cognate turns a pile of tasks and calendar events into a time-blocked day — solved offline in deterministic Rust, synced end-to-end encrypted, yours forever.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <meta property="og:title" content="Cognate — your day, already planned">
 <meta property="og:description" content="The local-first planner that plans your day. Deterministic solver, E2E-encrypted sync, private AI.">
@@ -264,6 +264,14 @@ h2{font-size:clamp(1.7rem,3.4vw,2.4rem);max-width:24ch;margin-bottom:16px}
 .spec dd{color:var(--zinc);font-size:.94rem}
 .spec dd b{color:var(--bone);font-weight:560}
 
+.calendar-note{
+  max-width:640px;margin-top:18px;padding:14px 16px;
+  border-left:2px solid var(--emerald);background:var(--emerald-muted);
+  color:var(--zinc);font-size:.88rem;
+}
+.calendar-note b{color:var(--bone);font-weight:560}
+.calendar-note .mono{color:var(--emerald);font-size:.78rem}
+
 /* ---------- lunch (the protected block) ---------- */
 #lunch .content{
   padding-top:26px;padding-bottom:64px;
@@ -459,10 +467,11 @@ footer .fin b{color:var(--emerald);font-weight:500}
       <dl class="spec">
         <div><dt>planner.rs</dt><dd>The scheduler is <b>native Rust</b>, mirrored in TypeScript for the web build. It places every task by priority, deadline, and estimated effort.</dd></div>
         <div><dt>energy_curve</dt><dd>Cognate <b>learns when you actually focus</b> from your completion and pomodoro history, and gives your hardest work to your best hours.</dd></div>
-        <div><dt>calendar.ics</dt><dd>Meetings from Google, Outlook, or any .ics feed are <b>hard walls</b>. The plan flows around them, never over them.</dd></div>
+        <div><dt>calendar.ics</dt><dd>Import an <b>.ics feed</b> from Google, Outlook, Apple Calendar, or another provider. Meetings become hard walls and the plan flows around them.</dd></div>
         <div><dt>auto_reflow</dt><dd>A meeting lands, a task slips, you drag a block — the day <b>re-solves instantly</b> and tells you what moved and why.</dd></div>
         <div><dt>pinned</dt><dd>Some things are sacred. <b>Pin a block</b> and the solver plans everything else around it.</dd></div>
       </dl>
+      <p class="calendar-note"><span class="mono">calendar status</span> — <b>.ics import works everywhere.</b> Direct Google and Outlook free/busy sync is currently desktop-only and requires your own OAuth client ID; the browser and PWA use the .ics path.</p>
     </div>
   </section>
 
