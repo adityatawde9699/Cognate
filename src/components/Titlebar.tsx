@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type MouseEvent } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useStore } from '../store';
 import { useTheme } from '../hooks/useTheme';
@@ -41,6 +41,20 @@ export function Titlebar() {
 
   const clearAiQuery = () => { setAiQuery(null); setValue(''); };
 
+  // Frameless Tauri windows do not get native drag behavior automatically on
+  // every platform/webview. Start the drag explicitly from non-interactive
+  // title-bar areas so the window behaves like a normal desktop window.
+  const dragWindow = async (e: MouseEvent<HTMLElement>) => {
+    if (!(window as any).__TAURI_INTERNALS__) return;
+    const target = e.target as HTMLElement;
+    if (target.closest('button, input, select, textarea, a, [role="button"]')) return;
+    try { await getCurrentWindow().startDragging(); } catch (error) { console.error(error); }
+  };
+
+  const toggleWindowSize = async () => {
+    await winAction((w) => w.toggleMaximize());
+  };
+
   const winAction = async (fn: (w: ReturnType<typeof getCurrentWindow>) => Promise<void>) => {
     try {
       if ((window as any).__TAURI_INTERNALS__) {
@@ -50,7 +64,15 @@ export function Titlebar() {
   };
 
   return (
-    <header className="cmdbar" data-tauri-drag-region>
+    <header
+      className="cmdbar"
+      data-tauri-drag-region
+      onMouseDown={(e) => { if (e.button === 0) void dragWindow(e); }}
+      onDoubleClick={(e) => {
+        const target = e.target as HTMLElement;
+        if (!target.closest('button, input, select, textarea, a, [role="button"]')) void toggleWindowSize();
+      }}
+    >
       <div className="cmd-brand" data-tauri-drag-region>
         <Logo className="cmd-logo" />
       </div>
@@ -103,10 +125,10 @@ export function Titlebar() {
         <button className="cmd-btn wc" title="Minimize" aria-label="Minimize" onClick={() => winAction((w) => w.minimize())}>
           <i className="fa-solid fa-minus"></i>
         </button>
-        <button className="cmd-btn wc" title="Maximize" aria-label="Maximize" onClick={() => winAction((w) => w.toggleMaximize())}>
+        <button className="cmd-btn wc" title="Maximize" aria-label="Maximize" onClick={toggleWindowSize}>
           <i className="fa-regular fa-square"></i>
         </button>
-        <button className="cmd-btn wc danger" title="Close" aria-label="Close" onClick={() => winAction((w) => w.close())}>
+        <button className="cmd-btn wc danger" title="Close to tray" aria-label="Close to tray" onClick={() => winAction((w) => w.close())}>
           <i className="fa-solid fa-xmark"></i>
         </button>
       </div>

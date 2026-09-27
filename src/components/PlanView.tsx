@@ -192,7 +192,15 @@ export function PlanView() {
       toast(n ? `✨ Estimated ${n} task${n === 1 ? '' : 's'} — re-planning…` : '✨ Everything was already sized');
       await handleAutoPlan();
     } catch (e: any) {
-      toast(e?.message || 'AI estimate unavailable');
+      // Tauri may reject with a string, a plain object, or an Error. Preserve
+      // the actionable provider message instead of reducing it to a generic
+      // failure that gives the user no way to fix the setup.
+      const message = typeof e === 'string'
+        ? e
+        : e?.message || e?.error || e?.cause?.message || String(e || '');
+      toast(message && message !== '[object Object]'
+        ? `AI estimate unavailable: ${message}`
+        : 'AI estimate unavailable. Open Settings → AI and configure a provider, API key, model, or local server.');
     } finally {
       setEnriching(false);
     }

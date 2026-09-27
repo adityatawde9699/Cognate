@@ -387,7 +387,7 @@ export function SettingsModal() {
               <span className="slider"></span>
             </label>
           </div>
-          <small className="form-hint">Focus-session end and tasks due today / overdue.</small>
+          <small className="form-hint">Focus-session end, planned task start, and due-today / overdue reminders. On desktop, closing the window keeps Cognate running in the tray; use Quit in the tray menu to stop reminders.</small>
         </SettingsSection>
               <SettingsSection id="housekeeping">
           <h3>Housekeeping</h3>
@@ -426,8 +426,14 @@ export function SettingsModal() {
           <div className="form-group">
             <label>Provider</label>
             <select value={aiProvider} onChange={e => {
-              setAiProvider(e.target.value);
-              handleUpdateSetting('ai_provider', e.target.value);
+              const provider = e.target.value;
+              const next = PROVIDERS[provider] || PROVIDERS.anthropic;
+              setAiProvider(provider);
+              setAiModel(next.model);
+              setAiBaseUrl(next.base);
+              handleUpdateSetting('ai_provider', provider);
+              handleUpdateSetting('ai_model', next.model);
+              handleUpdateSetting('ai_base_url', next.base);
             }}>
               {Object.entries(PROVIDERS).map(([id, p]) => (
                 <option key={id} value={id}>{p.label}</option>

@@ -218,6 +218,10 @@ npm run build         # PWA → dist/
 | **Use local AI** | Settings → AI → Go fully private (Ollama) → all AI runs on your machine |
 | **Keyboard shortcuts** | `⌘K` palette · `N` new · `/` search · `1/2/3` filters · `T` theme · `Esc` close · `Ctrl/⌘+Z` undo |
 
+### Desktop reminders while the window is closed
+
+Closing Cognate's desktop window now hides it to the system tray. While the app process is running, a native check reads the local SQLite database about once a minute. It alerts when a saved planned work block starts, once per scheduled start, and reminds you about due-today or overdue tasks once per task per local day. Block alerts are skipped if their start is already more than three minutes past. Enable **Desktop notifications** in Settings and allow notifications in your operating system. Use **Show Cognate** in the tray to reopen the window, or **Quit** to stop the app and its reminders. Reminders cannot fire while the laptop is asleep or the app has been quit. Day re-planning is not yet a native background service.
+
 ---
 
 ## Roadmap

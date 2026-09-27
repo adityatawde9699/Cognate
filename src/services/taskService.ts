@@ -27,7 +27,7 @@ import {
     getLocalDateString,
     initDb,
 } from '../db';
-import { Recurrence, Task, useStore } from '../store';
+import { Project, Recurrence, Task, useStore } from '../store';
 import { redo as historyRedo, undo as historyUndo, record } from './history';
 import { ensureIdentity } from './identity';
 import { backfillFromTasks, logTaskDelete, logTaskRestore, logTaskSoftDelete, logTaskUpsert } from './oplogStore';
@@ -314,13 +314,31 @@ export async function loadProjects(): Promise<void> {
   }
 }
 
-export async function addProject(name: string, color = ''): Promise<void> {
+export async function addProject(name: string, color = ''): Promise<Project | null> {
   try {
-    await dbCreateProject(name, color);
+    const project = await dbCreateProject(name.trim(), color);
     await loadProjects();
+    return project;
   } catch (e) {
     console.error('[taskService] addProject failed:', e);
+    return null;
   }
+}
+
+/** Find a project by name or create it, so generated tasks can be grouped atomically. */
+export async function ensureProject(name: string, color = ''): Promise<string | null> {
+  const normalized = name.trim().toLocaleLowerCase();
+  if (!normalized) return null;
+  const projects = await dbGetProjects();
+  const existing = projects.find(
+    (project: any) => String(project.name).trim().toLocaleLowerCase() === normalized
+  );
+  if (existing) {
+    useStore.getState().setProjects(projects as any);
+    return existing.id;
+  }
+  const created = await addProject(name, color);
+  return created?.id ?? null;
 }
 
 export async function renameProject(id: string, name: string, color?: string): Promise<void> {

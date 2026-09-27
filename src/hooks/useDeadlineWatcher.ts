@@ -30,6 +30,10 @@ function alreadyNotified(id: string, day: string): boolean {
 
 export function useDeadlineWatcher(): void {
   useEffect(() => {
+    // Desktop reminders run in Rust so they continue after the window is hidden.
+    // Keep this hook for the browser, where there is no native process.
+    if (typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__) return;
+
     const scan = () => {
       const day = todayStr();
       const tasks = useStore.getState().currentTasks;

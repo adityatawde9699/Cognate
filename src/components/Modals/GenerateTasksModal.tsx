@@ -1,14 +1,30 @@
 import { useState } from 'react';
 import { useStore } from '../../store';
 import { generateTasks, NewTaskDraft } from '../../services/aiService';
-import { addTask } from '../../services/taskService';
+import { addTask, ensureProject } from '../../services/taskService';
 import { toast } from '../../utils/toast';
+
+export function detectProjectName(text: string): string {
+  const source = text.trim();
+  const quoted = source.match(/project\s+(?:named|called)\s+["“']([^"”']+)["”']/i);
+  if (quoted?.[1]) return quoted[1].trim().slice(0, 80);
+
+  const labeled = source.match(/(?:project\s+name|project)\s*[:\-]\s*([^\n]+)/i);
+  if (labeled?.[1]) return labeled[1].replace(/[.。]+$/, '').trim().slice(0, 80);
+
+  const named = source.match(/project\s+(?:named|called)\s+([^\n.!?]+)/i);
+  if (named?.[1]) return named[1].trim().slice(0, 80);
+
+  const firstLine = source.split(/\r?\n/)[0].trim();
+  return firstLine.length <= 80 ? firstLine.replace(/[.:]+$/, '') : '';
+}
 
 export function GenerateTasksModal() {
   const isOpen = useStore((s) => s.isGenerateModalOpen);
   const setOpen = useStore((s) => s.setGenerateModalOpen);
 
   const [desc, setDesc] = useState('');
+  const [projectName, setProjectName] = useState('');
   const [drafts, setDrafts] = useState<NewTaskDraft[]>([]);
   const [picked, setPicked] = useState<boolean[]>([]);
   const [busy, setBusy] = useState(false);
@@ -18,13 +34,14 @@ export function GenerateTasksModal() {
 
   const close = () => {
     setOpen(false);
-    setDesc(''); setDrafts([]); setPicked([]);
+    setDesc(''); setProjectName(''); setDrafts([]); setPicked([]);
   };
 
   const handleGenerate = async () => {
     if (!desc.trim()) { toast('⚠️ Describe a project first'); return; }
     setBusy(true);
     try {
+      if (!projectName.trim()) setProjectName(detectProjectName(desc.trim()));
       const result = await generateTasks(desc.trim());
       if (result.length === 0) { toast('No tasks generated — try more detail'); return; }
       setDrafts(result);
@@ -39,8 +56,11 @@ export function GenerateTasksModal() {
   const handleCreate = async () => {
     const chosen = drafts.filter((_, i) => picked[i]);
     if (chosen.length === 0) { toast('Select at least one task'); return; }
+    if (!projectName.trim()) { toast('⚠️ Add a project name before creating tasks'); return; }
     setCreating(true);
     try {
+      const projectId = await ensureProject(projectName);
+      if (!projectId) throw new Error('Could not create or find the project.');
       for (const d of chosen) {
         await addTask({
           title: d.title,
@@ -49,6 +69,7 @@ export function GenerateTasksModal() {
           tags: d.tags,
           importance: d.importance,
           effort: d.effort,
+          project_id: projectId,
         });
       }
       toast(`✅ Added ${chosen.length} task${chosen.length === 1 ? '' : 's'}`);
@@ -81,6 +102,13 @@ export function GenerateTasksModal() {
 
         <div className="editor-body">
           <label className="gen-label">Describe a project or goal</label>
+          <input
+            className="editor-title"
+            value={projectName}
+            onChange={(e) => setProjectName(e.target.value)}
+            placeholder="Project name, e.g. Cognate Production Roadmap"
+            aria-label="Project name"
+          />
           <textarea
             className="editor-desc"
             rows={4}

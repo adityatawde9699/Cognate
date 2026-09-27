@@ -11,6 +11,16 @@ import type { QuickAddAIFields } from './nlQuickAdd';
 
 /** Providers that run locally and don't require an API key. */
 const LOCAL_PROVIDERS = ['ollama', 'llamacpp', 'custom'];
+const DEFAULT_MODELS: Record<string, string> = {
+  openai: 'gpt-4o',
+  openrouter: 'anthropic/claude-3.5-sonnet',
+  groq: 'llama-3.3-70b-versatile',
+  xai: 'grok-2-latest',
+  gemini: 'gemini-2.0-flash',
+  deepseek: 'deepseek-chat',
+  ollama: 'llama3.1',
+  llamacpp: 'local-model',
+};
 
 /** Low-level call into the Rust backend. */
 async function generate(system: string, prompt: string, maxTokens?: number): Promise<string> {
@@ -23,7 +33,11 @@ async function generate(system: string, prompt: string, maxTokens?: number): Pro
   if (!apiKey && !LOCAL_PROVIDERS.includes(provider)) {
     throw new Error('No API key set. Add one in Settings → AI.');
   }
-  const model = await getSetting('ai_model', '');
+  // Older profiles may have an empty model even after selecting a provider.
+  // Supply the same safe defaults shown in Settings so estimation works
+  // without requiring a manual re-save of the provider field.
+  const configuredModel = await getSetting('ai_model', '');
+  const model = configuredModel || DEFAULT_MODELS[provider] || '';
   const baseUrl = await getSetting('ai_base_url', '');
 
   const { invoke } = await import('@tauri-apps/api/core');
@@ -221,13 +235,14 @@ export interface NewTaskDraft {
 export async function generateTasks(projectDescription: string): Promise<NewTaskDraft[]> {
   const system =
     'You are a project planner embedded in a task manager. Given a project description, ' +
-    'produce a practical breakdown of up to 10 tasks. Return a JSON array where each item is ' +
+    'produce a practical breakdown of up to 30 tasks. Preserve every explicitly numbered task ' +
+    'or requirement in the user request; do not summarize or drop requested items. Return a JSON array where each item is ' +
     '{ "title": string, "description": string (1 sentence), "tags": string[] (lowercase, 0-3), ' +
     '"deadline": "" or "YYYY-MM-DD", "importance": 1-5, "effort": 1-5 }.';
   const prompt = `Today is ${today()}. Project:\n\n${projectDescription}`;
-  const raw = await generateJSON<any[]>(system, prompt, 2048);
+  const raw = await generateJSON<any[]>(system, prompt, 6144);
   if (!Array.isArray(raw)) return [];
-  return raw.slice(0, 10).map((t) => ({
+  return raw.slice(0, 30).map((t) => ({
     title: String(t.title || '').trim(),
     description: String(t.description || '').trim(),
     tags: Array.isArray(t.tags) ? t.tags.map((x: any) => String(x).trim().toLowerCase()).filter(Boolean) : [],

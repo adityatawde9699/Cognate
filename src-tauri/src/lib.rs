@@ -8,6 +8,8 @@ use chrono::{NaiveDate, Local};
 
 mod integrations;
 mod ai;
+#[cfg(desktop)]
+mod background_reminders;
 mod secrets;
 mod backup;
 mod planner;
@@ -149,7 +151,23 @@ pub fn run() {
                 })
                 .build(app)?;
 
+            #[cfg(desktop)]
+            background_reminders::start(app.handle().clone());
+
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if window.label() == "main" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    // The process and its native reminders stay alive in the tray.
+                    // The tray's Quit command still exits the application.
+                    if let Err(error) = window.hide() {
+                        log::error!("failed to hide Cognate window: {error}");
+                    } else {
+                        api.prevent_close();
+                    }
+                }
+            }
         })
         // ── Commands ─────────────────────────────────
         .invoke_handler(tauri::generate_handler![

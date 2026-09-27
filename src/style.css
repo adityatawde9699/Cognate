@@ -2231,7 +2231,17 @@ body {
     border-bottom: 1px solid var(--border);
     position: relative;
     z-index: 40;
+    cursor: grab;
+    user-select: none;
+    -webkit-app-region: drag;
 }
+.cmdbar:active { cursor: grabbing; }
+.cmdbar button, .cmdbar input, .cmdbar a, .cmd-center, .cmd-search {
+    user-select: auto;
+    -webkit-app-region: no-drag;
+}
+.cmd-brand, .cmd-brand * { -webkit-app-region: drag; }
+.cmd-right, .cmd-right * { -webkit-app-region: no-drag; }
 .cmd-brand { display: flex; align-items: center; min-width: var(--sidebar-w); }
 .cmd-logo { height: 26px; width: auto; }
 .cmd-center { flex: 1 1 auto; display: flex; justify-content: center; }
