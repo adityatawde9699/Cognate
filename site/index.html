@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cognate — your day, already planned</title>
-<meta name="description" content="Cognate turns a pile of tasks and calendar events into a time-blocked day — solved offline in deterministic Rust, synced end-to-end encrypted, yours forever.">
+<meta name="description" content="Cognate is a local-first planner that turns tasks and calendar busy time into a time-blocked day. Plan offline, use optional AI, and try encrypted sync.">
 <meta name="theme-color" content="#09090b">
 <link rel="canonical" href="https://adityatawde9699.github.io/Cognate/">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <meta property="og:type" content="website">
 <meta property="og:title" content="Cognate — your day, already planned">
-<meta property="og:description" content="The local-first planner that plans your day. Deterministic solver, E2E-encrypted sync, private AI.">
+<meta property="og:description" content="A local-first planner for tasks and calendar busy time. Deterministic planning, optional AI, and encrypted sync in development.">
 <style>
 /* ---------- fonts (the app's own faces, served locally) ---------- */
 @font-face{
@@ -108,6 +108,14 @@ nav a.sect b{color:var(--emerald);font-weight:500;margin-right:6px}
 }
 .btn-ghost:hover{border-color:var(--emerald);color:var(--bone)}
 nav .btn{padding:9px 18px;font-size:.88rem}
+.mobile-nav{display:none;position:relative;margin-left:auto;font-family:var(--mono);font-size:.76rem}
+.mobile-nav summary{list-style:none;border:1px solid var(--line);border-radius:8px;padding:8px 11px;color:var(--zinc);cursor:pointer}
+.mobile-nav summary::-webkit-details-marker{display:none}
+.mobile-nav summary::after{content:"⌄";margin-left:8px;color:var(--emerald)}
+.mobile-nav[open] summary{border-color:var(--emerald);color:var(--bone)}
+.mobile-menu{position:absolute;right:0;top:calc(100% + 8px);z-index:20;min-width:190px;padding:7px;background:var(--graphite);border:1px solid var(--line);border-radius:10px;box-shadow:0 18px 45px rgba(0,0,0,.45)}
+.mobile-menu a{display:block;padding:9px 11px;border-radius:6px;color:var(--zinc);text-decoration:none}
+.mobile-menu a:hover{background:var(--raised);color:var(--bone)}
 
 .release-note{
   max-width:var(--maxw);margin:0 auto;padding:0 24px 18px;
@@ -195,6 +203,7 @@ h2{font-size:clamp(1.7rem,3.4vw,2.4rem);max-width:24ch;margin-bottom:16px}
 #hero .content{padding-top:40px}
 .cta-row{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
 .cta-note{font-family:var(--mono);font-size:.75rem;color:var(--zinc-d);margin-bottom:56px}
+.download-note{font-family:var(--mono);font-size:.68rem;color:var(--zinc-d);margin-top:-48px;margin-bottom:50px}
 .trust-strip{
   display:flex;gap:10px 24px;flex-wrap:wrap;margin:-30px 0 42px;
   color:var(--zinc-d);font-family:var(--mono);font-size:.7rem;
@@ -309,6 +318,21 @@ h2{font-size:clamp(1.7rem,3.4vw,2.4rem);max-width:24ch;margin-bottom:16px}
   background:var(--emerald-muted);
 }
 
+/* ---------- desktop reminders ---------- */
+.reminder-panel{
+  display:grid;grid-template-columns:minmax(0,1.2fr) minmax(220px,.8fr);gap:22px;
+  max-width:760px;padding:22px;border:1px solid var(--line);border-radius:14px;
+  background:linear-gradient(135deg,rgba(52,211,153,.08),transparent 48%),var(--graphite);
+}
+.reminder-panel h3{font-family:var(--display);font-size:1.08rem;margin-bottom:7px}
+.reminder-panel p{color:var(--zinc);font-size:.88rem;max-width:46ch}
+.reminder-list{list-style:none;display:grid;gap:8px}
+.reminder-list li{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:rgba(9,9,11,.45);font-size:.8rem}
+.reminder-icon{width:18px;text-align:center;color:var(--emerald);font-family:var(--mono);font-weight:600}
+.reminder-list span{color:var(--zinc)}
+.reminder-list b{margin-left:auto;color:var(--bone);font-family:var(--mono);font-size:.65rem;font-weight:500;white-space:nowrap}
+.feature-caveat{font-family:var(--mono);font-size:.68rem!important;color:var(--zinc-d)!important;margin-top:12px}
+
 /* ---------- cipher panel (sync block) ---------- */
 .cipher{
   display:grid;grid-template-columns:1fr 1fr;gap:1px;
@@ -394,6 +418,7 @@ footer .fin b{color:var(--emerald);font-weight:500}
   .solve{grid-template-columns:1fr}
   .solve-arrow{transform:rotate(90deg);padding:0}
   .cipher{grid-template-columns:1fr}
+  .reminder-panel{grid-template-columns:1fr}
 }
 @media (max-width:720px){
   .block{display:block}
@@ -402,12 +427,33 @@ footer .fin b{color:var(--emerald);font-weight:500}
   .content{padding:8px 20px 72px}
   .eyebrow .t-inline{display:inline}
   nav a.sect{display:none}
+  .mobile-nav{display:block}
+  header nav{margin-left:auto}
   header{gap:16px}
   header nav{gap:8px}
   nav .btn{padding:8px 12px;font-size:.78rem}
   .release-note{padding:0 20px 16px;align-items:flex-start;line-height:1.45}
   .release-note a{white-space:nowrap}
   .trust-strip{margin-top:-26px;margin-bottom:34px;gap:8px 16px}
+  .download-note{margin-top:-28px;margin-bottom:40px}
+  .content{padding-left:20px;padding-right:20px}
+  .protected{padding:28px 22px}
+  .spec>div{grid-template-columns:1fr;gap:4px}
+  footer .fin{margin-left:0;width:100%}
+}
+@media (max-width:440px){
+  header{padding:18px 16px}
+  header nav .sect{display:none}
+  header nav .btn{font-size:.72rem;padding:8px 10px}
+  .release-note{font-size:.62rem;gap:7px}
+  .release-note a{font-size:0}
+  .release-note a::after{content:"Changelog ↗";font-size:.62rem}
+  .cta-row .btn{padding:10px 13px;font-size:.84rem}
+  .plan .row{grid-template-columns:44px minmax(0,1fr);gap:7px}
+  .plan .card{padding:7px 9px;font-size:.74rem;flex-wrap:wrap}
+  .plan .card .meta{margin-left:0;font-size:.62rem}
+  .reminder-panel{padding:16px}
+  .reminder-list li{padding:9px;font-size:.72rem}
 }
 </style>
 </head>
@@ -417,12 +463,24 @@ footer .fin b{color:var(--emerald);font-weight:500}
   <a class="wordmark" href="#hero"><img src="favicon.svg" alt="" width="26" height="26">Cognate</a>
   <nav aria-label="Sections">
     <a class="sect" href="#engine"><b>09:00</b>Engine</a>
+    <a class="sect" href="#desktop"><b>13:15</b>Desktop</a>
     <a class="sect" href="#sync"><b>14:00</b>Sync</a>
     <a class="sect" href="#team"><b>16:00</b>Team</a>
     <a class="sect" href="#private"><b>19:00</b>Private&nbsp;AI</a>
     <a class="sect" href="https://github.com/adityatawde9699/Cognate">GitHub</a>
     <a class="btn btn-primary dl-smart" id="dl-nav" href="#dl">Download</a>
   </nav>
+  <details class="mobile-nav">
+    <summary aria-label="Open site navigation">Menu</summary>
+    <div class="mobile-menu">
+      <a href="#engine">Planner</a>
+      <a href="#desktop">Desktop reminders</a>
+      <a href="#sync">Sync status</a>
+      <a href="#team">Collaboration</a>
+      <a href="#private">AI</a>
+      <a href="https://github.com/adityatawde9699/Cognate">GitHub</a>
+    </div>
+  </details>
 </header>
 
 <div class="release-note" role="status">
@@ -440,7 +498,7 @@ footer .fin b{color:var(--emerald);font-weight:500}
     <div class="content">
       <p class="eyebrow"><span class="t-inline">06:00</span><span class="dot hi" aria-hidden="true"></span>morning brief <span class="dur">· your day, solved before you sit down</span></p>
       <h1>Your day. Already planned.</h1>
-      <p class="lede">Cognate takes a pile of tasks and a calendar and solves them into a time-blocked day — <b>offline, in deterministic Rust, on your machine</b>. The AI advises. The solver decides. Your data stays local unless you choose sync or a cloud provider.</p>
+      <p class="lede">Cognate takes a pile of tasks and calendar busy time, then builds a time-blocked day. Planning runs locally and deterministically — in <b>Rust on desktop</b> and a TypeScript mirror on the web. AI can help with estimates, but the solver places the work. Your data stays local unless you choose sync or a cloud AI provider.</p>
       <div class="cta-row" id="dl">
         <a class="btn btn-ghost dl-os" data-os="windows" id="dl-windows" href="https://github.com/adityatawde9699/Cognate/releases/latest">
           <svg class="dl-icon" width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M1 2.6 6.6 1.8v5.5H1V2.6ZM7.3 1.7 15 .5v6.6H7.3V1.7ZM1 8h5.6v5.5L1 12.7V8Zm6.3 0H15v6.5l-7.7-1.1V8Z" fill="currentColor"/></svg>
@@ -458,6 +516,7 @@ footer .fin b{color:var(--emerald);font-weight:500}
         <a class="btn btn-ghost" href="https://github.com/adityatawde9699/Cognate">Read the source</a>
       </div>
       <p class="cta-note">free · open source · no account · no server required — your platform is highlighted above</p>
+      <p class="download-note">Desktop installers are published on GitHub Releases. Mobile builds are not currently offered.</p>
 
       <div class="trust-strip" aria-label="Cognate guarantees">
         <span><b>01</b> local-first</span>
@@ -482,13 +541,13 @@ footer .fin b{color:var(--emerald);font-weight:500}
           <div class="row place" style="--d:.55s"><time>08:00</time><div class="card">Deep work — planner docs<span class="meta">2h · ● hi</span></div></div>
           <div class="row place" style="--d:.7s"><time>10:00</time><div class="card busy">Standup<span class="meta">calendar</span></div></div>
           <div class="row place" style="--d:.85s"><time>10:30</time><div class="card">Review Sam's PR<span class="meta">45m</span></div></div>
-          <div class="row place" style="--d:1s"><time>12:30</time><div class="card brk">Lunch — protected<span class="meta">45m</span></div></div>
+          <div class="row place" style="--d:1s"><time>12:30</time><div class="card busy">Lunch<span class="meta">calendar busy time</span></div></div>
           <div class="row place" style="--d:1.15s"><time>14:00</time><div class="card busy">1:1 with Maya<span class="meta">calendar</span></div></div>
           <div class="row place" style="--d:1.3s"><time>15:00</time><div class="card">Book flights to Pune<span class="meta">20m · ○ lo</span></div></div>
           <div class="row place" style="--d:1.45s"><time>17:00</time><div class="card">Call landlord<span class="meta">pinned 17:00</span></div></div>
           <div class="row place" style="--d:1.6s"><time>18:00</time><div class="card">Gym<span class="meta">1h</span></div></div>
         </div>
-        <p class="solve-caption"><b>solved offline</b> — around your meetings, matched to your energy curve. a meeting moves? the day re-flows, with a rationale.</p>
+        <p class="solve-caption"><b>example plan</b> — local planning works offline. Add or change tasks and calendar busy time, then re-plan to refresh the day.</p>
       </div>
     </div>
   </section>
@@ -499,15 +558,15 @@ footer .fin b{color:var(--emerald);font-weight:500}
     <div class="content">
       <p class="eyebrow">09:00 — 11:00 <span class="dot hi" aria-hidden="true"></span>deep work <span class="dur">· the planner engine</span></p>
       <h2>A solver, not a suggestion.</h2>
-      <p class="blurb">Most planners give you an empty grid and wish you luck. Cognate treats your day as a constraint problem and <b>solves it deterministically</b> — same inputs, same plan, explainable to the minute. No model in the loop, nothing to hallucinate your Tuesday.</p>
+      <p class="blurb">Most planners give you an empty grid and wish you luck. Cognate treats your day as a constraint problem and <b>solves it deterministically</b> — matching inputs produce a repeatable result. AI does not choose time slots. You can inspect the scheduling rationale and re-plan when your tasks or availability change.</p>
       <dl class="spec">
         <div><dt>planner.rs</dt><dd>The scheduler is <b>native Rust</b>, mirrored in TypeScript for the web build. It places every task by priority, deadline, and estimated effort.</dd></div>
-        <div><dt>energy_curve</dt><dd>Cognate <b>learns when you actually focus</b> from your completion and pomodoro history, and gives your hardest work to your best hours.</dd></div>
-        <div><dt>calendar.ics</dt><dd>Import an <b>.ics feed</b> from Google, Outlook, Apple Calendar, or another provider. Meetings become hard walls and the plan flows around them.</dd></div>
-        <div><dt>auto_reflow</dt><dd>A meeting lands, a task slips, you drag a block — the day <b>re-solves instantly</b> and tells you what moved and why.</dd></div>
+        <div><dt>energy_curve</dt><dd>An optional <b>focus-time heuristic</b> uses completion and Pomodoro history to estimate when demanding work may fit best.</dd></div>
+        <div><dt>calendar.ics</dt><dd>Import <b>.ics busy time</b> from Google, Outlook, Apple Calendar, or another provider. Planner availability accounts for imported events.</dd></div>
+        <div><dt>re_plan</dt><dd>Change tasks, pin a block, or update availability, then <b>run Auto-plan</b> to rebuild the day. Background reflow checks about every five minutes while the app is open.</dd></div>
         <div><dt>pinned</dt><dd>Some things are sacred. <b>Pin a block</b> and the solver plans everything else around it.</dd></div>
       </dl>
-      <p class="calendar-note"><span class="mono">calendar status</span> — <b>.ics import works everywhere.</b> Direct Google and Outlook free/busy sync is currently desktop-only and requires your own OAuth client ID; the browser and PWA use the .ics path.</p>
+      <p class="calendar-note"><span class="mono">calendar status</span> — <b>.ics import is available across desktop and browser.</b> Google and Microsoft free/busy connectors are an early desktop integration and need provider setup; verify freshness in the app before relying on them.</p>
     </div>
   </section>
 
@@ -518,7 +577,29 @@ footer .fin b{color:var(--emerald);font-weight:500}
       <div class="protected">
         <span class="tag">protected block</span>
         <p class="eyebrow" style="margin-bottom:10px">12:30 — 13:15 <span class="dot lo" aria-hidden="true"></span>lunch</p>
-        <p><b>Nothing is scheduled here.</b> Cognate plans around your breaks, not over them — the solver treats rest as a constraint, same as a meeting. This page keeps the block free too. Go eat.</p>
+        <p><b>Busy time stays free in the plan.</b> This example lunch is imported from a calendar. Cognate schedules available work around calendar events; add your breaks as busy events to protect them.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 13:15 · desktop reminders -->
+  <section class="block" id="desktop">
+    <div class="rail"><span class="tstamp">13:15</span></div>
+    <div class="content">
+      <p class="eyebrow">13:15 — 13:30 <span class="dot hi" aria-hidden="true"></span>desktop companion <span class="dur">· reminders while tucked away</span></p>
+      <h2>Close the window. Keep your reminders.</h2>
+      <p class="blurb">On desktop, closing the window hides Cognate in the system tray. While the app is still running, it checks your local plan and sends native reminders for scheduled block starts, tasks due today, and overdue tasks.</p>
+      <div class="reminder-panel">
+        <div>
+          <h3>Your plan can tap you on the shoulder.</h3>
+          <p>Reminders use the local SQLite database. Turn on desktop notifications in Cognate and allow them in your operating system. Reopen from the tray, or choose Quit when you want to stop the app.</p>
+          <p class="feature-caveat">Reminders pause while your computer sleeps and stop after you quit Cognate.</p>
+        </div>
+        <ul class="reminder-list" aria-label="Desktop reminder types">
+          <li><span class="reminder-icon" aria-hidden="true">◷</span><span>Scheduled block starts</span><b>AT START</b></li>
+          <li><span class="reminder-icon" aria-hidden="true">✓</span><span>Tasks due today</span><b>DAILY</b></li>
+          <li><span class="reminder-icon" aria-hidden="true">!</span><span>Overdue tasks</span><b>DAILY</b></li>
+        </ul>
       </div>
     </div>
   </section>
@@ -527,9 +608,9 @@ footer .fin b{color:var(--emerald);font-weight:500}
   <section class="block" id="sync">
     <div class="rail"><span class="tstamp">14:00</span></div>
     <div class="content">
-      <p class="eyebrow">14:00 — 15:30 <span class="dot mid" aria-hidden="true"></span>sync <span class="dur">· every device, zero trust</span></p>
-      <h2>The relay can't read your week.</h2>
-      <p class="blurb">Every change is an entry in a <b>CRDT operation log</b>, sealed with a passphrase that exists only on your devices. Phones, laptops, offline edits — everything converges without conflicts. The relay in the middle is a few hundred lines of Rust, <b>stores only ciphertext</b>, and you can host it yourself.</p>
+      <p class="eyebrow">14:00 — 15:30 <span class="dot mid" aria-hidden="true"></span>sync preview <span class="dur">· optional encrypted relay</span></p>
+      <h2>Your relay stores encrypted snapshots.</h2>
+      <p class="blurb">Cognate includes an optional passphrase-encrypted sync path and a small Rust relay that stores sealed data. Sync is still being hardened: operation coverage, conflict recovery, and freshness need more work before promising seamless, conflict-free multi-device use. The app remains useful on one device without a relay.</p>
       <div class="cipher">
         <div class="you">
           <h3>On your device</h3>
@@ -546,7 +627,7 @@ R0NNIG92ZXIgUEJLREYyIGtleXMu
 IGdvIHBsYW4geW91ciBkYXku4pyU</pre>
         </div>
       </div>
-      <p class="cipher-caption"><b>wrong passphrase reads noise</b> — proven in tests, not promised in marketing. sync is optional; cognate is complete on one machine.</p>
+      <p class="cipher-caption"><b>Encryption is tested.</b> The relay receives ciphertext plus room/device metadata; this prototype does not yet provide complete forward secrecy or protect availability against a malicious relay.</p>
     </div>
   </section>
 
@@ -554,14 +635,14 @@ IGdvIHBsYW4geW91ciBkYXku4pyU</pre>
   <section class="block" id="team">
     <div class="rail"><span class="tstamp">16:00</span></div>
     <div class="content">
-      <p class="eyebrow">16:00 — 17:00 <span class="dot mid" aria-hidden="true"></span>collaboration <span class="dur">· share a project, not your workspace</span></p>
-      <h2>An invite is a key, not an account.</h2>
-      <p class="blurb">Sharing a project hands a teammate <b>the key to that project's encrypted log</b> — nothing else. Roles are enforced by cryptographic signatures, not server rules: revoke an editor and their future edits simply stop verifying. Comments, assignees, and presence ride the same log. Then the moat: <b>the solver plans the whole team</b> — it balances unassigned work into each member's real hours.</p>
+      <p class="eyebrow">16:00 — 17:00 <span class="dot mid" aria-hidden="true"></span>collaboration preview <span class="dur">· shared projects in development</span></p>
+      <h2>Share a project and work through it together.</h2>
+      <p class="blurb">Cognate has shared projects, comments, assignees, and basic presence. This area is still under development: membership changes, permission scope, revocation, and team capacity need additional reliability work. Do not use it yet for sensitive work that depends on strict access revocation.</p>
       <div class="loads" aria-label="Team workload after balancing">
         <div class="lrow"><span class="who">aditya</span><div class="bar"><i style="width:88%"></i></div><span class="amt">5h 20m / 6h</span></div>
         <div class="lrow"><span class="who">maya</span><div class="bar"><i style="width:64%"></i></div><span class="amt">3h 50m / 6h</span></div>
         <div class="lrow over"><span class="who">sam</span><div class="bar"><i style="width:100%"></i></div><span class="amt">6h 15m / 6h ·  over</span></div>
-        <div class="act"><span class="fakebtn">Balance workload</span><span>→ 4 tasks reassigned · sam back under capacity</span></div>
+        <div class="act"><span class="fakebtn">Team plan preview</span><span>Illustrative workload view — team balancing is not a verified production feature.</span></div>
       </div>
     </div>
   </section>
@@ -572,7 +653,7 @@ IGdvIHBsYW4geW91ciBkYXku4pyU</pre>
     <div class="content">
       <p class="eyebrow">19:00 — 19:30 <span class="dot lo" aria-hidden="true"></span>advisory hours <span class="dur">· ai on your terms</span></p>
       <h2>The AI advises. It never decides.</h2>
-      <p class="blurb">Type a thought and a <b>deterministic parser</b> — no network, no model — schedules it. AI is optional garnish on top: bring your own API key, or click once and run a local model through Ollama. <b>There is no hosted tier</b>, because there is nothing of yours on anyone's server to charge for.</p>
+      <p class="blurb">Quick Add can parse common task details locally without a model. Optional AI tools can estimate, enrich, and draft: configure a supported provider in Settings, bring your own API key, or run a local model through Ollama. Cloud providers receive the prompt data you send them, so choose what to share.</p>
       <div class="qa">
         <div class="in"><span class="caret">›</span>call Sam tmrw 5pm 30m #work !!</div>
         <div class="out">
@@ -593,7 +674,7 @@ IGdvIHBsYW4geW91ciBkYXku4pyU</pre>
     <div class="content">
       <p class="eyebrow">22:30 — 23:00 <span class="dot lo" aria-hidden="true"></span>shutdown ritual</p>
       <h2>End the day empty.</h2>
-      <p class="blurb">Tomorrow is already planned — it will be waiting when you open the lid. Cognate is <b>free, open source, and local-first</b>: if the project vanished tomorrow, your data is a SQLite file on your own disk.</p>
+      <p class="blurb">Start with one task, add your calendar busy time, and run Auto-plan. Cognate is <b>free, open source, and local-first</b>; desktop data is stored on your own device. Back up important work and verify that a restore works.</p>
       <div class="cta-row">
         <a class="btn btn-primary dl-smart" id="dl-shutdown" href="#dl">Download Cognate</a>
         <a class="btn btn-ghost" href="https://github.com/adityatawde9699/Cognate#quick-start">Quick start</a>
@@ -655,9 +736,10 @@ IGdvIHBsYW4geW91ciBkYXku4pyU</pre>
 (function(){
   var REPO='adityatawde9699/Cognate';
   var ua=navigator.userAgent||'', plat=navigator.platform||'';
-  var os = /Mac|iPhone|iPad|iPod/.test(ua+plat) ? 'mac'
+  var mobile=/Android|iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints>1);
+  var os = !mobile && /Mac|MacIntel|MacPPC|Mac68K/i.test(ua+plat) ? 'mac'
          : /Win/.test(ua+plat) ? 'windows'
-         : /Linux|X11/.test(ua+plat) ? 'linux'
+         : !mobile && /Linux|X11/.test(ua+plat) ? 'linux'
          : null;
 
   var osButtons=[].slice.call(document.querySelectorAll('.dl-os'));
