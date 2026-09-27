@@ -5,7 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cognate — your day, already planned</title>
 <meta name="description" content="Cognate turns a pile of tasks and calendar events into a time-blocked day — solved offline in deterministic Rust, synced end-to-end encrypted, yours forever.">
+<meta name="theme-color" content="#09090b">
+<link rel="canonical" href="https://adityatawde9699.github.io/Cognate/">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
+<meta property="og:type" content="website">
 <meta property="og:title" content="Cognate — your day, already planned">
 <meta property="og:description" content="The local-first planner that plans your day. Deterministic solver, E2E-encrypted sync, private AI.">
 <style>
@@ -106,6 +109,16 @@ nav a.sect b{color:var(--emerald);font-weight:500;margin-right:6px}
 .btn-ghost:hover{border-color:var(--emerald);color:var(--bone)}
 nav .btn{padding:9px 18px;font-size:.88rem}
 
+.release-note{
+  max-width:var(--maxw);margin:0 auto;padding:0 24px 18px;
+  display:flex;align-items:center;gap:9px;
+  font-family:var(--mono);font-size:.7rem;color:var(--zinc-d);
+}
+.release-note b{color:var(--emerald);font-weight:500}
+.release-note a{margin-left:auto;color:var(--zinc);text-decoration:none;transition:color .18s}
+.release-note a:hover{color:var(--bone)}
+.release-dot{width:6px;height:6px;border-radius:50%;background:var(--emerald);box-shadow:0 0 0 4px var(--emerald-muted);flex:none}
+
 .dl-os{display:inline-flex;align-items:center;gap:8px}
 .dl-os .dl-icon{display:block;flex:none;opacity:.9}
 .dl-os.is-detected{background:var(--emerald);color:var(--ink);border-color:transparent;box-shadow:0 4px 24px var(--emerald-glow)}
@@ -182,6 +195,12 @@ h2{font-size:clamp(1.7rem,3.4vw,2.4rem);max-width:24ch;margin-bottom:16px}
 #hero .content{padding-top:40px}
 .cta-row{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
 .cta-note{font-family:var(--mono);font-size:.75rem;color:var(--zinc-d);margin-bottom:56px}
+.trust-strip{
+  display:flex;gap:10px 24px;flex-wrap:wrap;margin:-30px 0 42px;
+  color:var(--zinc-d);font-family:var(--mono);font-size:.7rem;
+}
+.trust-strip span{display:inline-flex;align-items:center;gap:7px}
+.trust-strip b{color:var(--emerald);font-weight:500}
 
 /* the solve demo */
 .solve{
@@ -384,6 +403,11 @@ footer .fin b{color:var(--emerald);font-weight:500}
   .eyebrow .t-inline{display:inline}
   nav a.sect{display:none}
   header{gap:16px}
+  header nav{gap:8px}
+  nav .btn{padding:8px 12px;font-size:.78rem}
+  .release-note{padding:0 20px 16px;align-items:flex-start;line-height:1.45}
+  .release-note a{white-space:nowrap}
+  .trust-strip{margin-top:-26px;margin-bottom:34px;gap:8px 16px}
 }
 </style>
 </head>
@@ -401,6 +425,12 @@ footer .fin b{color:var(--emerald);font-weight:500}
   </nav>
 </header>
 
+<div class="release-note" role="status">
+  <span class="release-dot" aria-hidden="true"></span>
+  <span><b>v3.0.3</b> · desktop reminders, tray mode, and a faster task generator</span>
+  <a href="https://github.com/adityatawde9699/Cognate/blob/master/changelog.md">See what changed&nbsp;↗</a>
+</div>
+
 <main>
   <div id="now" aria-hidden="true"><span>06:00</span></div>
 
@@ -410,7 +440,7 @@ footer .fin b{color:var(--emerald);font-weight:500}
     <div class="content">
       <p class="eyebrow"><span class="t-inline">06:00</span><span class="dot hi" aria-hidden="true"></span>morning brief <span class="dur">· your day, solved before you sit down</span></p>
       <h1>Your day. Already planned.</h1>
-      <p class="lede">Cognate takes a pile of tasks and a calendar and solves them into a time-blocked day — <b>offline, in deterministic Rust, on your machine</b>. The AI advises. The solver decides. Your data never leaves.</p>
+      <p class="lede">Cognate takes a pile of tasks and a calendar and solves them into a time-blocked day — <b>offline, in deterministic Rust, on your machine</b>. The AI advises. The solver decides. Your data stays local unless you choose sync or a cloud provider.</p>
       <div class="cta-row" id="dl">
         <a class="btn btn-ghost dl-os" data-os="windows" id="dl-windows" href="https://github.com/adityatawde9699/Cognate/releases/latest">
           <svg class="dl-icon" width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M1 2.6 6.6 1.8v5.5H1V2.6ZM7.3 1.7 15 .5v6.6H7.3V1.7ZM1 8h5.6v5.5L1 12.7V8Zm6.3 0H15v6.5l-7.7-1.1V8Z" fill="currentColor"/></svg>
@@ -428,6 +458,12 @@ footer .fin b{color:var(--emerald);font-weight:500}
         <a class="btn btn-ghost" href="https://github.com/adityatawde9699/Cognate">Read the source</a>
       </div>
       <p class="cta-note">free · open source · no account · no server required — your platform is highlighted above</p>
+
+      <div class="trust-strip" aria-label="Cognate guarantees">
+        <span><b>01</b> local-first</span>
+        <span><b>02</b> deterministic planning</span>
+        <span><b>03</b> optional encrypted sync</span>
+      </div>
 
       <div class="solve" aria-label="Demo: an inbox of tasks solved into a scheduled day">
         <div class="pane">
@@ -566,7 +602,7 @@ IGdvIHBsYW4geW91ciBkYXku4pyU</pre>
         <span>200+ unit tests</span>
         <span>17 end-to-end flows</span>
         <span>undo everything</span>
-        <span>automatic backups</span>
+        <span>local backup tools</span>
         <span>deterministic to the minute</span>
       </div>
     </div>
