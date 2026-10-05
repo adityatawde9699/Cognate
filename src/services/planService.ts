@@ -11,6 +11,7 @@
 
 import {
   IS_TAURI,
+  initDb,
   commitPlan,
   getPlanningSnapshot,
   getAllTasks,
@@ -293,6 +294,8 @@ export interface PlanOptions {
  * work moves forward rather than being re-laid into the past.
  */
 export async function planDay(date: string, opts: PlanOptions = {}): Promise<PlanResult> {
+  if (opts.signal?.aborted) throw new Error('Planning cancelled.');
+  await initDb();
   if (opts.signal?.aborted) throw new Error('Planning cancelled.');
   await ensureCalendarCoverage(date);
   if(opts.signal?.aborted) throw new Error('Planning cancelled.');
