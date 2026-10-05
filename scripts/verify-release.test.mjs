@@ -16,7 +16,7 @@ for (const newline of ['\n', '\r\n']) {
       const version = '3.1.0-rc.4';
       writeFileSync(join(root, 'package.json'), JSON.stringify({ version }));
       writeFileSync(join(root, 'package-lock.json'), JSON.stringify({ version, packages: { '': { version } } }));
-      writeFileSync(join(root, 'src-tauri/tauri.conf.json'), JSON.stringify({ version }));
+      writeFileSync(join(root, 'src-tauri/tauri.conf.json'), JSON.stringify({ version, bundle: { windows: { wix: { version: '3.1.0.4' } } } }));
       writeFileSync(join(root, 'src-tauri/Cargo.toml'), `[package]${newline}version = "${version}"${newline}`);
       writeFileSync(join(root, 'src-tauri/Cargo.lock'), `[[package]]${newline}name = "cognate"${newline}version = "${version}"${newline}`);
       writeFileSync(join(root, `releases/${version}.md`), `# Cognate v${version}${newline}`);

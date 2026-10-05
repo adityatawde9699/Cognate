@@ -6,7 +6,16 @@ const version = json('package.json').version;
 const lock = json('package-lock.json');
 assert.equal(lock.version, version, 'npm lock version mismatch');
 assert.equal(lock.packages[''].version, version, 'npm root package version mismatch');
-assert.equal(json('src-tauri/tauri.conf.json').version, version, 'Tauri version mismatch');
+const tauri = json('src-tauri/tauri.conf.json');
+assert.equal(tauri.version, version, 'Tauri version mismatch');
+const wix = tauri.bundle?.windows?.wix?.version;
+if (version.includes('-') && !/^\d+$/.test(version.split('-')[1])) {
+  assert.ok(wix, 'Named prereleases require a numeric MSI version override');
+}
+if (wix) {
+  assert.match(wix, /^\d+\.\d+\.\d+(?:\.\d+)?$/, 'MSI version must be numeric');
+  assert.equal(wix.split('.').slice(0, 3).join('.'), version.split('-')[0].split('+')[0], 'MSI base version mismatch');
+}
 const cargo = readFileSync('src-tauri/Cargo.toml', 'utf8');
 assert.equal(cargo.match(/^version = "([^"]+)"/m)?.[1], version, 'Cargo version mismatch');
 const cargoLock = readFileSync('src-tauri/Cargo.lock', 'utf8');
