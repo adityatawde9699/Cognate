@@ -334,6 +334,19 @@ struct Config {
 
 /// Handle one request end-to-end (CORS, rate limit, auth, route). Runs on a
 /// worker thread, so the blocking `poll` route only ties up that one thread.
+// Reserve a bounded poll slot using APIs supported by older and current Rust.
+fn reserve_poll(active: &std::sync::atomic::AtomicUsize, limit: usize) -> bool {
+    use std::sync::atomic::Ordering;
+    let mut count = active.load(Ordering::Acquire);
+    while count < limit {
+        match active.compare_exchange_weak(count, count + 1, Ordering::AcqRel, Ordering::Acquire) {
+            Ok(_) => return true,
+            Err(actual) => count = actual,
+        }
+    }
+    false
+}
+
 fn serve(mut req: Request, store: &Store, versions: &Versions, rate: &RateMap, cfg: &Config) {
     REQUESTS.fetch_add(1,std::sync::atomic::Ordering::Relaxed);
     let method = req.method().clone();
@@ -377,7 +390,7 @@ fn serve(mut req: Request, store: &Store, versions: &Versions, rate: &RateMap, c
     let parts: Vec<&str> = path.split('?').next().unwrap_or("").split('/').filter(|s| !s.is_empty()).collect();
     let (status, payload) = if let ("GET", ["rooms", room, "poll"]) = (method.as_str(), parts.as_slice()) {
         if !identifier(room) { (400,json!({"error":"invalid room"}).to_string()) }
-        else if cfg.active_polls.fetch_update(std::sync::atomic::Ordering::AcqRel,std::sync::atomic::Ordering::Acquire,|n|(n<cfg.max_polls).then_some(n+1)).is_err() {
+        else if !reserve_poll(&cfg.active_polls, cfg.max_polls) {
             (503,json!({"error":"poll capacity exhausted; retry"}).to_string())
         } else {
             let v = wait_for_change(versions, room, parse_since(&path), POLL_TIMEOUT, POLL_INTERVAL);

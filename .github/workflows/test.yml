@@ -60,6 +60,15 @@ jobs:
         with:
           components: clippy
 
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: checks
+          workspaces: |
+            src-tauri -> target
+            server -> target
+          cache-on-failure: true
+
       - name: Install Linux dependencies
         run: |
           sudo apt-get update
