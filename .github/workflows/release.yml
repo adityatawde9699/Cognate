@@ -9,7 +9,13 @@ permissions:
   contents: write
 
 jobs:
+  checks:
+    uses: ./.github/workflows/test.yml
+    permissions:
+      contents: read
+
   release:
+    needs: checks
     name: Build & Release App
     strategy:
       fail-fast: false
@@ -26,6 +32,10 @@ jobs:
         with:
           node-version: 22
           cache: 'npm'
+
+      - name: Validate release version and load notes
+        id: metadata
+        run: node scripts/verify-release.mjs
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -62,7 +72,7 @@ jobs:
         with:
           tagName: v__VERSION__
           releaseName: "Cognate v__VERSION__"
-          releaseBody: "See the assets below to download and install this version. The app auto-updates from this release."
+          releaseBody: ${{ steps.metadata.outputs.notes }}
           releaseDraft: true
-          prerelease: false
+          prerelease: ${{ steps.metadata.outputs.prerelease == 'true' }}
           includeUpdaterJson: true
