@@ -1,56 +1,43 @@
 # Testing
 
-Cognate has a comprehensive test pyramid: unit tests, integration tests, property-based tests, and end-to-end tests across three platforms (desktop, web, PWA).
-
-## Running Tests
+Run the frontend baseline from the repository root:
 
 ```bash
-npm test                       # Vitest: unit + integration + property tests
-npm run test:e2e               # Playwright: drives the app in a real browser
-(cd src-tauri && cargo test)   # Rust: planner, priority, team plan, integrations
-(cd server   && cargo test)    # Rust: relay routing, auth, rate limit, long-poll
+npm run typecheck
+npm test
+npm run build
+npm run verify:build
+npm run test:e2e
+npm run test:pwa
 ```
 
-## CI Coverage
+Run Rust checks in each independent crate:
 
-CI (`.github/workflows/test.yml`) runs all four test suites plus `clippy -D warnings` on both Rust crates.
+```bash
+(cd src-tauri && cargo test)
+(cd src-tauri && cargo clippy -- -D warnings)
+(cd server && cargo test)
+(cd server && cargo clippy -- -D warnings)
+```
 
-**Current suite:**
-- ~200 Vitest (unit + integration + property)
-- 17 Playwright e2e scenarios
-- 13 Rust tests (src-tauri)
-- 10 Rust tests (server relay)
-- All green ✅
+The PR workflow `.github/workflows/test.yml` enforces these checks. Desktop Rust formatting is advisory, not a blocking check. Playwright reports are uploaded in CI; coverage collection is not configured.
 
-## What's Tested
+## Coverage and limits
 
-**Core deterministic logic:**
-- CRDT merge semantics
-- RBAC op admission
-- Crypto (PBKDF2, AES-GCM, ECDSA)
-- Scheduler (plan_day, plan_team)
-- Energy model
-- Natural-language parser
+Vitest includes `src/**/*.{test,spec}.{ts,tsx}`. The legacy `tests/calcPriority.test.js` is outside that include. Frontend tests cover deterministic planner cases, op-log merge, crypto, role admission, calendar parsing/mapping, and mocked service paths. Several randomized loop tests exercise invariants; there is no dedicated property-testing framework.
 
-**Cross-device flows:**
-- End-to-end encrypted sync
-- Relay routing & long-poll
-- Device offline → online recovery
+Playwright drives the browser build in Chromium with real IndexedDB. The migration tests retain original localStorage data and inject transaction/quota failures. Separate production preview tests check precached assets, offline reload/lazy Settings, a failed deployment, waiting updates across editing tabs, final activation/cache cleanup, a newly added asset and offline reopen. Browser tests also verify encrypted, non-exportable secret-key persistence and replacement-device identity/data recovery. Specs cover render smoke, task flows, onboarding, planning, basic accessibility, and export/import between browser contexts. The sync E2E uses a bundle, not a live encrypted relay. Calendar URL/mapping tests and imported busy-time tests do not validate a live Google/Microsoft OAuth handshake.
 
-**User workflows:**
-- First-run onboarding
-- Quick-add → auto-plan → re-flow
-- Shared project collaboration
-- Calendar OAuth flow
+Rust tests cover planner/priority/team planning/integration helpers and relay routing/auth/rate-limit/long-poll behavior. Running desktop Rust tests does not exercise an installed app's webview, SQL plugin, tray, notifications, signing, updater, or recovery lifecycle.
 
-## Property-Based Testing
+Startup duplicate regression tests assert preservation of browser records, no SQL mutations on an existing desktop database, and read-only reporting. Browser E2E additionally checks that matching tasks survive scan and reload. The SQL adapter test uses a mock; native SQLite lifecycle still needs installed-app coverage.
 
-Some of the most critical properties are verified with property-based tests:
+## Production gaps
 
-- Scheduler idempotency
-- CRDT commutativity (any op order → same result)
-- Op-log causality preservation
+Native OS smoke tests, hard-kill/previous-release migration fixtures, deployed independent-device relay outage tests, broader engine/DST property fixtures, live OAuth and mobile install/eviction tests remain required. Three independent row/history stores now exercise the v2 batch protocol against a fake relay with actual projection commits; real local HTTP relay tests cover persistence failures and poll saturation. Real SQLite tests now exercise uncheckpointed WAL snapshots, verified restore, corrupt input, required safety-snapshot failure, history/projection/calendar/plan rollback and stale plans. A shared adversarial JSON corpus runs through both planner engines. A green CI run does not establish production readiness. Track acceptance criteria in [PRODUCTION_ROADMAP.md](PRODUCTION_ROADMAP.md).
 
-## CI/CD
+## Local stabilization run — 2026-10-06
 
-The full test suite runs on every push to `main`. Coverage reports and test artifacts are available in GitHub Actions.
+TypeScript checking, **283 Vitest tests across 41 files**, **24 Chromium workflow/storage tests**, and **two production offline/update tests** passed. Desktop Rust **37 tests**, relay Rust **16 tests**, and Clippy with warnings denied (including all targets) passed for both crates. Web production build and `git diff --check` passed. Artifact verification is rerun after the production test restores its modified deployment fixture. These are local results; remote CI, installed-platform, live-provider and staging load checks have not run. npm installation/audit reported no remaining advisories after updating Vitest to 4.1.11.
+
+New coverage includes recurring exception cancellation, feed-local VTIMEZONE, RDATE/EXDATE, expansion beyond the saved horizon without resetting source freshness, calendar metadata rollback, cancelled plan preservation, context/signature/ciphertext admission, exact retry after lost acknowledgement, actual three-store task/history convergence, signed invite tampering, old-epoch upload freeze/read isolation, replacement identity recovery and recovery passphrase rewrap. OAuth lifecycle tests mock native HTTP/listener commands: they do not replace real provider authorization tests.

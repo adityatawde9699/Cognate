@@ -7,9 +7,9 @@
 
 **Cognate is the planner that plans your day — privately.**
 
-Never manually rearrange your calendar again. Open Cognate and your entire day is already scheduled — as time blocks across your calendar, color-coded by energy level and aligned with your real meetings. A task lands late? A meeting gets added? Your schedule re-flows instantly with a new rationale.
+Cognate is a task planner under production stabilization. Auto-plan creates day blocks from tasks and imported busy time. Planning runs locally in Rust on desktop and TypeScript in the browser; optional AI providers advise on tasks.
 
-The AI advises but doesn't decide. All planning runs **offline in deterministic Rust** on your machine. Your data stays **on your device**, syncs **end-to-end encrypted** to every other device, and — thanks to a CRDT sync spine — becomes a **real-time team workspace** the moment you share.
+Desktop stores tasks in SQLite; browser/PWA uses transactional IndexedDB with retained legacy migration snapshots. Task/project history, plan commits and verified SQLite backups now have atomicity/failure tests. Signed incremental sync, revoke epochs, encrypted browser secrets and identity recovery now have local regression evidence; live OAuth, installed-app and staging/mobile validation remain production blockers. See the [production roadmap](docs/PRODUCTION_ROADMAP.md).
 
 ---
 
@@ -19,7 +19,7 @@ The AI advises but doesn't decide. All planning runs **offline in deterministic 
 - [Features](#features) — What you get
 - [Quick Start](#quick-start)
 - [How It Works](#how-it-works)
-- [Status & Roadmap](#status--roadmap)
+- [Status & Roadmap](#roadmap)
 - [Docs](#documentation)
 - [License](#license)
 
@@ -32,13 +32,13 @@ The AI advises but doesn't decide. All planning runs **offline in deterministic 
 | Dragging tasks around all day | Manual (or no scheduling) | **Auto-planned** as time blocks |
 | Cloud vendor lock-in | Everything in the cloud | **Local-first** + optional sync |
 | AI requires cloud API | Dependent on OpenAI/Claude | **Local Ollama** or your own key |
-| Losing data offline | Must stay connected | **Works offline**, syncs on reconnect |
+| Losing data offline | Must stay connected | **Local editing**; offline shell and sync recovery need validation |
 | Server reading your data | Trust the corporation | **E2E encrypted**, server can't read it |
 | Meetings trash your plan | Stale schedule, manual fix | **Auto-reflow** when schedule changes |
-| Can't work as a team | Lone wolf or group chats | **Real-time shared workspace** |
+| Can't work as a team | Lone wolf or group chats | **Shared projects** (prototype) |
 | "Smart" planning is fragile | Single point of failure | **Deterministic scheduler** you can audit |
 
-**The combination**: open the app and your day is already laid out, re-flowing on disruption, on a model and machine you control, working on a plane.
+Open the Plan view and use Auto-plan to schedule local work. Automatic reflow and calendar refresh have reliability gaps tracked in the roadmap.
 
 ---
 
@@ -46,38 +46,38 @@ The AI advises but doesn't decide. All planning runs **offline in deterministic 
 
 **Planning & Scheduling**
 - 🕐 **Auto-plan your day** — tasks scheduled as time blocks across your real calendar, respecting deadlines, priority, duration, energy, and meetings
-- 🔄 **Auto-reflow** — when a meeting lands or work slips, your entire day re-solves with a new rationale
-- ⚡ **Energy-aware** — learns when you focus from completed Pomodoro sessions; uses your personal energy curve for better scheduling
-- 📅 **Calendar sync** — connect Google Calendar, Outlook, or paste `.ics` URL for free-busy integration
+- 🔄 **Auto-reflow** — when a meeting lands or work slips, a polling hook can request a re-plan; atomic commits and stale-plan protection remain open
+- ⚡ **Energy-aware** — uses completion/scheduled-hour and Pomodoro heuristics; learning quality is unverified
+- 📅 **Calendar sync** — Google/Outlook connection code and `.ics` import exist; live OAuth and timezone/recurrence handling need validation
 
 **Capture & Workspace**
 - ⌘K **Natural-language quick-add** — type "call Sam tomorrow 5pm 30m #work" → fully scheduled and pinned
-- 📋 **5 views** — Plan (hero), Board (Kanban), List, Table, Calendar, Timeline (switch by keystroke)
+- 📋 **6 views** — Plan (hero), Board (Kanban), List, Table, Calendar, Timeline (switch by keystroke)
 - 🔖 **Rich tasks** — title, description, tags, deadlines, priority/effort, projects, milestones, subtasks, custom fields
 - 🍅 **Pomodoro + Focus mode** — built-in timers and distraction-free working
 
 **Privacy & Sync**
 - 🔒 **End-to-end encrypted** — your server/relay *cannot* read your data, even if compromised
-- 📱 **Offline-first** — works on airplane mode; syncs when reconnected
-- 🔄 **CRDT sync** — edit tasks on laptop and phone simultaneously; changes merge automatically, no conflicts
-- 🌐 **PWA companion** — installable on mobile, works offline, syncs through your relay
+- 📱 **Local editing** — persisted tasks can be edited locally; offline PWA startup and reconnect fault behavior remain unverified
+- 🔄 **CRDT sync** — edit tasks on laptop and phone simultaneously; operation merging exists; incomplete logging and malformed collisions remain blockers
+- 🌐 **PWA companion** — installable browser shell; first-install offline/update lifecycle is unverified
 
-**Team Collaboration** *(falls out of the CRDT spine)*
-- 👥 **Share projects** — one passphrase share = everyone gets real-time updates (~1 second)
-- 🎯 **Roles & RBAC** — viewer / commenter / editor / owner, **cryptographically enforced** (relay can't forge ops)
+**Team Collaboration** *(prototype)*
+- 👥 **Share projects** — invites and encrypted relay polling; delivery timing is unverified
+- 🎯 **Roles & RBAC** — viewer / commenter / editor / owner, signatures and role checks on clients; project scope and read-key revocation remain open
 - 💬 **Comments & presence** — see who's online and thread discussions per task
 - ⚖️ **Team auto-plan** — balance work across your roster by capacity; schedule each person's day
 
 **AI (Your Model, Your Choice)**
 - 🧠 **Multi-provider** — Claude, OpenAI, OpenRouter, Groq, Gemini, xAI, **local Ollama**
-- 🚫 **Go private (1-click)** — all AI runs locally on your machine; nothing leaves your device
+- 🚫 **Go private (1-click)** — selects Ollama; use a local endpoint, as custom remote URL validation remains open
 - 🔮 **AI advisors** — improve descriptions, break into subtasks, estimate duration, suggest tags, advise on overcommitment
 
 **Trust & Reliability**
 - ↩️ **Undo/redo + Trash** — soft-delete with restore
-- 💾 **Timestamped backups** — auto-backup with one-click restore
+- 💾 **Timestamped backups** — verified desktop SQLite online snapshots, including WAL; installed recovery matrix remains open
 - 🎯 **Chief of Staff** — morning brief + overcommitment nudge
-- 🛡️ **Secure secrets** — passphrases stored in OS keychain, never plaintext
+- 🛡️ **Secure secrets** — desktop requires the OS keychain and reports backend failures; browser secrets remain local workspace values
 
 ---
 
@@ -128,16 +128,16 @@ chmod +x Cognate.AppImage
 ```
 
 ### Verify Download
-Every release includes SHA-256 checksums. Example:
+Checksum generation is not enforced by the current release workflow. If a release provides a checksum, compare it with your downloaded artifact. Example:
 ```bash
 sha256sum Cognate_0.1.0_x64_en-US.msi
 ```
-Compare the output with the checksum listed on the GitHub Release page.
+Use the exact artifact filename and independently verify the checksum source; signed artifact verification remains production roadmap work.
 
 ### Frequently Asked Questions
 
 **Is Cognate safe?**
-Yes. Cognate is open source. The source code is publicly available and every release is built from that repository. Current releases are not yet digitally signed, which is why Windows and macOS display security warnings.
+Cognate is under production stabilization. Source and release workflows are available for review, but open source and passing tests do not establish artifact safety. Installed-app behavior, signatures, recovery, and sync integrity still need validation.
 
 **Why isn't the app signed?**
 Code signing certificates require paid developer accounts. As an independent open-source project, Cognate currently distributes unsigned builds while development is ongoing. Signing and notarization are planned for a future release.
@@ -157,20 +157,9 @@ Please report installation issues on GitHub and include: OS version, CPU archite
 
 ## How It Works
 
-**At its core, Cognate is a deterministic scheduler written in Rust.**
+Capture creates a local task. Auto-plan reads the task cache and calendar rows, solves locally, then persists schedule blocks. Placement explanations are heuristic labels.
 
-1. **Capture** → You type "call Sam tomorrow 5pm" (or click → add task)
-2. **Optimize** → The scheduler places it in your day, respecting your calendar, deadlines, priority, and energy
-3. **Present** → You see it as a time block with a reason ("2pm because the client call owns your morning")
-4. **Interrupt** → A meeting arrives; the entire day re-solves in ~7 ms
-5. **Sync** → Edits encrypt, sign, and flow to your relay (or stay local if offline)
-6. **Merge** → Other devices decrypt, verify, and merge (no conflicts, ever)
-
-**Why Rust?** Speed, offline capability, determinism. You can audit why tasks are placed.
-
-**Why CRDT?** One sync engine unlocks offline, multi-device, and multiplayer *simultaneously*. Sharing a project is just sharing a key.
-
-**Why E2E?** The relay can't read your tasks (only ciphertext), forge edits (ops are ECDSA-signed), or go down and lose your data (everything is local first).
+Task/project commands commit SQLite/IndexedDB rows and operation history together. Optional sync encrypts signed incremental batches for the v2 relay, with durable acknowledgements and saved cursors. Shared-project clients additionally verify context, roles, scoped entities and epoch markers. Reconciliation rejects unlogged local gaps and stale snapshots before atomically committing the admitted projection. It is not a complete device recovery mechanism.
 
 See [**Architecture**](docs/ARCHITECTURE.md) for the full design.
 
@@ -211,11 +200,11 @@ npm run build         # PWA → dist/
 
 | Action | How |
 |---|---|
-| **Plan your day** | Open the app (lands on Plan view) → auto-plan lays it out. Drag a block to pin. |
+| **Plan your day** | Open Plan → click Auto-plan. Drag a block to pin. |
 | **Quick-add a task** | Press `⌘K` → type naturally ("ship deck friday 90m #work") → Enter |
 | **Sync across devices** | Settings → Live sync → enter relay URL + passphrase on each device |
 | **Share a project** | Settings → Shared projects → share → copy invite → teammate joins |
-| **Use local AI** | Settings → AI → Go fully private (Ollama) → all AI runs on your machine |
+| **Use local AI** | Settings → AI → Go fully private (Ollama) → configure a local endpoint |
 | **Keyboard shortcuts** | `⌘K` palette · `N` new · `/` search · `1/2/3` filters · `T` theme · `Esc` close · `Ctrl/⌘+Z` undo |
 
 ### Desktop reminders while the window is closed
@@ -226,48 +215,25 @@ Closing Cognate's desktop window now hides it to the system tray. While the app 
 
 ## Roadmap
 
-| Phase | Status | What |
-|---|---|---|
-| **Core Planner** | ✅ | Auto-planning, energy model, calendar sync |
-| **Offline + Sync** | ✅ | CRDT op-log, E2E encryption, relay |
-| **Teams** | ✅ | Shared projects, RBAC, comments, presence |
-| **AI** | ✅ | Multi-provider, local Ollama, advisors |
-| **Polish** | ✅ | Undo/redo, backups, Chief of Staff, i18n |
-| **Public Relay** | 🔜 | Hosted relay (self-host or bring your own) |
-| **Native Mobile** | 🔜 | iOS app (today: PWA) |
-| **Marketplace** | 🔜 | Custom integrations, workflows, plugins |
-
-
----
+The [production roadmap](docs/PRODUCTION_ROADMAP.md) is the implementation priority list. Initial stabilization protects task data, establishes atomic mutations and recovery, and validates planner constraints. Production release also requires transactional browser storage, authenticated sync, scoped collaboration, live calendar validation, and installed OS/release checks. Native mobile is a later evidence-driven decision.
 
 ## Performance
 
-Cognate is built for speed:
-
-| Operation | Latency |
-|---|---|
-| Auto-plan 100 tasks | **14 ms** |
-| Re-plan (on interrupt) | **7 ms** |
-| App startup | **180 ms** |
-| Sync round-trip | **~1 s** (long-poll) |
-| Encrypt/decrypt | **<1 ms** per op |
-
-See [**Benchmarks**](docs/BENCHMARKS.md) for detailed performance data.
-
----
+There is no reproducible benchmark harness in this checkout. Previously published exact timings and load figures are withdrawn. See [performance validation](docs/BENCHMARKS.md) for the measurements required before making claims.
 
 ## Testing
 
-A comprehensive test pyramid ensures reliability:
-
 ```bash
-npm test                       # ~200 Vitest (unit + integration + property)
-npm run test:e2e               # 17 Playwright e2e scenarios
-(cd src-tauri && cargo test)   # Rust: scheduler, priority, team plan
-(cd server && cargo test)      # Rust: relay routing, auth, rate limit
+npm run typecheck
+npm test
+npm run build
+npm run verify:build
+npm run test:e2e
+(cd src-tauri && cargo test)
+(cd server && cargo test)
 ```
 
-**Coverage**: CRDT merge, RBAC admission, crypto, scheduler, energy model, NL parser (all unit/property tested). Cross-device sync and first-run flow covered e2e. See [**Testing**](docs/TESTING.md).
+CI also runs Clippy on both Rust crates. Browser E2E covers IndexedDB workflows and sync-bundle exchange. SQLite tests cover WAL backup/restore and mutation rollback; a production preview test checks offline startup. Production PWA update/rollback tests pass in Chromium. Installed native runtime, live relay/OAuth and signed release installation remain unverified. See [Testing](docs/TESTING.md).
 
 ---
 
@@ -279,23 +245,23 @@ npm run test:e2e               # 17 Playwright e2e scenarios
 | [**RELAY**](docs/RELAY.md) | Sync relay architecture, deployment, security model |
 | [**TESTING**](docs/TESTING.md) | Test pyramid, CI coverage, test organization |
 | [**PROJECT_STRUCTURE**](docs/PROJECT_STRUCTURE.md) | Folder layout, module guide, abstractions |
-| [**BENCHMARKS**](docs/BENCHMARKS.md) | Performance profiling, comparisons with incumbents |
-| [**PLAN**](plan.md) | Product vision, roadmap (Acts 0–5), feature breakdown |
+| [**BENCHMARKS**](docs/BENCHMARKS.md) | Measurement status and future validation |
+| [**PRODUCTION ROADMAP**](docs/PRODUCTION_ROADMAP.md) | Audit, implementation priorities, acceptance criteria |
 
 ---
 
 ## Status & Honest Limitations
 
-**Built & tested**: Core planner, offline sync, teams, AI, undo/redo, backups, i18n (EN, ES, DE, FR).
+Task views, local planning, AI helpers, undo/redo, Trash, shared-project code, backup commands, and translations exist with varying test depth. This is not a production-ready release.
 
-**Deliberate choices**:
-- **Mobile**: PWA (installable, offline, full sync) not native app
-- **Sync latency**: ~1 second (long-poll) not persistent websocket
-- **Calendar OAuth**: Requires your own provider client ID (PKCE flow tested end-to-end)
-- **SQLite projection**: Synced from op-log, not a full read-cutover
-- **No hosted tier**: You bring your own API key (or local model) and self-host the relay
+- Startup preserves matching tasks. Settings → Housekeeping reports suspected duplicates without deleting them; review unwanted copies in Tasks and move them to Trash individually.
+- SQLite/IndexedDB is the operational store. Current task/project commands record history atomically; legacy row/history gaps require explicit audit/repair before reconciliation.
+- Backup/restore, PWA offline startup/updates, OS integrations, and signed release artifacts require lifecycle validation.
+- Google/Microsoft OAuth requires provider configuration; a live handshake is not covered by the current tests.
+- Shared read-key revocation and plaintext secret fallback remain open.
+- The relay is self-hosted; production durability and resource bounds are outstanding.
 
-See [plan.md](plan.md#status--honest-limitations) for the full breakdown.
+See [PRODUCTION_ROADMAP.md](docs/PRODUCTION_ROADMAP.md) for the full audit and current progress.
 
 ---
 
