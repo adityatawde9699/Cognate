@@ -35,7 +35,9 @@ jobs:
 
       - name: Validate release version and load notes
         id: metadata
-        run: node scripts/verify-release.mjs
+        run: |
+          node --test scripts/verify-release.test.mjs
+          node scripts/verify-release.mjs
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable

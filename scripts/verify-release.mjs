@@ -10,7 +10,7 @@ assert.equal(json('src-tauri/tauri.conf.json').version, version, 'Tauri version 
 const cargo = readFileSync('src-tauri/Cargo.toml', 'utf8');
 assert.equal(cargo.match(/^version = "([^"]+)"/m)?.[1], version, 'Cargo version mismatch');
 const cargoLock = readFileSync('src-tauri/Cargo.lock', 'utf8');
-assert.equal(cargoLock.match(/name = "cognate"\nversion = "([^"]+)"/)?.[1], version, 'Cargo lock version mismatch');
+assert.equal(cargoLock.match(/name = "cognate"\r?\nversion = "([^"]+)"/)?.[1], version, 'Cargo lock version mismatch');
 if (process.env.GITHUB_REF_TYPE === 'tag') {
   assert.equal(process.env.GITHUB_REF_NAME, `v${version}`, 'Release tag version mismatch');
 }
