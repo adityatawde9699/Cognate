@@ -6,11 +6,13 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "typecheck": "tsc --noEmit",
     "verify:build": "node scripts/verify-build.mjs",
     "preview": "vite preview",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "test:pwa": "npm run build && playwright test --config playwright.production.config.ts"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.2.9",
@@ -25,6 +27,7 @@
     "@tauri-apps/plugin-sql": "^2.0.0",
     "@tauri-apps/plugin-updater": "^2.10.1",
     "chart.js": "^4.5.1",
+    "ical.js": "^2.2.1",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "zustand": "^5.0.12"
@@ -38,6 +41,6 @@
     "@vitejs/plugin-react": "^4.7.0",
     "typescript": "^5.9.3",
     "vite": "^7.3.1",
-    "vitest": "^4.1.0"
+    "vitest": "^4.1.11"
   }
 }

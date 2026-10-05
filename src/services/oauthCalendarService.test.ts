@@ -76,3 +76,17 @@ describe('oauth calendar — token expiry', () => {
     expect(tokenExpired(0, now)).toBe(true);              // never set
   });
 });
+
+import {validateCalendarRedirect,REDIRECT_URI} from './oauthCalendarService';
+describe('OAuth redirect validation',()=>{
+  const created=1000000;
+  it('requires an exact callback and matching state',()=>{
+    expect(validateCalendarRedirect(`${REDIRECT_URI}?state=random&code=approved`,'random',created,created+1)).toBe('approved');
+    for (const url of [`${REDIRECT_URI}?state=wrong&code=x`,`${REDIRECT_URI}?state=random&state=random&code=x`,'https://evil.example/callback?state=random&code=x','approved']) expect(()=>validateCalendarRedirect(url,'random',created,created+1)).toThrow();
+  });
+  it('rejects expired, denied and duplicated-code callbacks',()=>{
+    expect(()=>validateCalendarRedirect(`${REDIRECT_URI}?state=random&code=x`,'random',created,created+600001)).toThrow('expired');
+    expect(()=>validateCalendarRedirect(`${REDIRECT_URI}?state=random&error=access_denied`,'random',created,created)).toThrow('not approved');
+    expect(()=>validateCalendarRedirect(`${REDIRECT_URI}?state=random&code=x&code=y`,'random',created,created)).toThrow('missing');
+  });
+});

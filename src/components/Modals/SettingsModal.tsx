@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
-import { dedupeTasks, getAllTasks, getSetting, IS_TAURI, setSetting } from '../../db';
+import { getSuspectedTaskDuplicates, getAllTasks, getSetting, IS_TAURI, setSetting } from '../../db';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
 import { getCalendarUrl, importBusyText, setCalendarUrl, syncCalendarUrl } from '../../services/calendarSyncService';
 import { saveCustomFieldDefs } from '../../services/customFields';
@@ -7,7 +7,7 @@ import { exportIcs, importIcsText } from '../../services/icalService';
 import { importTasks, parseImport } from '../../services/importService';
 import { enablePrivateAi } from '../../services/privateAi';
 import { exportBundle, importBundle } from '../../services/syncService';
-import { loadAllTasks } from '../../services/taskService';
+import { exportHistoryAudit, repairHistoryFromAudit, type HistoryAudit } from '../../services/historyAudit';
 import type { CustomFieldType } from '../../store';
 import { useStore } from '../../store';
 import { downloadStr } from '../../utils/export';
@@ -122,6 +122,9 @@ export function SettingsModal() {
   const [syncMsg, setSyncMsg] = useState('');
   const [syncBusy, setSyncBusy] = useState(false);
   const [dedupeMsg, setDedupeMsg] = useState('');
+  const [historyAudit, setHistoryAudit] = useState<HistoryAudit | null>(null);
+  const [auditBusy, setAuditBusy] = useState(false);
+  const [duplicateGroups, setDuplicateGroups] = useState<Awaited<ReturnType<typeof getSuspectedTaskDuplicates>>>([]);
 
   const [notifyEnabled, setNotifyEnabled] = useState(true);
   const [webhookOnComplete, setWebhookOnComplete] = useState(false);
@@ -135,9 +138,9 @@ export function SettingsModal() {
       getSetting('pomo_long_break_mins', '15').then(setLongBreakMins);
       getSetting('pomo_auto_break', '0').then((v: string) => setAutoBreak(v === '1'));
 
-      getSecret('int_discord').then(setDiscordHook);
-      getSecret('int_slack').then(setSlackHook);
-      getSecret('ai_api_key').then(setAiKey);
+      getSecret('int_discord').then(setDiscordHook).catch(e => toast(e.message));
+      getSecret('int_slack').then(setSlackHook).catch(e => toast(e.message));
+      getSecret('ai_api_key').then(setAiKey).catch(e => toast(e.message));
       getSetting('ai_provider', 'anthropic').then(setAiProvider);
       getSetting('ai_base_url', '').then(setAiBaseUrl);
       getSetting('ai_model', '').then(setAiModel);
@@ -171,8 +174,10 @@ export function SettingsModal() {
   };
 
   const handleUpdateSecret = async (key: string, value: string) => {
-    await setSecret(key, value);
-    window.dispatchEvent(new CustomEvent('settings-changed'));
+    try {
+      await setSecret(key, value);
+      window.dispatchEvent(new CustomEvent('settings-changed'));
+    } catch (error) { toast(error instanceof Error ? error.message : 'Secret could not be saved.'); }
   };
 
   const saveWorkHours = async (startStr: string, endStr: string) => {
@@ -223,16 +228,45 @@ export function SettingsModal() {
     }
   });
 
-  const removeDuplicates = async () => {
+  const scanDuplicates = async () => {
     setDedupeMsg('Scanning…');
+    setDuplicateGroups([]);
     try {
-      const n = await dedupeTasks();
-      await loadAllTasks(useStore.getState().currentFilter);
-      setDedupeMsg(n > 0 ? `Removed ${n} duplicate task${n === 1 ? '' : 's'}.` : 'No duplicate tasks found.');
-      toast(n > 0 ? `🧹 Removed ${n} duplicate${n === 1 ? '' : 's'}` : 'No duplicates found');
+      const groups = await getSuspectedTaskDuplicates();
+      setDuplicateGroups(groups);
+      setDedupeMsg(groups.length > 0
+        ? `${groups.length} suspected duplicate group${groups.length === 1 ? '' : 's'}. All tasks preserved.`
+        : 'No suspected duplicates found.');
     } catch (err: any) {
-      setDedupeMsg(`Cleanup failed: ${err?.message || err}`);
+      setDedupeMsg(`Scan failed: ${err?.message || err}. All tasks preserved.`);
     }
+  };
+
+  const exportAudit = async () => {
+    setDedupeMsg('Auditing saved tasks and history…');
+    setAuditBusy(true);
+    setHistoryAudit(null);
+    try {
+      const json = await exportHistoryAudit();
+      const report = JSON.parse(json).audit as HistoryAudit;
+      setHistoryAudit(report);
+      downloadStr(json, `cognate-history-audit-${Date.now()}.json`, 'application/json');
+      setDedupeMsg(`${report.gaps.length} history discrepancies. Snapshot preserved and report exported. Task data unchanged.`);
+    } catch (error: any) {
+      setDedupeMsg(`Audit failed: ${error?.message || error}. Task data unchanged.`);
+    } finally { setAuditBusy(false); }
+  };
+
+  const repairAudit = async () => {
+    if (!historyAudit) return;
+    setAuditBusy(true);
+    try {
+      const count = await repairHistoryFromAudit(historyAudit);
+      setHistoryAudit(null);
+      setDedupeMsg(`${count} repair operations committed. Local task rows preserved. Export a new audit to review remaining differences.`);
+    } catch (error: any) {
+      setDedupeMsg(`Repair failed: ${error?.message || error}. Local task rows preserved.`);
+    } finally { setAuditBusy(false); }
   };
 
   const exportSyncBundle = async () => {
@@ -391,13 +425,30 @@ export function SettingsModal() {
         </SettingsSection>
               <SettingsSection id="housekeeping">
           <h3>Housekeeping</h3>
-          <button className="btn-soft" onClick={removeDuplicates}>
-            <i className="fa-solid fa-broom"></i> Remove duplicate tasks
+          <button className="btn-soft" onClick={scanDuplicates}>
+            <i className="fa-solid fa-broom"></i> Scan for suspected duplicates
           </button>
-          {dedupeMsg && <small className="form-hint">{dedupeMsg}</small>}
+          <button className="btn-soft" onClick={exportAudit} disabled={auditBusy}>
+            <i className="fa-solid fa-file-export"></i> Export history audit
+          </button>
+          {historyAudit && historyAudit.gaps.length > 0 && (
+            <>
+              <small className="form-hint">Review the exported audit first. Repair records the saved local rows as newer history, including rows that conflict with tombstones. History-only entities remain available for review.</small>
+              <button className="btn-soft" onClick={repairAudit} disabled={auditBusy}>Repair history from audited local rows</button>
+            </>
+          )}
+          {dedupeMsg && <small className="form-hint" role="status">{dedupeMsg}</small>}
+          {duplicateGroups.length > 0 && (
+            <ul>{duplicateGroups.map(group => (
+              <li key={group.taskIds.join(',')}>
+                {group.title || '(Untitled)'} — {group.taskIds.length} matching tasks
+                <small className="form-hint">Task IDs: {group.taskIds.join(', ')}</small>
+              </li>
+            ))}</ul>
+          )}
           <small className="form-hint">
-            Cleans up exact-duplicate tasks (e.g. from an earlier seeding bug), keeping the most-complete copy.
-            Distinct tasks and anything in Trash are left untouched.
+            Matching tasks may be intentional or left by an earlier seeding bug.
+            Review them in Tasks and move unwanted copies to Trash individually.
           </small>
         </SettingsSection>
               <UpdatesSection />

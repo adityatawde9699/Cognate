@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 // protocol (extract → sign → seal → relay → decrypt → verify → authorize →
 // ingest). Convergence is asserted on the op-log projection directly.
 vi.mock('./syncService', () => ({
-  reconcileIntoApp: vi.fn(async () => ({ upserts: 0, deletes: 0 })),
+  mergeIntoApp: vi.fn(async (ops) => ({ applied: await (await import('./oplogStore')).ingestOps(ops), upserts: 0, deletes: 0 })),
 }));
 
 import { createShare, joinShare, syncShare, grantRole, getShare, addComment, getComments, shareRoomVersion, shareRoomPoll } from './shareService';
@@ -24,29 +24,7 @@ class MemStorage {
 }
 
 // In-memory stand-in for the Rust relay, matching its contract exactly.
-class FakeRelay {
-  rooms = new Map<string, Map<string, any>>();
-  versions = new Map<string, number>();
-  handle(method: string, url: string, body?: string) {
-    const path = new URL(url).pathname.split('/').filter(Boolean); // [rooms, room, blobs|version, actor?]
-    const room = path[1];
-    if (method === 'PUT' && path[3]) {
-      if (!this.rooms.has(room)) this.rooms.set(room, new Map());
-      this.rooms.get(room)!.set(path[3], JSON.parse(body!));
-      this.versions.set(room, (this.versions.get(room) ?? 0) + 1);
-      return { ok: true, status: 200, text: async () => '{"ok":true}' };
-    }
-    if (method === 'GET' && path[2] === 'blobs') {
-      const blobs = [...(this.rooms.get(room) ?? new Map()).entries()].map(([actor, b]) => ({ actor, ...b }));
-      return { ok: true, status: 200, text: async () => JSON.stringify({ blobs }) };
-    }
-    if (method === 'GET' && (path[2] === 'version' || path[2] === 'poll')) {
-      // The fake returns the current version immediately (no real long-poll wait).
-      return { ok: true, status: 200, text: async () => JSON.stringify({ version: this.versions.get(room) ?? 0 }) };
-    }
-    return { ok: false, status: 404, text: async () => '{}' };
-  }
-}
+import {FakeBatchRelay as FakeRelay} from './fixtures/fakeBatchRelay';
 
 function task(id: string, over: Partial<Task> = {}): Task {
   return {
@@ -213,3 +191,25 @@ async function getShareIdFrom(invite: string): Promise<string> {
   const json = JSON.parse(decodeURIComponent(escape(atob(invite))));
   return json.id as string;
 }
+
+it('rotates the read room on removal and preserves current content for remaining members',async()=>{
+  const A=new MemStorage(),B=new MemStorage(),C=new MemStorage(),relay=new FakeRelay();
+  vi.stubGlobal('fetch',vi.fn(async(url,init)=>relay.handle(init?.method ?? 'GET',url,init?.body)));
+  const {removeMember,inviteFor,rotateShareKey}=await import('./shareService');
+  let invite='',shareId='',bActor='',oldSecret='';
+  await as(A,async()=>{await logTaskUpsert(task('t1',{project_id:'p1',title:'original'}));const r=await createShare('p1','Team',RELAY);invite=r.invite;shareId=r.share.id;oldSecret=r.share.secret;await syncShare(shareId);});
+  await as(B,async()=>{await joinShare(invite);bActor=(await publicIdentity()).actor;await syncShare(shareId);});
+  await as(A,async()=>{await syncShare(shareId);await grantRole(shareId,bActor,'editor');await syncShare(shareId);});
+  await as(B,async()=>{await syncShare(shareId);await logTaskUpsert(task('t1',{project_id:'p1',title:'editor version'}));await syncShare(shareId);});
+  let rotated='';
+  await as(A,async()=>{await syncShare(shareId);await removeMember(shareId,bActor);const share=(await getShare(shareId))!;expect(share.epoch).toBe(2);expect(share.secret).not.toBe(oldSecret);rotated=await inviteFor(shareId);await logTaskUpsert(task('t1',{project_id:'p1',title:'after revocation'}));await syncShare(shareId);await expect(joinShare(invite)).rejects.toThrow('downgrade');});
+  await as(B,async()=>{await expect(syncShare(shareId)).rejects.toThrow('revoked or rotated');expect(projectTasks(await loadOps()).find(t=>t.id==='t1')?.title).toBe('editor version');await expect(rotateShareKey(shareId)).rejects.toThrow('genesis owner');});
+  await as(C,async()=>{await joinShare(rotated);await syncShare(shareId);expect(projectTasks(await loadOps()).find(t=>t.id==='t1')?.title).toBe('after revocation');});
+});
+it('rejects tampered invitations before persisting share capabilities',async()=>{
+  const A=new MemStorage(),B=new MemStorage();let invite='';
+  await as(A,async()=>{invite=(await createShare('p1','Team',RELAY)).invite;});
+  const token=JSON.parse(decodeURIComponent(escape(atob(invite))));token.projectId='foreign';
+  const tampered=btoa(unescape(encodeURIComponent(JSON.stringify(token))));
+  await as(B,async()=>{await expect(joinShare(tampered)).rejects.toThrow('signature');expect(await getShare(token.id)).toBeNull();});
+});

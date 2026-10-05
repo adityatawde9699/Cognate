@@ -9,6 +9,7 @@ import { useStore } from '../store';
 import { useTranslation } from '../i18n';
 import { isOnboarded, markOnboarded, quickStart } from '../services/onboardingService';
 import { loadAllTasks } from '../services/taskService';
+import {importRecoveryKit} from '../services/recoveryService';
 import { toast } from '../utils/toast';
 
 export function Onboarding() {
@@ -16,6 +17,7 @@ export function Onboarding() {
   const { t } = useTranslation();
   const [show, setShow] = useState(false);
   const [ics, setIcs] = useState('');
+  const [recovering,setRecovering]=useState(false),[kit,setKit]=useState(''),[passphrase,setPassphrase]=useState(''),[retired,setRetired]=useState(false),[error,setError]=useState('');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => { isOnboarded().then((done) => setShow(!done)); }, []);
@@ -35,6 +37,12 @@ export function Onboarding() {
     } finally { setBusy(false); }
   };
 
+  const recover=async()=>{
+    setBusy(true);setError('');
+    try {await importRecoveryKit(kit,passphrase);await markOnboarded();await loadAllTasks('all');setShow(false);setFilter('plan');}
+    catch(error:any){setError(error.message);}
+    finally{setBusy(false);}
+  };
   const skip = async () => { await markOnboarded(); setShow(false); };
 
   const card: React.CSSProperties = {
@@ -70,6 +78,15 @@ export function Onboarding() {
           }}
         />
 
+        <button className="btn-ghost" onClick={()=>setRecovering(!recovering)} disabled={busy}>Restore a recovery kit</button>
+        {recovering && <section aria-label="Recover replacement device">
+          <p>Restore on an empty replacement workspace. Retire the old device before syncing to avoid using the same signing identity on two devices.</p>
+          <textarea aria-label="Recovery kit" value={kit} onChange={event=>setKit(event.target.value)} rows={3}/>
+          <input aria-label="Recovery passphrase" type="password" value={passphrase} onChange={event=>setPassphrase(event.target.value)}/>
+          <label><input type="checkbox" checked={retired} onChange={event=>setRetired(event.target.checked)}/> I have retired the old device.</label>
+          <button className="btn-primary" disabled={busy || !retired || !kit || !passphrase} onClick={recover}>Restore replacement device</button>
+          {error && <p role="alert">{error}</p>}
+        </section>}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' }}>
           <button className="btn-ghost" onClick={skip} disabled={busy}>{t('onboarding.skip')}</button>
           <button className="btn-primary" onClick={finish} disabled={busy}>

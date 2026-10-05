@@ -4,10 +4,9 @@
    Owns this device's actor id and a single Hybrid Logical Clock, persists
    ops, and records mutations from the taskService choke point.
 
-   SHADOW MODE: today this runs alongside the SQLite-as-truth pipeline so we
-   can prove the op-log converges and projects correctly before cutting reads
-   over to it (the next Act 2 slice). Recording is best-effort and must never
-   affect the user-facing path — every entry point swallows its own errors.
+   Task/project row mutations record history in the database adapter's atomic
+   command path. These helpers record collaboration/history-only operations;
+   failed persistence propagates to callers. Legacy repair is explicit.
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 
 import { appendOps, loadOps, getSetting, setSetting } from '../db';
@@ -34,64 +33,68 @@ function init(): Promise<void> {
     const actor = await getActorId();
     const ops = await loadOps();
     const c = new Clock(actor, Date.now());
+    const saved = await getSetting('crdt_hlc','');
+    if (saved) {
+      const hlc = JSON.parse(saved);
+      if (!Number.isSafeInteger(hlc.wall) || !Number.isSafeInteger(hlc.counter) || hlc.wall<0 || hlc.counter<0 || hlc.actor!==actor) throw new Error('Invalid persisted operation clock.');
+      c.receive(hlc);
+    }
     // Fold the highest known timestamp in so our next tick is causally after it.
     let max: Op | null = null;
     for (const o of ops) if (!max || hlcCompare(o.hlc, max.hlc) > 0) max = o;
     if (max) c.receive(max.hlc, Date.now());
     clock = c;
   })().catch((e) => {
-    console.warn('[oplog] init failed:', e);
+    ready = null;
+    throw e;
   });
   return ready;
 }
 
 /** The fields we mirror into the op-log (everything that defines a task). */
-export const TRACKED: (keyof Task)[] = [
-  'title', 'description', 'deadline', 'tags', 'importance', 'effort', 'priority',
-  'done', 'created_at', 'completed_at', 'pomodoros_spent', 'project_id', 'parent_id',
-  'milestone_id', 'recurrence', 'sort_order', 'custom_fields', 'deleted_at',
-  'duration_min', 'energy', 'pinned', 'scheduled_start', 'scheduled_end',
-];
+export { TASK_FIELDS as TRACKED } from './taskFields';
+import { taskRecord } from './taskFields';
+
+async function refreshClock(): Promise<void> {
+  await init();
+  if (!clock) throw new Error('Operation clock unavailable.');
+  for (const op of await loadOps()) if (hlcCompare(op.hlc,clock.current())>=0) clock.receive(op.hlc);
+}
 
 function taskFields(task: Task): Record<string, Json> {
-  const out: Record<string, Json> = {};
-  for (const k of TRACKED) {
-    const v = (task as any)[k];
-    if (v !== undefined) out[k as string] = v as Json;
-  }
-  return out;
+  return taskRecord(task);
 }
 
 /** Record a task create/update as one `set` op per tracked field. */
 export async function logTaskUpsert(task: Task): Promise<void> {
   try {
-    await init();
+    await refreshClock();
     if (!clock || !task?.id) return;
     await appendOps(entityToOps(clock, task.id, taskFields(task)));
   } catch (e) {
-    console.warn('[oplog] logTaskUpsert failed:', e);
+    throw e;
   }
 }
 
 /** Soft-delete (Trash) is a field change, not a tombstone — the task survives. */
 export async function logTaskSoftDelete(id: string, when: string): Promise<void> {
   try {
-    await init();
+    await refreshClock();
     if (!clock || !id) return;
     await appendOps([setOp(clock, id, 'deleted_at', when)]);
   } catch (e) {
-    console.warn('[oplog] logTaskSoftDelete failed:', e);
+    throw e;
   }
 }
 
 /** Restore from Trash clears the soft-delete stamp. */
 export async function logTaskRestore(id: string): Promise<void> {
   try {
-    await init();
+    await refreshClock();
     if (!clock || !id) return;
     await appendOps([setOp(clock, id, 'deleted_at', null)]);
   } catch (e) {
-    console.warn('[oplog] logTaskRestore failed:', e);
+    throw e;
   }
 }
 
@@ -102,39 +105,37 @@ export async function logTaskRestore(id: string): Promise<void> {
  */
 export async function logCollabSet(entity: string, field: string, value: Json): Promise<Op | null> {
   try {
-    await init();
+    await refreshClock();
     if (!clock || !entity) return null;
     const op = setOp(clock, entity, field, value);
     await appendOps([op]);
     return op;
   } catch (e) {
-    console.warn('[oplog] logCollabSet failed:', e);
-    return null;
+    throw e;
   }
 }
 
 /** Tombstone a collaboration entity (e.g. remove a member). */
 export async function logCollabDel(entity: string): Promise<Op | null> {
   try {
-    await init();
+    await refreshClock();
     if (!clock || !entity) return null;
     const op = delOp(clock, entity);
     await appendOps([op]);
     return op;
   } catch (e) {
-    console.warn('[oplog] logCollabDel failed:', e);
-    return null;
+    throw e;
   }
 }
 
 /** Permanent deletion (purge / empty Trash) is a CRDT tombstone. */
 export async function logTaskDelete(id: string): Promise<void> {
   try {
-    await init();
+    await refreshClock();
     if (!clock || !id) return;
     await appendOps([delOp(clock, id)]);
   } catch (e) {
-    console.warn('[oplog] logTaskDelete failed:', e);
+    throw e;
   }
 }
 
@@ -145,7 +146,7 @@ export async function logTaskDelete(id: string): Promise<void> {
  */
 export async function backfillFromTasks(tasks: Task[]): Promise<number> {
   try {
-    await init();
+    await refreshClock();
     if (!clock) return 0;
     const known = new Set<string>();
     for (const o of await loadOps()) known.add(o.entity);
@@ -166,18 +167,21 @@ export async function backfillFromTasks(tasks: Task[]): Promise<number> {
  * remote history. The merge itself is conflict-free (see oplog.ts).
  */
 export async function ingestOps(ops: Op[]): Promise<number> {
-  try {
-    await init();
-    if (!clock || !ops?.length) return 0;
-    await appendOps(ops);
-    let max: Op | null = null;
-    for (const o of ops) if (!max || hlcCompare(o.hlc, max.hlc) > 0) max = o;
-    if (max) clock.receive(max.hlc, Date.now());
-    return ops.length;
-  } catch (e) {
-    console.warn('[oplog] ingestOps failed:', e);
-    return 0;
-  }
+  await init();
+  if (!clock) throw new Error('Operation clock unavailable.');
+  if (!ops?.length) return 0;
+  await appendOps(ops);
+  let max: Op | null = null;
+  for (const o of ops) if (!max || hlcCompare(o.hlc, max.hlc) > 0) max = o;
+  if (max) clock.receive(max.hlc, Date.now());
+  return ops.length;
+}
+
+/** Advance the in-memory clock after a transaction already persisted ops. */
+export async function observeOps(ops: Op[]): Promise<void> {
+  await init();
+  if (!clock) throw new Error('Operation clock unavailable.');
+  for (const op of ops) if (hlcCompare(op.hlc, clock.current()) >= 0) clock.receive(op.hlc);
 }
 
 /** Project the persisted op-log to current entity state (the future read path). */
@@ -195,4 +199,14 @@ export async function actorId(): Promise<string> {
 export function _resetForTests(): void {
   clock = null;
   ready = null;
+}
+
+/** Record an owner-authorized checkpoint as one durable operation batch. */
+export async function logCollabCheckpoint(states:Map<string,EntityState>,deleted:string[]=[]):Promise<void> {
+  await refreshClock();
+  if(!clock) throw new Error('Operation clock unavailable.');
+  const ops:Op[]=[];
+  for(const [entity,state] of states) for(const [field,value] of Object.entries(state)) ops.push(setOp(clock,entity,field,value));
+  for(const entity of deleted) ops.push(delOp(clock,entity));
+  await appendOps(ops);
 }

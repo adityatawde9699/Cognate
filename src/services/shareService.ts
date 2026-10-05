@@ -25,19 +25,21 @@
 
 import { IS_TAURI, getSetting, setSetting, loadOps, getProjects, upsertProjectRaw } from '../db';
 import { getSecret, setSecret } from '../utils/secrets';
-import { materialize, type Op } from './oplog';
+import { canonicalJson, materialize, type Op } from './oplog';
 import { isTaskEntity, entityStateToTask, projectTasks } from './projector';
 import { projectActivity, type ActivityEntry } from './activity';
 import { getWorkHours, DEFAULT_WORK_START, DEFAULT_WORK_END } from './planService';
 import { planTeam, toTeamPlanTask, type TeamPlanResult, type TeamAssignment } from './teamPlanService';
 import { loadProjects } from './taskService';
-import { generateShareSecret, importShareKey, roomIdForSecret, seal, open, type SealedBlob } from './crypto';
-import { publicIdentity, signLocalOps } from './identity';
-import { authorize, memberActor, type Member, type Role, type SignedOp } from './collab';
+import { generateShareSecret, importShareKey, roomIdForSecret,signBytes,verifyBytes,importPublicKey } from './crypto';
+import { publicIdentity,getIdentity } from './identity';
+import { authorizeVerified, memberActor, type Member, type Role } from './collab';
 import { projectComments, projectRoster, projectAssignees, projectSharedProjects, type Comment } from './collabProjection';
-import { logCollabSet, logCollabDel, ingestOps, actorId } from './oplogStore';
-import { reconcileIntoApp } from './syncService';
-import { httpGet, httpPut, blobsUrl } from './relayTransport';
+import { logCollabSet, logCollabDel,logCollabCheckpoint, actorId } from './oplogStore';
+import { mergeIntoApp } from './syncService';
+import { httpGet } from './relayTransport';
+
+import { pushBatches, pullBatches, withSyncLock,checkRetryWindow } from './batchSync';
 
 const METAS_KEY = 'shares_v1';
 const secretKey = (id: string) => `share_secret_${id}`;
@@ -50,6 +52,8 @@ export interface ShareMeta {
   url: string;                // relay base url
   role: Role;                 // our last-known role in this share
   genesis: { actor: string; pub: string }; // the trusted owner of the doc
+  epoch?: number;
+  inviteSig?:string;
 }
 
 /** A share with its secret loaded — the form push/pull need. */
@@ -59,7 +63,9 @@ export interface Share extends ShareMeta {
 
 /** A portable invite. The `secret` is a capability — share it securely. */
 export interface InviteToken {
-  v: 1;
+  v: 2;
+  epoch?: number;
+  sig?:string;
   id: string;
   name: string;
   projectId: string;
@@ -99,6 +105,14 @@ export async function getShare(id: string): Promise<Share | null> {
   const meta = (await loadMetas()).find((m) => m.id === id);
   if (!meta) return null;
   const secret = await getSecret(secretKey(id));
+  const rotation=await getSecret(`share_rotation_${id}`);
+  if(rotation) {
+    const pending=JSON.parse(rotation);
+    if(pending.phase==='published' && (meta.epoch ?? 1)<pending.epoch) {
+      await setSecret(secretKey(id),pending.secret);
+      const recovered={...meta,epoch:pending.epoch,inviteSig:pending.inviteSig};await upsertMeta(recovered);return {...recovered,secret:pending.secret};
+    }
+  }
   return secret ? { ...meta, secret } : null;
 }
 
@@ -117,6 +131,13 @@ export async function importShareRecord(meta: ShareMeta, secret: string): Promis
 
 const enc = (o: unknown) => btoa(unescape(encodeURIComponent(JSON.stringify(o))));
 const dec = <T>(s: string): T => JSON.parse(decodeURIComponent(escape(atob(s)))) as T;
+
+async function signInvite(invite:InviteToken):Promise<string> {
+  const me=await getIdentity();
+  if(me.actor!==invite.genesis.actor || me.pub!==invite.genesis.pub) throw new Error('Only the genesis owner can mint a new signed invite.');
+  const {sig:_sig,...payload}=invite;
+  return signBytes(me.privateKey,new TextEncoder().encode(canonicalJson(payload as never)));
+}
 
 /** Create a share for a project. We become its genesis owner. Returns an
  *  invite token string to hand a teammate over a secure channel. */
@@ -142,7 +163,10 @@ export async function createShare(projectId: string, name: string, url?: string)
     await logCollabSet(`project:${projectId}`, 'color', proj.color ?? '');
   }
 
-  const invite: InviteToken = { v: 1, id, name, projectId, url: relayUrl, secret, genesis: meta.genesis };
+  const invite: InviteToken = { v: 2, id, name, projectId, url: relayUrl, secret, genesis: meta.genesis };
+  invite.epoch=1;
+  invite.sig=await signInvite(invite);
+  meta.epoch=1;meta.inviteSig=invite.sig;await upsertMeta(meta);
   return { share: { ...meta, secret }, invite: enc(invite) };
 }
 
@@ -155,9 +179,13 @@ export async function joinShare(token: string): Promise<Share> {
   } catch {
     throw new Error('Invalid invite token.');
   }
-  if (t.v !== 1 || !t.id || !t.secret || !t.genesis?.pub) throw new Error('Invalid invite token.');
+  if (t.v !== 2 || !t.id || !t.projectId || !t.secret || !t.genesis?.actor || !t.genesis.pub || !t.sig || !Number.isInteger(t.epoch) || t.epoch!<1) throw new Error('Invalid or legacy invite. Ask the owner for a signed invitation.');
+  const {sig,...payload}=t;
+  if(!await verifyBytes(await importPublicKey(t.genesis.pub),sig,new TextEncoder().encode(canonicalJson(payload as never)))) throw new Error('Invite signature does not match its owner.');
+  const existing=(await loadMetas()).find(meta=>meta.id===t.id);
+  if(existing && (existing.genesis.actor!==t.genesis.actor || existing.genesis.pub!==t.genesis.pub || existing.projectId!==t.projectId || (t.epoch ?? 1)<(existing.epoch ?? 1))) throw new Error('Invite attempts to replace share trust or downgrade its epoch.');
 
-  const meta: ShareMeta = { id: t.id, name: t.name, projectId: t.projectId, url: (t.url ?? '').replace(/\/$/, ''), role: 'viewer', genesis: t.genesis };
+  const meta: ShareMeta = { id: t.id, name: t.name, projectId: t.projectId, url: (t.url ?? '').replace(/\/$/, ''), role: 'viewer', genesis: t.genesis, epoch:t.epoch ?? 1,inviteSig:t.sig };
   await setSecret(secretKey(t.id), t.secret);
   await upsertMeta(meta);
 
@@ -190,7 +218,40 @@ export async function grantRole(shareId: string, actor: string, role: Role): Pro
 
 /** Remove a member, revoking their write access for ops after this point. */
 export async function removeMember(shareId: string, actor: string): Promise<void> {
+  const share=await getShare(shareId),me=await publicIdentity();
+  if(!share || me.actor!==share.genesis.actor || me.pub!==share.genesis.pub || actor===me.actor) throw new Error('The genesis owner must revoke another member.');
   await logCollabDel(`member:${shareId}:${actor}`);
+  await rotateShareKey(shareId);
+}
+
+/** Rotate room/key after revocation. Remaining members receive the new signed
+ * invite through a secure external channel; revoked devices see only old data. */
+export async function rotateShareKey(shareId:string):Promise<string> {
+  const share=await getShare(shareId),me=await publicIdentity();
+  if(!share || me.actor!==share.genesis.actor || me.pub!==share.genesis.pub) throw new Error('Only the genesis owner can rotate the read key.');
+  return withSyncLock(await roomIdForSecret(share.secret),async()=>{
+  const oldOps=await shareOps(share),states=materialize(oldOps);
+  const roster=await getRoster(shareId);
+  for(const member of roster) if(member.actor!==me.actor) {
+    states.set(`member:${shareId}:${member.actor}`,{pub:member.pub,role:member.role,...(member.work_start_min!==undefined?{work_start:member.work_start_min}:{}),...(member.work_end_min!==undefined?{work_end:member.work_end_min}:{})});
+  }
+  const removed=[...new Set(oldOps.filter(op=>op.kind==='del' && !states.has(op.entity)).map(op=>op.entity))];
+  const retained=await getSecret(`share_rotation_${share.id}`),pending=retained?JSON.parse(retained):null;
+  const secret=pending?.phase==='prepared'?pending.secret:generateShareSecret(),epoch=pending?.phase==='prepared'?pending.epoch:(share.epoch ?? 1)+1;
+  const invite:InviteToken={v:2,id:share.id,name:share.name,projectId:share.projectId,url:share.url,secret,genesis:share.genesis,epoch};
+  invite.sig=await signInvite(invite);
+  const record={oldSecret:share.secret,secret,epoch,inviteSig:invite.sig,phase:'prepared'};
+  await setSecret(`share_rotation_${share.id}`,JSON.stringify(record));
+  await logCollabCheckpoint(states,removed);
+  await logCollabSet(`member:${shareId}:${me.actor}`,'read_epoch',epoch);
+  // Publish the signed freeze in the old room before exposing the new key.
+  await pushShareUnlocked(share);
+  await setSecret(`share_rotation_${share.id}`,JSON.stringify({...record,phase:'published'}));
+  await setSecret(secretKey(share.id),secret);
+  const {secret:_old,...meta}=share;
+  await upsertMeta({...meta,epoch,inviteSig:invite.sig});
+  return enc(invite);
+  });
 }
 
 /** Re-derive the shareable invite token for an existing share (to copy again). */
@@ -198,14 +259,16 @@ export async function inviteFor(shareId: string): Promise<string> {
   const share = await getShare(shareId);
   if (!share) throw new Error('Unknown share.');
   const invite: InviteToken = {
-    v: 1,
+    v: 2,
     id: share.id,
     name: share.name,
     projectId: share.projectId,
     url: share.url,
     secret: share.secret,
     genesis: share.genesis,
+    epoch:share.epoch ?? 1,
   };
+  invite.sig=share.inviteSig || await signInvite(invite);
   return enc(invite);
 }
 
@@ -333,6 +396,7 @@ export async function shareOps(share: ShareMeta): Promise<Op[]> {
   for (const [id, s] of state) {
     if (isTaskEntity(id) && (s as any).project_id === share.projectId) taskIds.add(id);
   }
+  for(const op of all) if(op.kind==='set' && op.field==='project_id' && op.value===share.projectId && !state.has(op.entity)) taskIds.add(op.entity);
   const memberPrefix = `member:${share.id}:`;
   const commentPrefix = `comment:${share.id}:`;
   const projectEntity = `project:${share.projectId}`;
@@ -358,40 +422,42 @@ export interface ShareSyncResult {
 }
 
 /** Seal this project's signed ops under the share key and upload them. */
-export async function pushShare(share: Share): Promise<number> {
+export async function pushShare(share:Share):Promise<number> {
+  return withSyncLock(await roomIdForSecret(share.secret),async()=>{await pullShareUnlocked(share);await assertCurrentEpoch(share);return pushShareUnlocked(share);});
+}
+async function assertCurrentEpoch(share:Share):Promise<void> {
+  const required=Number(await getSetting(`share_required_epoch:${share.id}`,'1'));
+  if(required>(share.epoch ?? 1)) throw new Error('This share key was revoked or rotated. Ask the owner for the new signed invitation before uploading.');
+}
+async function pushShareUnlocked(share: Share): Promise<number> {
   if (!share.url) throw new Error('This share has no relay URL configured.');
   const ops = await shareOps(share);
-  const signed = await signLocalOps(ops);
-  const key = await importShareKey(share.secret);
-  const room = await roomIdForSecret(share.secret);
-  const me = await actorId();
-  await httpPut(`${blobsUrl(share.url, room)}/${me}`, JSON.stringify(await seal(key, signed)));
-  return ops.length;
+  const key=await importShareKey(share.secret),room=await roomIdForSecret(share.secret);
+  return pushBatches({url:share.url,room,key,context:{kind:'share',id:share.id,epoch:share.epoch ?? 1}},ops);
 }
 
 /** Fetch the room, decrypt, verify, authorize, ingest, and reconcile. */
-export async function pullShare(share: Share): Promise<Omit<ShareSyncResult, 'pushed'>> {
+export async function pullShare(share:Share):Promise<Omit<ShareSyncResult,'pushed'>> {
+  return withSyncLock(await roomIdForSecret(share.secret),()=>pullShareUnlocked(share));
+}
+async function pullShareUnlocked(share: Share): Promise<Omit<ShareSyncResult, 'pushed'>> {
   if (!share.url) throw new Error('This share has no relay URL configured.');
   const key = await importShareKey(share.secret);
   const room = await roomIdForSecret(share.secret);
 
-  const raw = await httpGet(blobsUrl(share.url, room));
-  const parsed = JSON.parse(raw);
-  const blobs: (SealedBlob & { actor?: string })[] = Array.isArray(parsed) ? parsed : parsed.blobs ?? [];
-
-  const incoming: SignedOp[] = [];
-  for (const blob of blobs) {
-    try {
-      incoming.push(...(await open<SignedOp[]>(key, blob)));
-    } catch (e) {
-      console.warn('[share] skipped an undecryptable/foreign blob:', e);
-    }
-  }
-
-  // Verify signatures + apply RBAC against the doc's genesis owner.
-  const res = await authorize(incoming, share.genesis);
-  await ingestOps(res.accepted); // only authenticated, authorized ops enter our log
-  const { upserts, deletes } = await reconcileIntoApp();
+  const pulled=await pullBatches({url:share.url,room,key,context:{kind:'share',id:share.id,epoch:share.epoch ?? 1},trustedBindings:{[share.genesis.actor]:share.genesis.pub}},async archive=>{
+    const localState=materialize(await loadOps());
+    const taskIds=new Set<string>(),forbiddenTaskIds=new Set<string>();
+    for(const [id,task] of localState) if(isTaskEntity(id)) (task.project_id===share.projectId?taskIds:forbiddenTaskIds).add(id);
+    const res=authorizeVerified(archive.flatMap(batch=>batch.ops.map(op=>({op,pub:batch.pub}))),share.genesis,{shareId:share.id,projectId:share.projectId,taskIds,forbiddenTaskIds});
+    const projection=await mergeIntoApp(res.accepted);
+    return {...res,...projection};
+  });
+  const res=pulled.result;
+  const epochs=res.accepted.filter(op=>op.kind==='set' && op.entity.startsWith(`member:${share.id}:`) && op.field==='read_epoch' && Number.isSafeInteger(op.value)).map(op=>op.kind==='set'?Number(op.value):0);
+  const previous=Number(await getSetting(`share_required_epoch:${share.id}`,'1'));
+  await setSetting(`share_required_epoch:${share.id}`,String(Math.max(previous,...epochs)));
+  const {upserts,deletes}=res;
 
   // Materialize any shared project record so a joiner sees it named + grouped.
   const sharedProjects = projectSharedProjects(await loadOps());
@@ -419,12 +485,16 @@ export async function pullShare(share: Share): Promise<Omit<ShareSyncResult, 'pu
 }
 
 /** One full share sync: push our contribution, then pull everyone's. */
-export async function syncShare(shareId: string): Promise<ShareSyncResult> {
+export async function syncShare(shareId: string,options:{automatic?:boolean}={}): Promise<ShareSyncResult> {
   const share = await getShare(shareId);
   if (!share) throw new Error('Unknown share.');
-  const pushed = await pushShare(share);
-  const pulled = await pullShare(share);
-  return { pushed, ...pulled };
+  const room=await roomIdForSecret(share.secret);
+  if(options.automatic) await checkRetryWindow(room,share.url);
+  return withSyncLock(room,async()=>{
+    await pullShareUnlocked(share);await assertCurrentEpoch(share);
+    const pushed=await pushShareUnlocked(share);
+    return {pushed,...await pullShareUnlocked(share)};
+  });
 }
 
 /** The relay's cheap change-counter for a share's room. Lets a client poll for
@@ -434,7 +504,7 @@ export async function shareRoomVersion(shareId: string): Promise<number> {
   if (!share?.url) return 0;
   try {
     const room = await roomIdForSecret(share.secret);
-    const raw = await httpGet(`${share.url}/rooms/${room}/version`);
+    const raw = await httpGet(`${share.url}/v2/rooms/${room}/version`);
     const v = JSON.parse(raw)?.version;
     return typeof v === 'number' ? v : 0;
   } catch {
@@ -450,7 +520,7 @@ export async function shareRoomPoll(shareId: string, since: number): Promise<num
   if (!share?.url) return since;
   try {
     const room = await roomIdForSecret(share.secret);
-    const raw = await httpGet(`${share.url}/rooms/${room}/poll?since=${since}`);
+    const raw = await httpGet(`${share.url}/v2/rooms/${room}/poll?since=${since}`);
     const v = JSON.parse(raw)?.version;
     return typeof v === 'number' ? v : since;
   } catch {
@@ -459,11 +529,11 @@ export async function shareRoomPoll(shareId: string, since: number): Promise<num
 }
 
 /** Sync every share we participate in (best-effort per share). */
-export async function syncAllShares(): Promise<Record<string, ShareSyncResult | { error: string }>> {
+export async function syncAllShares(options:{automatic?:boolean}={}): Promise<Record<string, ShareSyncResult | { error: string }>> {
   const out: Record<string, ShareSyncResult | { error: string }> = {};
   for (const meta of await loadMetas()) {
     try {
-      out[meta.id] = await syncShare(meta.id);
+      out[meta.id] = await syncShare(meta.id,options);
     } catch (e) {
       out[meta.id] = { error: e instanceof Error ? e.message : String(e) };
     }

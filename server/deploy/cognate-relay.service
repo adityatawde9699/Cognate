@@ -1,0 +1,26 @@
+[Unit]
+Description=Cognate encrypted sync relay
+After=network.target
+
+[Service]
+User=cognate-relay
+Group=cognate-relay
+ExecStart=/usr/local/bin/cognate-relay
+EnvironmentFile=/etc/cognate-relay.env
+StateDirectory=cognate-relay
+StateDirectoryMode=0700
+WorkingDirectory=/var/lib/cognate-relay
+Environment=RELAY_ADDR=127.0.0.1:8787
+Environment=RELAY_DATA=/var/lib/cognate-relay/relay-data.json
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/cognate-relay
+
+[Install]
+WantedBy=multi-user.target

@@ -25,8 +25,8 @@ GET  /health                        -> {"ok":true}           # open, for probes
 - **`version`** increments on every write to a room; clients poll it cheaply to know
   *whether* to do a full (decrypt + merge) sync.
 - **`poll`** holds the request until the room's version moves past `since` (or a
-  ~25s timeout), so edits fan out in about a second without websockets. It runs on a
-  worker-thread pool, so a held poll never blocks other clients.
+  ~25s timeout), without websockets. Each held poll occupies a worker thread; poll admission
+  reserves half the worker pool for ordinary requests. Delivery latency is unmeasured.
 
 ## Run
 
@@ -39,10 +39,10 @@ RELAY_TOKEN=secret cargo run         # require Authorization: Bearer secret on /
 | Env var | Default | Purpose |
 |---|---|---|
 | `RELAY_ADDR` | `127.0.0.1:8787` | bind address |
-| `RELAY_DATA` | `relay-data.json` | write-through durable store path |
+| `RELAY_DATA` | `relay-data.json` | Synced JSON snapshot file (failed writes return 503) |
 | `RELAY_TOKEN` | _(empty = open)_ | shared bearer token gating `/rooms/*` |
 | `RELAY_RATE_LIMIT` / `RELAY_RATE_WINDOW` | `240` / `60` | per-IP fixed-window limit (→ 429) |
-| `RELAY_WORKERS` | `16` | request worker threads (so long-polls don't block) |
+| `RELAY_WORKERS` | `16` | request worker threads (long-polls occupy workers) |
 
 Then in Cognate → **Settings → Live sync**, set the Relay URL (e.g.
 `http://127.0.0.1:8787`), a strong shared passphrase, and (if set) the access token.
@@ -57,13 +57,17 @@ cargo clippy -- -D warnings
 
 ## Notes / production
 
-- **Durability:** state is kept in memory and written through to `RELAY_DATA` (JSON,
-  temp-file + rename) on each write, so a restart doesn't drop a team's docs. Swap in
-  a real KV store (Redis, SQLite, Cloudflare KV, S3) for scale — the contract is tiny.
+- **Durability:** production PUT publishes a file-synced snapshot (with parent-directory sync on Unix) before acknowledgement. Failed persistence returns 503 without changing memory/version. Corrupt stored data fails startup. Helper-level unavailable-disk, quota and restart tests pass; actual disk-full, process-kill and sustained HTTP load fixtures remain required.
 - **Auth:** set `RELAY_TOKEN` for a hosted/gated relay. It is **not** a decryption
   key — the relay still only ever sees ciphertext; it just stops anonymous strangers
   from filling your relay.
 - **CORS** is open (`Access-Control-Allow-Origin: *`) so browser/PWA clients work; the
   desktop app routes through the Rust `relay_fetch` command instead.
-- Because the server only ever sees ciphertext, a packet capture or a dump of its
-  store reveals nothing about anyone's tasks — the E2E property (asserted in tests).
+- Because the server only ever sees ciphertext, the task contents are encrypted. Room/actor IDs, blob sizes, timing, and network
+  metadata remain visible; encryption does not establish availability or freshness.
+
+Track production blockers and acceptance criteria in [the roadmap](../docs/PRODUCTION_ROADMAP.md).
+
+Storage is bounded: 1 MB request bodies, 32 MB serialized store, 1000 rooms, 128 actors per room. Corrupt/unreadable stores fail startup. Poll admission reserves half the request workers. See [deployment requirements](../docs/RELAY.md#deployment-requirements); HTTP load and crash/restart protocol validation remain open.
+
+Protocol v2 provides immutable encrypted batch journals and durable restart-safe cursors. New clients require v2 and retain legacy local bundles for explicit migration. See [protocol, quotas, trust limits and TLS deployment requirements](../docs/RELAY.md). `/metrics` is bearer-gated when `RELAY_TOKEN` is configured. Journal compaction and staging slow-client/disk-full validation remain open.

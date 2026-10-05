@@ -4,7 +4,7 @@
    no-op (or empty) off Tauri so the browser fallback stays happy.
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 
-import { IS_TAURI, checkpoint, integrityCheck, getSetting, setSetting } from '../db';
+import { IS_TAURI, initDb, runDatabaseMaintenance, integrityCheck, getSetting, setSetting } from '../db';
 
 export interface BackupInfo {
   name: string;
@@ -19,10 +19,10 @@ async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T
   return invoke<T>(cmd, args);
 }
 
-/** Take a consistent snapshot of the DB. Checkpoints the WAL first. */
+/** Native SQLite online snapshot includes committed WAL data. */
 export async function createBackup(reason = 'manual'): Promise<BackupInfo | null> {
   if (!IS_TAURI) return null;
-  await checkpoint();
+  await initDb();
   return invoke<BackupInfo>('backup_database', { reason });
 }
 
@@ -34,7 +34,7 @@ export async function listBackups(): Promise<BackupInfo[]> {
 /** Restore a backup over the live DB. Caller should reload the app afterward. */
 export async function restoreBackup(name: string): Promise<void> {
   if (!IS_TAURI) return;
-  await invoke('restore_backup', { name });
+  await runDatabaseMaintenance(() => invoke('restore_backup', { name }), true);
 }
 
 export async function deleteBackup(name: string): Promise<void> {
@@ -48,14 +48,10 @@ const LAST_BACKUP_KEY = 'last_backup_at';
 /** Once per day, snapshot the DB automatically. Safe to call on every boot. */
 export async function maybeAutoBackup(): Promise<void> {
   if (!IS_TAURI) return;
-  try {
-    const last = Number(await getSetting(LAST_BACKUP_KEY, '0')) || 0;
-    if (Date.now() - last < DAY_MS) return;
-    await createBackup('auto');
-    await setSetting(LAST_BACKUP_KEY, String(Date.now()));
-  } catch (e) {
-    console.warn('[backupService] auto-backup failed:', e);
-  }
+  const last = Number(await getSetting(LAST_BACKUP_KEY, '0')) || 0;
+  if (Date.now() - last < DAY_MS) return;
+  await createBackup('auto');
+  await setSetting(LAST_BACKUP_KEY, String(Date.now()));
 }
 
 /** Run SQLite's integrity checks; returns 'ok' or a short problem description. */

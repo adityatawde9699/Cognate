@@ -20,3 +20,8 @@ describe('privateAi', () => {
     expect(isLocalProvider('openai', 'https://api.openai.com/v1')).toBe(false);
   });
 });
+
+it('does not label remote Ollama or URLs containing loopback text as private',()=>{
+  for (const url of ['https://models.example/v1','http://localhost.evil.example/v1','https://evil.example/localhost','http://localhost@evil.example','http://0.0.0.0:11434']) expect(isLocalProvider('ollama',url)).toBe(false);
+  expect(isLocalProvider('custom','http://[::1]:8080/v1')).toBe(true);
+});

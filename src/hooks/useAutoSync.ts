@@ -18,7 +18,7 @@ export function useAutoSync(): void {
     const tick = async () => {
       if (stopped) return;
       try {
-        if (await isSyncEnabled()) await syncNow();
+        if (await isSyncEnabled()) await syncNow({automatic:true});
       } catch {
         // Offline or relay unreachable — try again next interval.
       }

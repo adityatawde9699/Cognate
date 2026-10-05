@@ -16,6 +16,8 @@ export function TaskModal() {
   const milestones = useStore((s) => s.milestones);
   const customFieldDefs = useStore((s) => s.customFieldDefs);
 
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [deadline, setDeadline] = useState('');
@@ -33,6 +35,7 @@ export function TaskModal() {
 
   useEffect(() => {
     if (isTaskModalOpen) {
+      setSaveError('');
       if (editingTask) {
         setTitle(editingTask.title);
         setDescription(editingTask.description || '');
@@ -73,6 +76,8 @@ export function TaskModal() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (saving) return;
+    setSaveError('');
     if (!title.trim()) {
       toast('⚠️ Please enter a task title');
       return;
@@ -92,16 +97,20 @@ export function TaskModal() {
       custom_fields: customFields,
     };
 
-    if (editingTask) {
-      await editTask(editingTask.id, payload);
-      toast('✏️ Task updated');
-    } else {
-      await addTask(payload);
-      toast('✅ Task created!');
-    }
-
-    setTaskModalOpen(false);
-    // No more window.dispatchEvent('refresh-tasks') — CQRS handles state updates
+    setSaving(true);
+    try {
+      if (editingTask) {
+        await editTask(editingTask.id, payload);
+        toast('✏️ Task updated');
+      } else {
+        const task = await addTask(payload);
+        if (!task) throw new Error('Task could not be saved. Your input has been preserved.');
+        toast('✅ Task created!');
+      }
+      setTaskModalOpen(false);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : String(error));
+    } finally { setSaving(false); }
   };
 
   const aiTask = () => ({
@@ -190,6 +199,7 @@ export function TaskModal() {
           </button>
         </div>
 
+        {saveError && <p role="alert" className="form-hint">Save failed: {saveError}</p>}
         <form onSubmit={handleSubmit} style={{ flex: '1 1 auto', overflowY: 'auto', padding: '22px', display: 'block' }}>
           <div style={{ marginBottom: '16px' }}>
             <input
@@ -363,7 +373,7 @@ export function TaskModal() {
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '16px', paddingTop: '8px' }}>
             <button type="button" className="btn-ghost" onClick={() => setTaskModalOpen(false)} style={{ padding: '10px 18px', borderRadius: '9px', fontSize: '.87rem' }}>Cancel</button>
-            <button type="submit" className="btn-primary" style={{ padding: '10px 18px', borderRadius: '9px', fontSize: '.87rem' }}>{editingTask ? 'Save changes' : 'Create task'}</button>
+            <button type="submit" disabled={saving} className="btn-primary" style={{ padding: '10px 18px', borderRadius: '9px', fontSize: '.87rem' }}>{editingTask ? 'Save changes' : 'Create task'}</button>
           </div>
         </form>
       </div>

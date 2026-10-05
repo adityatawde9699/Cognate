@@ -5,13 +5,14 @@ const h = vi.hoisted(() => ({
   invoke: vi.fn(),
   getSetting: vi.fn(),
   setSetting: vi.fn().mockResolvedValue(undefined),
-  checkpoint: vi.fn().mockResolvedValue(undefined),
+  maintenance: vi.fn(async (action: () => Promise<unknown>) => action()),
 }));
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: h.invoke }));
 vi.mock('../db', () => ({
   IS_TAURI: true,
-  checkpoint: h.checkpoint,
+  initDb: vi.fn().mockResolvedValue(undefined),
+  runDatabaseMaintenance: h.maintenance,
   integrityCheck: vi.fn().mockResolvedValue('ok'),
   getSetting: h.getSetting,
   setSetting: h.setSetting,
@@ -29,10 +30,9 @@ const sample = { name: 'cognote-x.db', path: '', size: 1, created_ms: 1, reason:
 describe('backupService', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('createBackup checkpoints the WAL before snapshotting', async () => {
+  it('createBackup uses a native online snapshot', async () => {
     h.invoke.mockResolvedValue(sample);
     const r = await createBackup('manual');
-    expect(h.checkpoint).toHaveBeenCalled();
     expect(h.invoke).toHaveBeenCalledWith('backup_database', { reason: 'manual' });
     expect(r?.name).toBe('cognote-x.db');
   });
@@ -51,10 +51,18 @@ describe('backupService', () => {
     expect(h.setSetting).toHaveBeenCalledWith('last_backup_at', expect.any(String));
   });
 
+  it('failed snapshot never records a successful automatic backup', async () => {
+    h.getSetting.mockResolvedValue('0');
+    h.invoke.mockRejectedValueOnce(new Error('disk full'));
+    await expect(maybeAutoBackup()).rejects.toThrow('disk full');
+    expect(h.setSetting).not.toHaveBeenCalled();
+  });
+
   it('restore and delete forward the backup name to the backend', async () => {
     h.invoke.mockResolvedValue(undefined);
     await restoreBackup('cognote-x.db');
     expect(h.invoke).toHaveBeenCalledWith('restore_backup', { name: 'cognote-x.db' });
+    expect(h.maintenance).toHaveBeenCalledWith(expect.any(Function), true);
     await deleteBackup('cognote-x.db');
     expect(h.invoke).toHaveBeenCalledWith('delete_backup', { name: 'cognote-x.db' });
   });

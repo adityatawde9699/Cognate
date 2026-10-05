@@ -6,6 +6,7 @@ on:
       - main
       - master
   pull_request:
+  workflow_call:
 
 jobs:
   test:
@@ -25,6 +26,15 @@ jobs:
       - name: Install JS dependencies
         run: npm ci
 
+      - name: Check TypeScript
+        run: npm run typecheck
+
+      - name: Build web application
+        run: npm run build
+
+      - name: Verify build contains no local data
+        run: npm run verify:build
+
       - name: Run JS tests
         run: npm test
 
@@ -33,6 +43,9 @@ jobs:
 
       - name: Run e2e tests
         run: npm run test:e2e
+
+      - name: Verify offline production shell
+        run: npm run test:pwa
 
       - name: Upload Playwright report
         if: ${{ !cancelled() }}

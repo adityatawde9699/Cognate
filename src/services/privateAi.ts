@@ -21,8 +21,12 @@ export function privateAiPreset(model = DEFAULT_LOCAL_MODEL): AiPreset {
 
 /** True when a provider/base pair keeps inference on-device. Pure. */
 export function isLocalProvider(provider: string, baseUrl: string): boolean {
-  if (provider === 'ollama' || provider === 'llamacpp') return true;
-  return /\b(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])\b/.test(baseUrl || '');
+  const effective = baseUrl.trim() || (provider==='ollama' ? OLLAMA_BASE : provider==='llamacpp' ? 'http://localhost:8080/v1' : '');
+  try {
+    const url = new URL(effective);
+    return ['http:','https:'].includes(url.protocol) && !url.username && !url.password &&
+      (url.hostname==='localhost' || url.hostname==='[::1]' || /^127\.\d+\.\d+\.\d+$/.test(url.hostname));
+  } catch { return false; }
 }
 
 /** Point the AI layer at a local model. Returns the applied preset. */

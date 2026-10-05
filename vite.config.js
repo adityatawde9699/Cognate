@@ -1,11 +1,12 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { offlineShell } from './scripts/pwa-build.mjs';
 
 const host = process.env.TAURI_DEV_HOST;
 
 // https://tauri.app/start/frontend/vite/
 export default defineConfig({
-    plugins: [react()],
+    plugins: [react(),offlineShell()],
     clearScreen: false,
     server: {
         host: host || false,
@@ -21,6 +22,7 @@ export default defineConfig({
     },
     envPrefix: ['VITE_', 'TAURI_ENV_*'],
     build: {
+        rollupOptions: { output: { manualChunks: {calendarParser:['ical.js']} } },
         // Tauri requires a modern target
         target:
             process.env.TAURI_ENV_PLATFORM === 'windows'

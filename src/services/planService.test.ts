@@ -132,3 +132,19 @@ describe('nowMinutes', () => {
     expect(nowMinutes(new Date('2026-06-24T13:30:00'))).toBe(810);
   });
 });
+
+import corpus from './fixtures/planner-contract.json';
+describe('shared adversarial planner contract', () => {
+  for (const fixture of corpus) it(fixture.name, () => {
+    const request = fixture.request as PlanRequest;
+    if (!fixture.valid) { expect(() => planLocally(request)).toThrow(); return; }
+    const result = planLocally(request);
+    expect(result.blocks.map(b => b.task_id)).toEqual(fixture.scheduled);
+    expect(result.unscheduled.map(b => b.task_id)).toEqual(fixture.unscheduled);
+    for (const b of result.blocks) {
+      expect(b.start_min).toBeGreaterThanOrEqual(request.work_start_min);
+      expect(b.end_min).toBeLessThanOrEqual(request.work_end_min);
+      for (const busy of request.busy) expect(overlaps([b.start_min,b.end_min],[busy.start_min,busy.end_min])).toBe(false);
+    }
+  });
+});

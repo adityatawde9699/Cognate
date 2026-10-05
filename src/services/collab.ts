@@ -29,7 +29,7 @@
        decrypted. Owners are mutually trusted (TOFU on the genesis owner).
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 
-import { hlcCompare, type Op } from './oplog';
+import { hlcCompare, validateOps, merge, type Op } from './oplog';
 import { importPublicKey, signBytes, verifyBytes } from './crypto';
 
 // ── Roles ────────────────────────────────────────────────
@@ -98,6 +98,7 @@ export async function signOps(priv: CryptoKey, pub: string, ops: Op[]): Promise<
 export async function verifySignedOp(s: SignedOp): Promise<VerifiedOp | null> {
   if (!s || !s.op || !s.pub || !s.sig) return null;
   try {
+    validateOps([s.op]);
     const pubKey = await importPublicKey(s.pub);
     const ok = await verifyBytes(pubKey, s.sig, opBytes(s.op));
     return ok ? { op: s.op, pub: s.pub } : null;
@@ -232,7 +233,7 @@ export function applyAccessControl(
         op.kind === 'set' &&
         memberActor(op.entity) === author &&
         SELF_FIELDS.has(op.field) &&
-        (op.field !== 'pub' || op.value === pub);
+        (op.field !== 'pub' || (op.value === pub && (!roster.get(author)?.pub || roster.get(author)?.pub===pub)));
       if (ownerBound || selfClaim) {
         applyMemberOp(roster, op);
         adminOps.push(op);
@@ -247,10 +248,41 @@ export function applyAccessControl(
   return { admitted, accepted: [...admitted, ...adminOps], roster, rejected };
 }
 
-/** Convenience: verify signatures then apply access control in one step. */
+export interface ShareScope {
+  shareId: string;
+  projectId: string;
+  taskIds: ReadonlySet<string>;
+  forbiddenTaskIds: ReadonlySet<string>;
+}
+function withinScope(op: Op, scope: ShareScope, taskIds: Set<string>): boolean {
+  if (op.entity.startsWith('member:')) return op.entity.startsWith(`member:${scope.shareId}:`);
+  if (op.entity.startsWith('comment:')) return op.entity.startsWith(`comment:${scope.shareId}:`) &&
+    (op.kind!=='set' || op.field!=='task_id' || (typeof op.value==='string' && taskIds.has(op.value)));
+  if (op.entity.startsWith('project:')) return op.entity===`project:${scope.projectId}`;
+  if (!taskIds.has(op.entity) || scope.forbiddenTaskIds.has(op.entity)) return false;
+  return op.kind!=='set' || op.field!=='project_id' || op.value===scope.projectId;
+}
+
+/** Verify before folding roles; namespace checks apply even to owners. */
 export async function authorize(
   signed: SignedOp[],
-  genesis: { actor: string; pub: string }
+  genesis: { actor: string; pub: string },
+  scope?: ShareScope
 ): Promise<AccessResult> {
-  return applyAccessControl(await verifySignedOps(signed), genesis);
+  const verified = await verifySignedOps(signed);
+  return authorizeVerified(verified,genesis,scope);
+}
+
+/** Also used for operations covered by a verified context-bound batch. */
+export function authorizeVerified(verified:VerifiedOp[],genesis:{actor:string;pub:string},scope?:ShareScope):AccessResult {
+  merge(verified.map(entry=>entry.op)); // divergent IDs/timestamps reject the batch
+  if (!scope) return applyAccessControl(verified,genesis);
+  const taskIds = new Set(scope.taskIds);
+  for (const {op} of verified) {
+    if (op.kind==='set' && op.field==='project_id' && op.value===scope.projectId && !scope.forbiddenTaskIds.has(op.entity)) taskIds.add(op.entity);
+  }
+  const accepted = verified.filter(({op})=>withinScope(op,scope,taskIds));
+  const result = applyAccessControl(accepted,genesis);
+  result.rejected.push(...verified.filter(({op})=>!withinScope(op,scope,taskIds)).map(({op})=>op));
+  return result;
 }

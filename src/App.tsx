@@ -8,6 +8,7 @@ import { TaskModal } from './components/Modals/TaskModal';
 import { CommandPalette } from './components/CommandPalette';
 import { FocusMode } from './components/FocusMode';
 import { Onboarding } from './components/Onboarding';
+import {PwaStatus} from './components/PwaStatus';
 import { Toast } from './components/Toast';
 
 // Code-split (Act 5 perf): load these only when their view/overlay opens, so
@@ -108,6 +109,7 @@ function App() {
   return (
     <div className="app-shell">
       <Titlebar />
+      <PwaStatus />
 
       <div className="layout">
         <Sidebar />

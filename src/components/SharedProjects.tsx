@@ -19,7 +19,7 @@ import {
 import type { TeamPlanResult } from '../services/teamPlanService';
 import { fmtClock } from '../services/planService';
 import { getPresence, type Presence } from '../services/presenceService';
-import { exportRecoveryKit, importRecoveryKit } from '../services/recoveryService';
+import { exportRecoveryKit, importRecoveryKit,changeRecoveryPassphrase } from '../services/recoveryService';
 import { loadAllTasks } from '../services/taskService';
 import { toast } from '../utils/toast';
 
@@ -42,6 +42,7 @@ export function SharedProjects() {
   const [joinToken, setJoinToken] = useState('');
   const [recoveryPass, setRecoveryPass] = useState('');
   const [recoveryKit, setRecoveryKit] = useState('');
+  const [newRecoveryPass,setNewRecoveryPass]=useState(''),[retiredOldDevice,setRetiredOldDevice]=useState(false);
 
   const refresh = async () => {
     const list = await listShares();
@@ -133,6 +134,7 @@ export function SharedProjects() {
     setBusy(true);
     try {
       await removeMember(shareId, actor);
+      setMsg('Member removed and read key rotated. Copy the new invite and send it securely to each remaining member. Old invites cannot read future updates.');
       await syncShare(shareId).catch(() => {});
       await refresh();
     } finally { setBusy(false); }
@@ -175,6 +177,7 @@ export function SharedProjects() {
     setBusy(true);
     try {
       const kit = await exportRecoveryKit(recoveryPass);
+      setRecoveryKit(kit);
       await navigator.clipboard.writeText(kit);
       toast('🔐 Recovery kit copied — store it safely');
       setMsg('Recovery kit copied to clipboard. Keep it somewhere safe (e.g. a password manager).');
@@ -183,7 +186,13 @@ export function SharedProjects() {
     } finally { setBusy(false); }
   };
 
+  const rewrapKit=async()=>{
+    setBusy(true);
+    try {setRecoveryKit(await changeRecoveryPassphrase(recoveryKit,recoveryPass,newRecoveryPass));setRecoveryPass(newRecoveryPass);setNewRecoveryPass('');setMsg('Recovery kit re-encrypted below. Save it with the new passphrase. Existing kit copies still use the old passphrase.');}
+    catch(error:any){setMsg(error.message);}finally{setBusy(false);}
+  };
   const handleImportKit = async () => {
+    if(!retiredOldDevice){setMsg('Retire the old device before restoring its signing identity.');return;}
     if (!recoveryKit.trim() || !recoveryPass.trim()) { setMsg('Paste a kit and its recovery passphrase.'); return; }
     setBusy(true);
     try {
@@ -398,13 +407,17 @@ export function SharedProjects() {
             type="text" value={recoveryKit} placeholder="Paste a recovery kit to restore…"
             onChange={(e) => setRecoveryKit(e.target.value)} style={{ flex: 1 }}
           />
-          <button className="btn-soft" onClick={handleImportKit} disabled={busy}>
+          <button className="btn-soft" onClick={handleImportKit} disabled={busy || !retiredOldDevice}>
             <i className="fa-solid fa-rotate-left"></i> Restore
           </button>
         </div>
+        <label><input type="checkbox" checked={retiredOldDevice} onChange={event=>setRetiredOldDevice(event.target.checked)}/> I have retired the old device before restoring.</label>
+        <div style={{display:'flex',gap:'8px'}}>
+          <input type="password" aria-label="New recovery passphrase" placeholder="New recovery passphrase" value={newRecoveryPass} onChange={event=>setNewRecoveryPass(event.target.value)}/>
+          <button className="btn-soft" onClick={rewrapKit} disabled={busy || !recoveryKit || !recoveryPass || newRecoveryPass.length<12}>Change kit passphrase</button>
+        </div>
         <small className="form-hint">
-          Encrypts every share secret + your relay passphrase under the recovery passphrase. The kit is
-          ciphertext — safe to store in a password manager. Restore it on a new device to regain access.
+          Encrypts your signing identity, tasks, projects, history, share secrets and relay passphrase. Use at least 12 characters. Restore on an empty replacement workspace, then retire the old device before syncing. Keep a separate database backup for calendars, templates and settings.
         </small>
       </div>
 

@@ -15,7 +15,7 @@ describe('nextDeadline', () => {
   });
 
   it('handles month-end rollover for monthly', () => {
-    // Jan 31 + 1 month → JS normalizes to Mar 3 (non-leap 2026)
-    expect(nextDeadline('2026-01-31', 'monthly')).toBe('2026-03-03');
+    // Monthly recurrence clamps to the next calendar month.
+    expect(nextDeadline('2026-01-31', 'monthly')).toBe('2026-02-28');
   });
 });

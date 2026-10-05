@@ -2,10 +2,9 @@
 //! (Anthropic API key, Slack/Discord webhook URLs).
 //!
 //! Backed by the `keyring` crate (Secret Service on Linux, Keychain on
-//! macOS, Credential Manager on Windows). All errors degrade gracefully:
-//! reads return `None`, writes return `Ok(())`, so a missing/locked
-//! backend never crashes the app — the frontend falls back to its
-//! settings store in that case.
+//! macOS, Credential Manager on Windows). Only absent credentials return
+//! `None`; unavailable/locked backends return errors. The frontend must never
+//! interpret a backend failure as a missing identity or write plaintext.
 
 const SERVICE: &str = "cognate";
 
@@ -23,12 +22,12 @@ pub fn secret_get(key: String) -> Result<Option<String>, String> {
             Err(keyring::Error::NoEntry) => Ok(None),
             Err(err) => {
                 log::warn!("secret_get({key}) failed: {err}");
-                Ok(None)
+                Err(format!("secure storage read failed: {err}"))
             }
         },
         Err(err) => {
             log::warn!("secret_get entry({key}) failed: {err}");
-            Ok(None)
+            Err(format!("secure storage unavailable: {err}"))
         }
     }
 }

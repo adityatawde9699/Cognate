@@ -10,7 +10,7 @@
 //! Times are minutes-from-midnight (e.g. 360 = 06:00) for a single date.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 const DEFAULT_DURATION: u32 = 30;
 const DEFAULT_WORK_START: u32 = 6 * 60; // 06:00
@@ -64,7 +64,7 @@ pub struct PlanRequest {
     pub energy_curve: Vec<u8>,
 }
 
-#[derive(Serialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Block {
     pub task_id: String,
     pub start_min: u32,
@@ -72,14 +72,19 @@ pub struct Block {
     pub reason: String,
 }
 
-#[derive(Serialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Unscheduled {
     pub task_id: String,
     pub reason: String,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
+pub struct PlanPin { pub task_id: String, pub duration_min:u32 }
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct PlanResult {
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub pin: Option<PlanPin>,
     pub blocks: Vec<Block>,
     pub unscheduled: Vec<Unscheduled>,
 }
@@ -208,8 +213,28 @@ fn reason_for(task: &PlanTask, start: u32, date: &str, busy: &[BusyBlock], curve
     }
 }
 
+pub fn validate(req: &PlanRequest) -> Result<(),String> {
+    fn date(s: &str) -> bool {
+        s.len()==10 && chrono::NaiveDate::parse_from_str(s,"%Y-%m-%d").is_ok_and(|d| d.format("%Y-%m-%d").to_string()==s)
+    }
+    if !date(&req.date) || req.work_start_min>=req.work_end_min || req.work_end_min>1440 { return Err("Invalid planner date or working hours".into()); }
+    if req.tasks.len()>10000 || req.busy.len()>10000 { return Err("Planner input exceeds supported size".into()); }
+    if !req.energy_curve.is_empty() && (req.energy_curve.len()!=24 || req.energy_curve.iter().any(|n|*n>2)) { return Err("Invalid energy curve".into()); }
+    let mut ids = HashSet::new();
+    for task in &req.tasks {
+        if task.id.is_empty() || !ids.insert(&task.id) { return Err("Planner task IDs must be unique".into()); }
+        if !(1..=1440).contains(&task.duration_min) || !(1..=5).contains(&task.importance) || !["hi","med","lo"].contains(&task.energy.as_str()) || !["high","medium","low"].contains(&task.priority.as_str()) || (!task.deadline.is_empty() && !date(&task.deadline)) { return Err("Invalid task fields".into()); }
+        if task.pinned_start_min.is_some_and(|n|n>1440 || !task.pinned) { return Err("Invalid pinned start".into()); }
+    }
+    if req.busy.iter().any(|b|b.start_min>=b.end_min || b.end_min>1440) { return Err("Invalid busy interval".into()); }
+    Ok(())
+}
+
 /// The scheduler. Pure: same input → same output.
 pub fn plan(req: &PlanRequest) -> PlanResult {
+    if let Err(reason) = validate(req) {
+        return PlanResult { pin:None, blocks:vec![],unscheduled:req.tasks.iter().map(|t|Unscheduled {task_id:t.id.clone(),reason:reason.clone()}).collect() };
+    }
     let (ws, we) = (req.work_start_min, req.work_end_min);
     let mut blocks: Vec<Block> = Vec::new();
     let mut unscheduled: Vec<Unscheduled> = Vec::new();
@@ -218,19 +243,20 @@ pub fn plan(req: &PlanRequest) -> PlanResult {
     let mut occupied: Vec<(u32, u32)> =
         req.busy.iter().map(|b| (b.start_min, b.end_min)).collect();
 
-    for t in &req.tasks {
-        if t.pinned {
-            if let Some(s) = t.pinned_start_min {
-                let e = s + dur_of(t);
-                occupied.push((s, e));
-                blocks.push(Block {
-                    task_id: t.id.clone(),
-                    start_min: s,
-                    end_min: e,
-                    reason: "Pinned to this time".into(),
-                });
-            }
+    let mut pins: Vec<&PlanTask> = req.tasks.iter().filter(|t|t.pinned).collect();
+    pins.sort_by(|a,b|a.id.cmp(&b.id));
+    for t in pins {
+        let Some(s) = t.pinned_start_min else {
+            unscheduled.push(Unscheduled {task_id:t.id.clone(),reason:"Pinned task has no start time".into()});
+            continue;
+        };
+        let e = s + dur_of(t);
+        if s<ws || e>we || occupied.iter().any(|&(start,end)|start<e && end>s) {
+            unscheduled.push(Unscheduled {task_id:t.id.clone(),reason:"Pinned time conflicts with working hours, calendar, or another pin".into()});
+            continue;
         }
+        occupied.push((s,e));
+        blocks.push(Block {task_id:t.id.clone(),start_min:s,end_min:e,reason:"Pinned to this time".into()});
     }
 
     // 2) Order the remaining tasks: deadline ↑, then priority/importance/energy ↓,
@@ -238,7 +264,7 @@ pub fn plan(req: &PlanRequest) -> PlanResult {
     let mut pending: Vec<&PlanTask> = req
         .tasks
         .iter()
-        .filter(|t| !(t.pinned && t.pinned_start_min.is_some()))
+        .filter(|t| !t.pinned)
         .collect();
     pending.sort_by(|a, b| {
         deadline_key(&a.deadline)
@@ -300,7 +326,7 @@ pub fn plan(req: &PlanRequest) -> PlanResult {
     }
 
     blocks.sort_by_key(|b| (b.start_min, b.task_id.clone()));
-    PlanResult { blocks, unscheduled }
+    PlanResult { pin:None, blocks, unscheduled }
 }
 
 // ── Team auto-planning (Act 3): balance, then schedule each member ──
@@ -496,8 +522,8 @@ mod tests {
     fn a_learned_curve_overrides_the_default_energy_placement() {
         // Curve: afternoon (13–16h) is the peak, mornings are low.
         let mut curve = vec![1u8; 24];
-        for h in 13..=16 { curve[h] = 2; }
-        for h in 9..=11 { curve[h] = 0; }
+        curve[13..=16].fill(2);
+        curve[9..=11].fill(0);
         // A midday block splits the day so the curve gets to pick a window.
         let busy = vec![BusyBlock { start_min: 660, end_min: 780, title: "Block".into() }];
         let mk = |curve: Vec<u8>| PlanRequest {
@@ -677,4 +703,27 @@ mod tests {
         let out = plan_team(&req);
         assert_eq!(out.unroutable, vec!["t1".to_string()]);
     }
+    #[test]
+    fn shared_adversarial_planner_contract() {
+        let corpus: Vec<serde_json::Value> = serde_json::from_str(include_str!("../../src/services/fixtures/planner-contract.json")).unwrap();
+        for fixture in corpus {
+            let request = serde_json::from_value::<PlanRequest>(fixture["request"].clone());
+            if fixture["valid"]==false {
+                assert!(request.is_err() || validate(request.as_ref().unwrap()).is_err(),"{}",fixture["name"]);
+                continue;
+            }
+            let request = request.unwrap();
+            validate(&request).unwrap();
+            let result = plan(&request);
+            let scheduled = serde_json::json!(result.blocks.iter().map(|b|&b.task_id).collect::<Vec<_>>());
+            let unscheduled = serde_json::json!(result.unscheduled.iter().map(|b|&b.task_id).collect::<Vec<_>>());
+            assert_eq!(scheduled,fixture["scheduled"],"{}",fixture["name"]);
+            assert_eq!(unscheduled,fixture["unscheduled"],"{}",fixture["name"]);
+            for b in result.blocks {
+                assert!(b.start_min>=request.work_start_min && b.end_min<=request.work_end_min);
+                for busy in &request.busy { assert!(!overlaps((b.start_min,b.end_min),(busy.start_min,busy.end_min))); }
+            }
+        }
+    }
+
 }

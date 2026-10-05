@@ -17,8 +17,9 @@
    at the share/relay boundary via `signLocalOps`. See identity.test.ts.
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 
-import { getSetting, setSetting } from '../db';
+import { getSetting, setSetting, USE_BROWSER_WORKSPACE, registerBrowserIdentity } from '../db';
 import { getSecret, setSecret } from '../utils/secrets';
+import { encryptBrowserSecret,decryptBrowserSecret } from '../utils/browserVault';
 import { actorId } from './oplogStore';
 import {
   generateSigningKeypair,
@@ -26,6 +27,8 @@ import {
   importPrivateKey,
   exportPublicKey,
   importPublicKey,
+  signBytes,
+  verifyBytes,
 } from './crypto';
 import { signOps, type SignedOp } from './collab';
 import type { Op } from './oplog';
@@ -56,22 +59,47 @@ export async function getIdentity(): Promise<Identity> {
     const privB64 = await getSecret(PRIV_SECRET);
     const pubB64 = await getSetting(PUB_SETTING, '');
 
+    if (!actor) throw new Error('Device actor identity is unavailable.');
+    if (Boolean(privB64) !== Boolean(pubB64)) {
+      throw new Error('Signing identity is incomplete. Restore your signing identity before sharing; automatic key replacement is disabled.');
+    }
+    const binding = await getSetting('crdt_signing_binding', '');
     if (privB64 && pubB64) {
+      const privateKey = await importPrivateKey(privB64);
+      const publicKey = await importPublicKey(pubB64);
+      const challenge = crypto.getRandomValues(new Uint8Array(32));
+      if (!await verifyBytes(publicKey,await signBytes(privateKey,challenge),challenge)) {
+        throw new Error('Stored signing keys do not match. Restore your device identity.');
+      }
+      const expectedBinding = JSON.stringify({actor,pub:pubB64});
+      if (binding && binding !== expectedBinding) throw new Error('Device actor and signing key binding changed. Restore your identity.');
+      if (!binding) await setSetting('crdt_signing_binding',expectedBinding);
       cached = {
         actor,
         pub: pubB64,
-        privateKey: await importPrivateKey(privB64),
-        publicKey: await importPublicKey(pubB64),
+        privateKey,
+        publicKey,
       };
       return cached;
     }
 
+    if (binding) throw new Error('Registered signing keys are missing. Restore your identity.');
     // First run on this device: mint and persist a keypair.
     const kp = await generateSigningKeypair();
     const freshPriv = await exportPrivateKey(kp.privateKey);
     const freshPub = await exportPublicKey(kp.publicKey);
+    if (USE_BROWSER_WORKSPACE) {
+      const installed = await registerBrowserIdentity(actor,await encryptBrowserSecret(freshPriv),freshPub);
+      const privateKey = await importPrivateKey(await decryptBrowserSecret(installed.priv));
+      const publicKey = await importPublicKey(installed.pub);
+      const challenge = crypto.getRandomValues(new Uint8Array(32));
+      if (!await verifyBytes(publicKey,await signBytes(privateKey,challenge),challenge)) throw new Error('Registered signing keys do not match.');
+      cached={actor,pub:installed.pub,privateKey,publicKey};
+      return cached;
+    }
     await setSecret(PRIV_SECRET, freshPriv);
     await setSetting(PUB_SETTING, freshPub);
+    await setSetting('crdt_signing_binding',JSON.stringify({actor,pub:freshPub}));
     cached = { actor, pub: freshPub, privateKey: kp.privateKey, publicKey: kp.publicKey };
     return cached;
   })();

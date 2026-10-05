@@ -11,12 +11,15 @@
 
 import {
   IS_TAURI,
-  clearDaySchedules,
+  commitPlan,
+  getPlanningSnapshot,
+  getAllTasks,
   getCalendarEvents,
   getSetting,
-  setSchedule,
+
   updateScheduling,
 } from '../db';
+import {ensureCalendarCoverage} from './calendarSyncService';
 import { useStore, type CalendarEvent, type Energy, type Task } from '../store';
 import { estimateScheduling } from './aiService';
 import { learnEnergyCurve } from './energyModel';
@@ -46,7 +49,7 @@ export interface PlanRequest {
 }
 export interface PlanBlock { task_id: string; start_min: number; end_min: number; reason: string }
 export interface PlanUnscheduled { task_id: string; reason: string }
-export interface PlanResult { blocks: PlanBlock[]; unscheduled: PlanUnscheduled[] }
+export interface PlanResult { blocks: PlanBlock[]; unscheduled: PlanUnscheduled[]; pin?: {task_id:string;duration_min:number} }
 
 // Defaults for the planner when the user hasn't opted into custom work hours.
 // We treat the broad waking day as the default planning horizon (06:00–23:00).
@@ -64,10 +67,31 @@ export function minutesOf(iso: string): number {
   return d.getHours() * 60 + d.getMinutes();
 }
 export function isoAt(date: string, min: number): string {
-  const h = String(Math.floor(min / 60)).padStart(2, '0');
-  const m = String(min % 60).padStart(2, '0');
-  return `${date}T${h}:${m}:00`;
+  if (!Number.isInteger(min) || min<0 || min>1440) throw new Error('Invalid minute of day.');
+  if (min===1440) {
+    const next = new Date(`${date}T00:00:00`); next.setDate(next.getDate()+1);
+    const ymd = `${next.getFullYear()}-${String(next.getMonth()+1).padStart(2,'0')}-${String(next.getDate()).padStart(2,'0')}`;
+    return `${ymd}T00:00:00`;
+  }
+  return `${date}T${String(Math.floor(min/60)).padStart(2,'0')}:${String(min%60).padStart(2,'0')}:00`;
 }
+/** Clip multi-day busy intervals to the selected local calendar day. */
+export function busyBlocksForDate(events: CalendarEvent[], date: string): BusyBlock[] {
+  const dayStart = new Date(`${date}T00:00:00`);
+  const dayEnd = new Date(dayStart); dayEnd.setDate(dayEnd.getDate()+1);
+  return events.flatMap(event => {
+    const start = new Date(event.start), end = new Date(event.end);
+    if (!Number.isFinite(+start) || !Number.isFinite(+end) || end<=start) throw new Error('Calendar contains an invalid busy interval.');
+    if (end<=dayStart || start>=dayEnd) return [];
+    const from = start<=dayStart ? 0 : start.getHours()*60+start.getMinutes();
+    const to = end>=dayEnd ? 1440 : end.getHours()*60+end.getMinutes()+Number(end.getSeconds()>0);
+    // DST fall-back can repeat wall minutes: reserve the entire affected day
+    // when an instant interval reverses/ambiguously crosses the local clock.
+    if (start.getTimezoneOffset()!==end.getTimezoneOffset() || to<=from) return [{start_min:0,end_min:1440,title:event.title || 'Busy (clock change)'}];
+    return [{start_min:from,end_min:to,title:event.title || ''}];
+  });
+}
+
 export function fmtClock(min: number): string {
   const h = Math.floor(min / 60);
   const m = min % 60;
@@ -143,7 +167,25 @@ function reasonFor(t: PlanTask, start: number, date: string, busy: BusyBlock[], 
   return parts.length ? capFirst(parts.join(', ')) : 'Best available slot';
 }
 
+/** The same bounds are enforced by the native planner before solving. */
+export function validatePlanRequest(req: PlanRequest): void {
+  const minute = (n:number) => Number.isInteger(n) && n>=0 && n<=1440;
+  const date = (s:string) => /^\d{4}-\d{2}-\d{2}$/.test(s) && Number.isFinite(Date.parse(`${s}T00:00:00Z`)) && new Date(`${s}T00:00:00Z`).toISOString().slice(0,10)===s;
+  if (!date(req.date) || !minute(req.work_start_min) || !minute(req.work_end_min) || req.work_end_min<=req.work_start_min) throw new Error('Invalid planner date or working hours.');
+  if (req.tasks.length>10000 || req.busy.length>10000) throw new Error('Planner input exceeds the supported size.');
+  if (req.energy_curve && req.energy_curve.length && (req.energy_curve.length!==24 || req.energy_curve.some(n => !Number.isInteger(n) || n<0 || n>2))) throw new Error('Invalid energy curve.');
+  const ids = new Set<string>();
+  for (const task of req.tasks) {
+    if (!task.id || ids.has(task.id)) throw new Error('Planner task IDs must be unique.');
+    ids.add(task.id);
+    if (!Number.isInteger(task.duration_min) || task.duration_min<1 || task.duration_min>1440 || !Number.isInteger(task.importance) || task.importance<1 || task.importance>5 || !['hi','med','lo'].includes(task.energy) || !['high','medium','low'].includes(task.priority) || (task.deadline && !date(task.deadline))) throw new Error('Invalid task duration, importance, energy, priority, or deadline.');
+    if (task.pinned_start_min!=null && (!minute(task.pinned_start_min) || !task.pinned)) throw new Error('Invalid pinned start.');
+  }
+  for (const busy of req.busy) if (!minute(busy.start_min) || !minute(busy.end_min) || busy.end_min<=busy.start_min) throw new Error('Invalid busy interval.');
+}
+
 export function planLocally(req: PlanRequest): PlanResult {
+  validatePlanRequest(req);
   const { work_start_min: ws, work_end_min: we } = req;
   // Prefer a learned energy curve when one was supplied; else the circadian one.
   const eAt =
@@ -155,17 +197,24 @@ export function planLocally(req: PlanRequest): PlanResult {
   const occupied: Array<[number, number]> = req.busy.map((b) => [b.start_min, b.end_min]);
 
   // Pinned tasks claim fixed slots first.
-  for (const t of req.tasks) {
-    if (t.pinned && t.pinned_start_min != null) {
-      const s = t.pinned_start_min;
-      const e = s + durOf(t);
-      occupied.push([s, e]);
-      blocks.push({ task_id: t.id, start_min: s, end_min: e, reason: 'Pinned to this time' });
+  for (const t of [...req.tasks].sort((a,b) => a.id<b.id ? -1 : a.id>b.id ? 1 : 0)) {
+    if (!t.pinned) continue;
+    if (t.pinned_start_min == null) {
+      unscheduled.push({task_id:t.id,reason:'Pinned task has no start time'});
+      continue;
     }
+    const s = t.pinned_start_min;
+    const e = s + durOf(t);
+    if (s<ws || e>we || occupied.some(([start,end]) => start<e && end>s)) {
+      unscheduled.push({task_id:t.id,reason:'Pinned time conflicts with working hours, calendar, or another pin'});
+      continue;
+    }
+    occupied.push([s,e]);
+    blocks.push({task_id:t.id,start_min:s,end_min:e,reason:'Pinned to this time'});
   }
 
   const pending = req.tasks
-    .filter((t) => !(t.pinned && t.pinned_start_min != null))
+    .filter((t) => !t.pinned)
     .sort(
       (a, b) =>
         deadlineKey(a.deadline).localeCompare(deadlineKey(b.deadline)) ||
@@ -173,7 +222,7 @@ export function planLocally(req: PlanRequest): PlanResult {
         b.importance - a.importance ||
         energyRank(b.energy) - energyRank(a.energy) ||
         durOf(b) - durOf(a) ||
-        a.id.localeCompare(b.id)
+        (a.id<b.id ? -1 : a.id>b.id ? 1 : 0)
     );
 
   const free = freeWindows(ws, we, occupied);
@@ -193,7 +242,7 @@ export function planLocally(req: PlanRequest): PlanResult {
     blocks.push({ task_id: t.id, start_min: s, end_min: end, reason: reasonFor(t, s, req.date, req.busy, eAt) });
   }
 
-  blocks.sort((a, b) => a.start_min - b.start_min || a.task_id.localeCompare(b.task_id));
+  blocks.sort((a, b) => a.start_min - b.start_min || (a.task_id<b.task_id ? -1 : a.task_id>b.task_id ? 1 : 0));
   return { blocks, unscheduled };
 }
 
@@ -232,6 +281,8 @@ function buildRequest(
 export interface PlanOptions {
   /** Earliest minute a new block may start (used by mid-day reflow). */
   fromMin?: number;
+  signal?: AbortSignal;
+  pin?: {taskId:string;startMin:number;durationMin:number};
 }
 
 /**
@@ -242,20 +293,26 @@ export interface PlanOptions {
  * work moves forward rather than being re-laid into the past.
  */
 export async function planDay(date: string, opts: PlanOptions = {}): Promise<PlanResult> {
-  const open = useStore
-    .getState()
-    .currentTasks.filter((t) => !t.done && !t.parent_id && !t.deleted_at);
-  const work = await getWorkHours();
-  const start = opts.fromMin != null ? Math.max(work.start, opts.fromMin) : work.start;
-  const events = await getCalendarEvents();
-  const busy: BusyBlock[] = events
-    .filter((e) => String(e.start).slice(0, 10) === date)
-    .map((e) => ({ start_min: minutesOf(e.start), end_min: minutesOf(e.end), title: e.title || '' }))
-    .filter((b) => b.end_min > b.start_min);
-
-  // Learn the personal energy curve from completed, focused history (Act 4).
-  const energyCurve = learnEnergyCurve(useStore.getState().currentTasks);
-  const req = buildRequest(date, open, { start, end: work.end }, busy, energyCurve);
+  if (opts.signal?.aborted) throw new Error('Planning cancelled.');
+  await ensureCalendarCoverage(date);
+  if(opts.signal?.aborted) throw new Error('Planning cancelled.');
+  const snapshot = await getPlanningSnapshot();
+  const open = snapshot.tasks.filter(t => !t.done && !t.parent_id && !t.deleted_at).map(task => opts.pin?.taskId===task.id ? {...task,pinned:true,duration_min:opts.pin.durationMin,scheduled_start:isoAt(date,opts.pin.startMin)} : task);
+  if (opts.pin && !open.some(task=>task.id===opts.pin!.taskId)) throw new Error('Only an open task can be moved into this plan.');
+  const settings = snapshot.settings;
+  const custom = settings.use_custom_work_hours==='1';
+  const work = {
+    start:Number(settings[custom ? 'work_start_min' : 'wake_start_min'] ?? DEFAULT_WORK_START),
+    end:Number(settings[custom ? 'work_end_min' : 'wake_end_min'] ?? DEFAULT_WORK_END),
+  };
+  const start = opts.fromMin != null ? Math.max(work.start,opts.fromMin) : work.start;
+  if (start>=work.end) return {blocks:[],unscheduled:open.map(t => ({task_id:t.id,reason:'Working hours have ended'}))};
+  const completed = snapshot.tasks.filter(task => task.done && !task.deleted_at && task.scheduled_start && task.scheduled_end)
+    .map(task=>({id:task.id,title:`Completed: ${task.title}`,start:task.scheduled_start!,end:task.scheduled_end!,source:'completed',created_at:''}));
+  const busy = busyBlocksForDate([...snapshot.calendar,...completed],date);
+  const energyCurve = learnEnergyCurve(snapshot.tasks);
+  const req = buildRequest(date,open,{start,end:work.end},busy,energyCurve);
+  validatePlanRequest(req);
 
   let result: PlanResult;
   if (IS_TAURI) {
@@ -265,16 +322,14 @@ export async function planDay(date: string, opts: PlanOptions = {}): Promise<Pla
     result = planLocally(req);
   }
 
-  await clearDaySchedules(date);
-  for (const b of result.blocks) {
-    const start = isoAt(date, b.start_min);
-    const end = isoAt(date, b.end_min);
-    await setSchedule(b.task_id, start, end);
-    useStore.getState().updateTaskOptimistic(b.task_id, { scheduled_start: start, scheduled_end: end } as Partial<Task>);
+  if (opts.pin) {
+    const placed = result.blocks.find(block=>block.task_id===opts.pin!.taskId);
+    if (!placed) throw new Error(result.unscheduled.find(item=>item.task_id===opts.pin!.taskId)?.reason || 'Pinned time is unavailable.');
+    result.pin={task_id:opts.pin.taskId,duration_min:opts.pin.durationMin};
   }
-  for (const u of result.unscheduled) {
-    useStore.getState().updateTaskOptimistic(u.task_id, { scheduled_start: null, scheduled_end: null } as Partial<Task>);
-  }
+  if (opts.signal?.aborted) throw new Error('Planning cancelled.');
+  await commitPlan(date,result,snapshot);
+  useStore.getState().setTasks(await getAllTasks(useStore.getState().currentFilter) as Task[]);
   return result;
 }
 
@@ -308,10 +363,7 @@ export function detectDisruption(
       end: t.scheduled_end ? minutesOf(t.scheduled_end) : minutesOf(t.scheduled_start!) + 30,
     }));
 
-  const busy = events
-    .filter((e) => onDate(e.start))
-    .map((e) => ({ title: e.title || '', start: minutesOf(e.start), end: minutesOf(e.end) }))
-    .filter((b) => b.end > b.start);
+  const busy = busyBlocksForDate(events,date).map(b => ({title:b.title,start:b.start_min,end:b.end_min}));
 
   for (const s of scheduled) {
     const hit = busy.find((b) => b.start < s.end && b.end > s.start);
@@ -366,13 +418,13 @@ export function nowMinutes(d: Date = new Date()): number {
  * triggered the re-plan (with the fresh result), or null if nothing changed.
  */
 export async function reflowIfDisrupted(
-  date: string
+  date: string, signal?: AbortSignal
 ): Promise<{ disruption: Disruption; result: PlanResult } | null> {
-  const tasks = useStore.getState().currentTasks;
+  const tasks = await getAllTasks('all') as Task[];
   const events = await getCalendarEvents();
   const now = nowMinutes();
   const disruption = detectDisruption(tasks, events, date, now);
   if (!disruption) return null;
-  const result = await planDay(date, { fromMin: now });
+  const result = await planDay(date, { fromMin: now, signal });
   return { disruption, result };
 }

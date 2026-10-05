@@ -225,3 +225,23 @@ describe('collab — RBAC access control', () => {
     expect([...shuffled.roster.keys()].sort()).toEqual([...inOrder.roster.keys()].sort());
   });
 });
+
+it('rejects cross-project and foreign roster writes even when signed by an owner',async()=>{
+  const owner=await makeActor('owner');
+  const ops=await owner.signMany([
+    owner.content('other-task','title','attacked'),
+    owner.content('other-task','project_id','project'),
+    owner.content('project:other','name','attacked'),
+    owner.content('member:foreign:editor','role','owner'),
+    owner.content('allowed','title','valid'),
+  ]);
+  const result=await authorize(ops,owner.genesis,{shareId:'share',projectId:'project',taskIds:new Set(['allowed']),forbiddenTaskIds:new Set(['other-task'])});
+  expect(result.accepted.map(op=>op.entity)).toEqual(['allowed']);
+  expect(result.rejected).toHaveLength(4);
+});
+it('does not let another key self-claim an already bound actor',async()=>{
+  const owner=await makeActor('owner');const attacker=await makeActor('owner');
+  const result=await authorize([await attacker.sign(attacker.content('member:owner','pub',attacker.pub))],owner.genesis);
+  expect(result.accepted).toHaveLength(0);
+  expect(result.roster.get('owner')?.pub).toBe(owner.pub);
+});

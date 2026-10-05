@@ -4,7 +4,9 @@
    sees ciphertext. */
 
 import { useEffect, useState } from 'react';
-import { getSetting, setSetting } from '../../db';
+import {getSecret,setSecret} from '../../utils/secrets';
+import {deriveRoomId} from '../../services/crypto';
+import {syncDiagnostics} from '../../services/batchSync';
 import { enableSync, disableSync, getConfig, syncNow } from '../../services/relayService';
 import { toast } from '../../utils/toast';
 
@@ -16,6 +18,8 @@ export function LiveSyncSettings() {
   const [token, setToken] = useState('');
   const [on, setOn] = useState(false);
   const [msg, setMsg] = useState('');
+  const [health,setHealth]=useState('');
+  const updateHealth=async()=>{const cfg=await getConfig();if(cfg){const d=await syncDiagnostics(await deriveRoomId(cfg.passphrase),cfg.url);setHealth(`Saved cursor ${d.cursor} · ${d.pending} queued operations${d.lastError ? ` · Last error: ${d.lastError}`:''}`);}};
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -24,7 +28,8 @@ export function LiveSyncSettings() {
       setUrl(cfg?.url || '');
       setPass(cfg?.passphrase || '');
     });
-    getSetting(TOKEN_KEY, '').then(setToken);
+    getSecret(TOKEN_KEY).then(setToken).catch(error=>setMsg(error.message));
+    void updateHealth();
   }, []);
 
   const save = async () => {
@@ -32,8 +37,8 @@ export function LiveSyncSettings() {
     setBusy(true);
     setMsg('');
     try {
-      await setSetting(TOKEN_KEY, token.trim());
       await enableSync(url, pass);
+      await setSecret(TOKEN_KEY, token.trim());
       const r = await syncNow();
       setOn(true);
       setMsg(`Connected. Pushed ${r.pushed} ops · merged ${r.mergedOps} · ${r.upserts} updated, ${r.deletes} removed.`);
@@ -41,7 +46,7 @@ export function LiveSyncSettings() {
     } catch (err: any) {
       setMsg(err?.message || 'Could not connect to the relay.');
     } finally {
-      setBusy(false);
+      setBusy(false);void updateHealth();
     }
   };
 
@@ -55,7 +60,7 @@ export function LiveSyncSettings() {
     } catch (err: any) {
       setMsg(err?.message || 'Sync failed.');
     } finally {
-      setBusy(false);
+      setBusy(false);void updateHealth();
     }
   };
 
@@ -99,9 +104,9 @@ export function LiveSyncSettings() {
           placeholder="a strong shared secret" autoComplete="off"
         />
         <small className="form-hint">
-          Stored in your OS keychain and never sent to the relay. Your room is scoped to this device —
-          only YOUR other devices with the same passphrase will sync. Other people with the same passphrase
-          cannot access your data.
+          Anyone with this passphrase can read this workspace and enroll a signed device.
+          Use a strong secret and share it only with your own trusted devices.
+          A v2 relay is required; legacy relay blobs remain available for explicit migration.
         </small>
       </div>
       <div className="form-group">
@@ -130,6 +135,7 @@ export function LiveSyncSettings() {
           </button>
         )}
       </div>
+      {health && <small className="form-hint" role="status">{health}</small>}
       {msg && <small className="form-hint">{msg}</small>}
       <small className="form-hint">
         The relay stores only ciphertext — it can't read your tasks. Edits merge conflict-free (CRDT),

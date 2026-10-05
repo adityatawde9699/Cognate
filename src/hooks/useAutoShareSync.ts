@@ -43,7 +43,7 @@ export function useAutoShareSync(): void {
         if (stopped) break;
         if (v !== since) {
           seen.set(id, v);
-          await syncShare(id).catch(() => {});
+          await syncShare(id,{automatic:true}).catch(() => {});
           if (!stopped) await reloadView();
         } else {
           await sleep(IDLE_BACKOFF_MS); // timeout / offline → don't hot-loop
@@ -72,7 +72,7 @@ export function useAutoShareSync(): void {
           const full = await getShare(s.id);
           if (full) await heartbeat(full);
         }));
-        const results = await syncAllShares();
+        const results = await syncAllShares({automatic:true});
         const changed = Object.values(results).some((r) => 'upserts' in r && (r.upserts > 0 || r.deletes > 0));
         if (changed && !stopped) await reloadView();
       } catch { /* swallow */ }

@@ -3,15 +3,16 @@ import {
     createCalendarEvent,
     deleteCalendarEvent,
     getCalendarEvents,
-    setSchedule,
+    getSetting,
     updateScheduling,
 } from '../db';
 import { advisePlan } from '../services/aiService';
-import { importBusyText, setCalendarUrl, syncCalendarUrl } from '../services/calendarSyncService';
+import { calendarWarnings, importBusyText, setCalendarUrl, syncCalendarUrl } from '../services/calendarSyncService';
 import {
     DEFAULT_WORK_END,
     DEFAULT_WORK_START,
     enrichScheduling,
+    busyBlocksForDate,
     fmtClock,
     getWorkHours,
     isoAt,
@@ -53,11 +54,14 @@ export function PlanView() {
 
   const [date, setDate] = useState(todayStr());
   const [work, setWork] = useState({ start: DEFAULT_WORK_START, end: DEFAULT_WORK_END });
+  const [calendarStatus,setCalendarStatus]=useState<string[]>([]);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [reasons, setReasons] = useState<Record<string, string>>({});
   const [planning, setPlanning] = useState(false);
   const [enriching, setEnriching] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  useEffect(()=>{ calendarWarnings(date).then(setCalendarStatus).catch(()=>setCalendarStatus(['Calendar status unavailable. Refresh before planning.'])); },[date, syncing]);
+
   const [lastOverflow, setLastOverflow] = useState<string[]>([]);
   const [drag, setDrag] = useState<{ id: string; dur: number; startY: number; origMin: number; curMin: number } | null>(null);
   const [note, setNote] = useState('');
@@ -81,7 +85,20 @@ export function PlanView() {
     return () => window.removeEventListener('settings-changed', onChange);
   }, []);
   const refreshEvents = async () => setEvents(await getCalendarEvents());
-  useEffect(() => { refreshEvents(); }, []);
+  useEffect(() => {
+    const update=()=>{void refreshEvents();void calendarWarnings(date).then(setCalendarStatus);};
+    update();window.addEventListener('calendar-changed',update);
+    return ()=>window.removeEventListener('calendar-changed',update);
+  }, [date]);
+  useEffect(() => {
+    let active = true;
+    getSetting(`plan:${date}`,'').then(raw => {
+      if (!active || !raw) return;
+      const saved = JSON.parse(raw);
+      setReasons(Object.fromEntries(saved.blocks.map((block: {task_id:string;reason:string}) => [block.task_id,block.reason])));
+    }).catch(error => console.warn('[planner] Could not load saved explanations:',error));
+    return () => {active=false;};
+  },[date]);
 
   // Keep containerH in sync with the timeline wrapper's rendered height.
   useEffect(() => {
@@ -118,10 +135,7 @@ export function PlanView() {
 
   const busyToday = useMemo(
     () =>
-      events
-        .filter((e) => String(e.start).slice(0, 10) === date)
-        .map((e) => ({ ev: e, start: minutesOf(e.start), end: minutesOf(e.end) }))
-        .filter((b) => b.end > b.start),
+      events.flatMap(ev => busyBlocksForDate([ev],date).map(block => ({ev,start:block.start_min,end:block.end_min}))),
     [events, date]
   );
 
@@ -256,14 +270,14 @@ export function PlanView() {
     setDrag(null);
     try { (e.target as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* noop */ }
     if (d.curMin === d.origMin) return; // a click, not a drag
-    const start = isoAt(date, d.curMin);
-    const end = isoAt(date, d.curMin + d.dur);
-    const t = scheduled.find((s) => s.task.id === d.id)?.task;
-    await updateScheduling(d.id, { duration_min: d.dur, energy: (t?.energy as any) || 'med', pinned: true });
-    await setSchedule(d.id, start, end);
-    useStore.getState().updateTaskOptimistic(d.id, { pinned: true, scheduled_start: start, scheduled_end: end } as Partial<Task>);
-    toast('📌 Pinned — re-planning around it');
-    await handleAutoPlan(); // pinned block holds; everything else re-solves around it
+    setPlanning(true);
+    try {
+      const result = await planDay(date,{pin:{taskId:d.id,startMin:d.curMin,durationMin:d.dur}});
+      setReasons(Object.fromEntries(result.blocks.map(block=>[block.task_id,block.reason])));
+      setLastOverflow(result.unscheduled.map(item=>item.task_id));
+      toast('📌 Pinned — plan updated');
+    } catch(error) {toast(error instanceof Error ? error.message : 'Move could not be saved.');}
+    finally {setPlanning(false);}
   };
 
   // ── AI chief-of-staff brief on the current plan ──
@@ -306,6 +320,7 @@ export function PlanView() {
     <section className="plan-view" aria-label="Plan">
       <header className="plan-header">
         <div className="plan-heading">
+          {calendarStatus.length>0 && <p role="status">{calendarStatus.join(' ')}</p>}
           <div className="plan-eyebrow"><i className="fa-regular fa-calendar-check"></i> Your day, planned</div>
           <h1 className="plan-title">{prettyDate(date)}</h1>
           <p className="plan-sub">

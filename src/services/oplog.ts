@@ -53,8 +53,9 @@ export class Clock {
   tick(now: number = Date.now()): HLC {
     const wall = Math.max(this.last.wall, now);
     const counter = wall === this.last.wall ? this.last.counter + 1 : 0;
+    if (!Number.isSafeInteger(wall) || wall<0 || !Number.isSafeInteger(counter)) throw new Error('Operation clock exhausted or invalid.');
     this.last = { wall, counter, actor: this.actor };
-    return this.last;
+    return {...this.last};
   }
 
   /** Fold in a remote timestamp so our next tick is causally after it. */
@@ -65,17 +66,18 @@ export class Clock {
     else if (wall === this.last.wall) counter = this.last.counter + 1;
     else if (wall === remote.wall) counter = remote.counter + 1;
     else counter = 0;
+    if (!Number.isSafeInteger(wall) || wall<0 || !Number.isSafeInteger(counter)) throw new Error('Operation clock exhausted or invalid.');
     this.last = { wall, counter, actor: this.actor };
   }
 
   current(): HLC {
-    return this.last;
+    return {...this.last};
   }
 }
 
 // ── Op construction ──────────────────────────────────────
 
-/** Stable, content-addressed op id — identical logical ops dedupe on merge. */
+/** Logical operation identity; merge rejects divergent contents with the same ID. */
 function opId(hlc: HLC, kind: string, entity: string, field?: string): string {
   return `${hlc.wall}.${hlc.counter}.${hlc.actor}|${kind}|${entity}|${field ?? ''}`;
 }
@@ -101,10 +103,72 @@ export function entityToOps(clock: Clock, entity: string, fields: Record<string,
  * Merge op-logs into one, de-duplicated by op id. Commutative, associative,
  * and idempotent — the algebraic properties a CRDT relay relies on.
  */
+/** Stable encoding for comparisons and audit fingerprints (object key order is irrelevant). */
+export function canonicalJson(value: Json): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+const FORBIDDEN = new Set(['__proto__', 'constructor', 'prototype']);
+function validJson(value: unknown, depth = 0): boolean {
+  if (depth > 32) return false;
+  if (value === null || typeof value === 'boolean' || typeof value === 'string') return true;
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (Array.isArray(value)) return value.every(item => validJson(item, depth + 1));
+  return typeof value === 'object' && !!value &&
+    (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null) &&
+    Object.entries(value).every(([key, item]) => !FORBIDDEN.has(key) && validJson(item, depth + 1));
+}
+function token(value: unknown, max: number): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= max && !/[\u0000-\u001f]/.test(value);
+}
+
+/** Reject an entire malformed batch; never silently drop records as synced. */
+export function validateOps(input: unknown): asserts input is Op[] {
+  if (!Array.isArray(input) || input.length > 50_000) throw new Error('Invalid or oversized operation batch.');
+  for (const value of input) {
+    const o = value as Partial<Op> & { version?: unknown };
+    if (!o || (o.version !== undefined && o.version !== 1) || !token(o.id, 4096) || !token(o.entity, 512) ||
+        !o.hlc || !token(o.hlc.actor, 512) ||
+        !Number.isSafeInteger(o.hlc.wall) || o.hlc.wall < 0 ||
+        !Number.isSafeInteger(o.hlc.counter) || o.hlc.counter < 0 ||
+        (o.kind !== 'set' && o.kind !== 'del')) throw new Error('Malformed or unsupported operation.');
+    if (o.kind === 'set' && (!token(o.field, 128) || FORBIDDEN.has(o.field) || !validJson(o.value))) {
+      throw new Error('Invalid operation field or JSON value.');
+    }
+    if (JSON.stringify(o).length > 65_536) throw new Error('Operation exceeds size limit.');
+  }
+}
+
+function opContent(op: Op): string {
+  return canonicalJson(op.kind === 'set'
+    ? { id: op.id, hlc: { ...op.hlc }, kind: op.kind, entity: op.entity, field: op.field, value: op.value }
+    : { id: op.id, hlc: { ...op.hlc }, kind: op.kind, entity: op.entity });
+}
+
 export function merge(...logs: Op[][]): Op[] {
   const byId = new Map<string, Op>();
-  for (const log of logs) for (const op of log) if (!byId.has(op.id)) byId.set(op.id, op);
-  return [...byId.values()].sort((a, b) => hlcCompare(a.hlc, b.hlc) || (a.id < b.id ? -1 : 1));
+  const contents = new Map<string, string>();
+  const writes = new Map<string, string>();
+  for (const log of logs) {
+    validateOps(log);
+    for (const op of log) {
+      const content = opContent(op);
+      if (contents.has(op.id) && contents.get(op.id) !== content) throw new Error(`Operation ID collision: ${op.id}`);
+      if (op.kind === 'set') {
+        const stamp = JSON.stringify([op.entity, op.field, op.hlc.wall, op.hlc.counter, op.hlc.actor]);
+        const value = canonicalJson(op.value);
+        if (writes.has(stamp) && writes.get(stamp) !== value) throw new Error('Conflicting writes reuse an operation timestamp.');
+        writes.set(stamp, value);
+      }
+      contents.set(op.id, content);
+      if (!byId.has(op.id)) byId.set(op.id, op);
+    }
+  }
+  return [...byId.values()].sort((a, b) => hlcCompare(a.hlc, b.hlc) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
 export type EntityState = Record<string, Json>;
@@ -120,7 +184,7 @@ export function materialize(ops: Op[]): Map<string, EntityState> {
   const writes = new Map<string, Map<string, { value: Json; hlc: HLC }>>();
   const deletes = new Map<string, HLC>();
 
-  for (const op of ops) {
+  for (const op of merge(ops)) {
     if (op.kind === 'set') {
       let fields = writes.get(op.entity);
       if (!fields) writes.set(op.entity, (fields = new Map()));
@@ -151,7 +215,7 @@ export function converged(a: Op[], b: Op[]): boolean {
   if (ma.size !== mb.size) return false;
   for (const [k, va] of ma) {
     const vb = mb.get(k);
-    if (!vb || JSON.stringify(va) !== JSON.stringify(vb)) return false;
+    if (!vb || canonicalJson(va) !== canonicalJson(vb)) return false;
   }
   return true;
 }

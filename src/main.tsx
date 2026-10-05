@@ -8,6 +8,7 @@ import './style.css';
 import App from './App';
 import { migrateSecrets } from './utils/secrets';
 import { registerServiceWorker } from './utils/pwa';
+import {startCalendarRefresh} from './services/oauthCalendarService';
 import { initLocale } from './i18n';
 
 // Move any legacy plaintext secrets into the OS keychain (desktop only).
@@ -18,6 +19,7 @@ void initLocale();
 
 // Make the web build installable + offline-capable (no-op on desktop/dev).
 registerServiceWorker();
+startCalendarRefresh();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

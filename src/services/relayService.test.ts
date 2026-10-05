@@ -3,9 +3,10 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 // Keep the DB reconcile out of this unit — we're proving the relay round-trip
 // (seal → store → fetch → open → merge), which is separately reconciled.
 vi.mock('./syncService', () => ({
-  reconcileIntoApp: vi.fn(async () => ({ upserts: 0, deletes: 0 })),
+  mergeIntoApp: vi.fn(async (ops) => ({ applied: await (await import('./oplogStore')).ingestOps(ops), upserts: 0, deletes: 0 })),
 }));
 
+import { _resetForTests as resetIdentity } from './identity';
 import { enableSync, syncNow } from './relayService';
 import { logTaskUpsert, _resetForTests } from './oplogStore';
 import { projectTasks } from './projector';
@@ -21,23 +22,7 @@ class MemStorage {
 }
 
 // An in-memory stand-in for the Rust relay, mirroring its contract exactly.
-class FakeRelay {
-  rooms = new Map<string, Map<string, any>>();
-  handle(method: string, url: string, body?: string) {
-    const path = new URL(url).pathname.split('/').filter(Boolean); // [rooms, room, blobs, actor?]
-    const room = path[1];
-    if (method === 'PUT' && path[3]) {
-      if (!this.rooms.has(room)) this.rooms.set(room, new Map());
-      this.rooms.get(room)!.set(path[3], JSON.parse(body!));
-      return { ok: true, status: 200, text: async () => '{"ok":true}' };
-    }
-    if (method === 'GET' && path[2] === 'blobs') {
-      const blobs = [...(this.rooms.get(room) ?? new Map()).entries()].map(([actor, b]) => ({ actor, ...b }));
-      return { ok: true, status: 200, text: async () => JSON.stringify({ blobs }) };
-    }
-    return { ok: false, status: 404, text: async () => '{}' };
-  }
-}
+import {FakeBatchRelay as FakeRelay} from './fixtures/fakeBatchRelay';
 
 function task(id: string, over: Partial<Task> = {}): Task {
   return {
@@ -53,7 +38,7 @@ const PASS = 'shared-team-passphrase-9000';
 
 async function on<T>(store: MemStorage, fn: () => Promise<T>): Promise<T> {
   (globalThis as any).localStorage = store;
-  _resetForTests();
+  _resetForTests(); resetIdentity();
   await enableSync(RELAY, PASS); // same passphrase ⇒ same key + room on every device
   return fn();
 }
@@ -110,7 +95,7 @@ describe('relayService — live sync over a dumb E2E relay', () => {
     // room AND key, so it sees nothing and certainly can't decrypt.
     const C = new MemStorage();
     (globalThis as any).localStorage = C;
-    _resetForTests();
+    _resetForTests(); resetIdentity(); resetIdentity();
     await enableSync(RELAY, 'a-totally-different-passphrase');
     await syncNow();
     const onC = projectTasks(await loadOps());

@@ -1,17 +1,12 @@
-//! Data-safety: timestamped SQLite backups + one-click restore.
-//!
-//! The live database lives at `app_config_dir()/cognote.db` (the path
-//! tauri-plugin-sql derives from the `sqlite:cognote.db` connection string).
-//! Backups are plain file copies kept in `app_config_dir()/backups/`.
-//!
-//! Consistency: the frontend issues `PRAGMA wal_checkpoint(TRUNCATE)` before
-//! asking us to copy, which folds the write-ahead log back into the main file
-//! and empties it — so a copy of the single main file is a coherent snapshot.
-//! On restore we drop any stale `-wal`/`-shm` sidecars so they can't clobber
-//! the file we just put back.
+//! Coherent SQLite online snapshots and transactional restore.
+//! Never copy a live main file or remove its WAL/SHM sidecars.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+use sqlx::{Connection, SqliteConnection, sqlite::SqliteConnectOptions};
+
+pub(crate) static MAINTENANCE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 use std::time::UNIX_EPOCH;
 
 use serde::Serialize;
@@ -58,7 +53,7 @@ fn safe_reason(reason: &str) -> String {
     if r.is_empty() { "manual".into() } else { r.to_lowercase() }
 }
 
-fn info_for(path: &PathBuf) -> Option<BackupInfo> {
+fn info_for(path: &Path) -> Option<BackupInfo> {
     let name = path.file_name()?.to_string_lossy().to_string();
     let meta = fs::metadata(path).ok()?;
     let created_ms = meta
@@ -108,67 +103,252 @@ fn prune(app: &AppHandle) {
     }
 }
 
-/// Copy the live database into `backups/` with a timestamped name.
-/// The frontend must checkpoint the WAL first for a consistent snapshot.
-#[tauri::command]
-pub fn backup_database(app: AppHandle, reason: Option<String>) -> Result<BackupInfo, String> {
-    let src = db_path(&app)?;
-    if !src.exists() {
-        return Err("no database file to back up yet".into());
-    }
-    let reason = safe_reason(reason.as_deref().unwrap_or("manual"));
-    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
-    let name = format!("cognote-{stamp}-{reason}.db");
-    let dest = backups_dir(&app)?.join(&name);
-
-    fs::copy(&src, &dest).map_err(|e| format!("backup copy failed: {e}"))?;
-    prune(&app);
-
-    info_for(&dest).ok_or_else(|| "backup created but could not be read back".into())
+async fn open(path: &Path, writable: bool, create: bool) -> Result<SqliteConnection, String> {
+    SqliteConnection::connect_with(
+        &SqliteConnectOptions::new().filename(path).read_only(!writable)
+            .create_if_missing(create).busy_timeout(Duration::from_secs(5))
+    ).await.map_err(|e| format!("cannot open database: {e}"))
 }
 
-/// Restore a backup over the live database. Snapshots the current DB first
-/// (reason `pre-restore`) so the restore itself is reversible, then swaps the
-/// file in and clears stale WAL sidecars. The frontend must reload afterward
-/// so the SQL plugin reopens the new file.
-#[tauri::command]
-pub fn restore_backup(app: AppHandle, name: String) -> Result<(), String> {
-    // Disallow path traversal — operate strictly inside backups/.
-    if name.contains('/') || name.contains('\\') || name.contains("..") {
-        return Err("invalid backup name".into());
+async fn validate(connection: &mut SqliteConnection) -> Result<(), String> {
+    let rows: Vec<String> = sqlx::query_scalar("PRAGMA integrity_check")
+        .fetch_all(&mut *connection).await.map_err(|e| format!("integrity check failed: {e}"))?;
+    if rows != ["ok"] { return Err(format!("database integrity failed: {}", rows.join("; "))); }
+    // Reject empty SQLite files and unrelated databases before touching live data.
+    for table in ["tasks", "app_state", "projects", "milestones", "templates", "calendar_events", "oplog"] {
+        let exists: i64 = sqlx::query_scalar("SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?")
+            .bind(table).fetch_one(&mut *connection).await.map_err(|e| e.to_string())?;
+        if exists != 1 { return Err(format!("incompatible snapshot: missing {table}")); }
     }
-    let backup = backups_dir(&app)?.join(&name);
-    if !backup.exists() {
-        return Err(format!("backup not found: {name}"));
-    }
-    let live = db_path(&app)?;
+    sqlx::query("SELECT id, deleted_at, scheduled_start, scheduled_end, custom_fields FROM tasks LIMIT 0")
+        .execute(&mut *connection).await.map_err(|e| format!("incompatible task schema: {e}"))?;
+    Ok(())
+}
 
-    // Safety net: snapshot current state before overwriting it.
-    if live.exists() {
-        let _ = backup_database(app.clone(), Some("prerestore".into()));
-    }
-
-    fs::copy(&backup, &live).map_err(|e| format!("restore copy failed: {e}"))?;
-
-    // Remove stale write-ahead-log sidecars so they don't override the restore.
-    for ext in ["cognote.db-wal", "cognote.db-shm"] {
-        let p = config_dir(&app)?.join(ext);
-        if p.exists() {
-            let _ = fs::remove_file(p);
+/// Copy through SQLite's own write transaction. Both SQLx worker handles are
+/// locked for the FFI calls. An unfinished/failed backup rolls back on finish.
+async fn online_copy(source: &mut SqliteConnection, destination: &mut SqliteConnection) -> Result<(), String> {
+    let mut src = source.lock_handle().await.map_err(|e| e.to_string())?;
+    let mut dst = destination.lock_handle().await.map_err(|e| e.to_string())?;
+    // SAFETY: SQLx guards exclusively own two distinct live handles throughout
+    // init/step/finish; the backup is always finished before either guard drops.
+    unsafe {
+        let backup = libsqlite3_sys::sqlite3_backup_init(
+            dst.as_raw_handle().as_ptr(), c"main".as_ptr(),
+            src.as_raw_handle().as_ptr(), c"main".as_ptr(),
+        );
+        if backup.is_null() { return Err("SQLite could not start snapshot transaction".into()); }
+        let step = libsqlite3_sys::sqlite3_backup_step(backup, -1);
+        let finish = libsqlite3_sys::sqlite3_backup_finish(backup);
+        if step != libsqlite3_sys::SQLITE_DONE || finish != libsqlite3_sys::SQLITE_OK {
+            return Err(format!("SQLite snapshot transaction failed (step={step}, finish={finish}); destination rolled back"));
         }
     }
+    Ok(())
+}
+
+async fn snapshot(source: &Path, destination: &Path) -> Result<(), String> {
+    if destination.exists() { return Err("snapshot destination already exists".into()); }
+    let mut src = open(source, false, false).await?;
+    validate(&mut src).await?;
+    let temporary = destination.with_extension("pending");
+    fs::OpenOptions::new().write(true).create_new(true).open(&temporary)
+        .map_err(|e| format!("cannot reserve snapshot: {e}"))?;
+    let mut dst = open(&temporary, true, false).await?;
+    // A standalone DELETE-mode file needs no WAL sidecar to restore elsewhere.
+    sqlx::query("PRAGMA journal_mode=DELETE").execute(&mut dst).await.map_err(|e| e.to_string())?;
+    let result = async {
+        online_copy(&mut src, &mut dst).await?;
+        validate(&mut dst).await
+    }.await;
+    dst.close().await.map_err(|e| e.to_string())?;
+    src.close().await.map_err(|e| e.to_string())?;
+    result?;
+    fs::File::open(&temporary).and_then(|file| file.sync_all()).map_err(|e| format!("snapshot sync failed: {e}"))?;
+    fs::rename(&temporary, destination).map_err(|e| format!("cannot publish snapshot: {e}"))?;
+    #[cfg(unix)]
+    fs::File::open(destination.parent().ok_or("snapshot directory unavailable")?)
+        .and_then(|file| file.sync_all()).map_err(|e| format!("snapshot directory sync failed: {e}"))?;
+    Ok(())
+}
+
+async fn create_snapshot(app: &AppHandle, reason: &str) -> Result<BackupInfo, String> {
+    let dir = backups_dir(app)?;
+    let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S-%f");
+    let name = format!("cognote-{stamp}-{}.db", safe_reason(reason));
+    let dest = dir.join(name);
+    // Incomplete snapshots never appear in the backup list.
+    snapshot(&db_path(app)?, &dest).await?;
+    info_for(&dest).ok_or_else(|| "snapshot metadata unavailable".into())
+}
+
+#[tauri::command]
+pub async fn backup_database(app: AppHandle, reason: Option<String>) -> Result<BackupInfo, String> {
+    let _guard = MAINTENANCE.lock().await;
+    let info = create_snapshot(&app, reason.as_deref().unwrap_or("manual")).await?;
+    prune(&app);
+    Ok(info)
+}
+
+fn checked_name(name: &str) -> Result<(), String> {
+    if !name.starts_with("cognote-") || !name.ends_with(".db") || name.contains('/') || name.contains('\\') || name.contains("..") {
+        return Err("invalid backup name".into());
+    }
+    Ok(())
+}
+
+async fn restore_snapshot(backup: &Path, live: &Path, safety: &Path) -> Result<(), String> {
+    let mut src = open(backup, false, false).await?;
+    validate(&mut src).await?;
+    // Any failure here aborts restore; never discard the last surviving state.
+    snapshot(live, safety).await?;
+    let mut dst = open(live, true, false).await?;
+    online_copy(&mut src, &mut dst).await?;
+    validate(&mut dst).await?;
+    dst.close().await.map_err(|e| e.to_string())?;
+    src.close().await.map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Restore into the live SQLite database transactionally, retaining its WAL
+/// lifecycle. The frontend drains and closes the plugin pool first, then reloads.
+#[tauri::command]
+pub async fn restore_backup(app: AppHandle, name: String) -> Result<(), String> {
+    let _guard = MAINTENANCE.lock().await;
+    checked_name(&name)?;
+    let backup = backups_dir(&app)?.join(&name);
+    let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S-%f");
+    let safety = backups_dir(&app)?.join(format!("cognote-{stamp}-prerestore.db"));
+    restore_snapshot(&backup, &db_path(&app)?, &safety).await?;
+    // Keep the selected backup and safety snapshot until recovery is confirmed.
     Ok(())
 }
 
 /// Permanently delete a single backup file.
 #[tauri::command]
 pub fn delete_backup(app: AppHandle, name: String) -> Result<(), String> {
-    if name.contains('/') || name.contains('\\') || name.contains("..") {
-        return Err("invalid backup name".into());
-    }
+    checked_name(&name)?;
     let path = backups_dir(&app)?.join(&name);
     if path.exists() {
         fs::remove_file(&path).map_err(|e| format!("delete failed: {e}"))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::SystemTime;
+
+    struct Fixture(PathBuf);
+    impl Fixture {
+        fn new() -> Self {
+            let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+            let dir = std::env::temp_dir().join(format!("cognate-backup-{}-{nonce}", std::process::id()));
+            fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+        fn path(&self, name: &str) -> PathBuf { self.0.join(name) }
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); }
+    }
+
+    async fn database(path: &Path) -> SqliteConnection {
+        let mut db = open(path, true, true).await.unwrap();
+        for migration in [
+            include_str!("../migrations/001_init.sql"), include_str!("../migrations/002_projects.sql"),
+            include_str!("../migrations/003_milestones.sql"), include_str!("../migrations/004_trash.sql"),
+            include_str!("../migrations/005_schedule.sql"), include_str!("../migrations/006_oplog.sql"),
+        ] { sqlx::raw_sql(migration).execute(&mut db).await.unwrap(); }
+        sqlx::raw_sql("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0;
+            INSERT INTO tasks(id,title,created_at) VALUES ('task','before','2026-10-06');
+            INSERT INTO oplog(id,wall,counter,actor,kind,entity,field,value) VALUES ('op',1,0,'device','set','task','title','\"before\"');
+            INSERT INTO projects(id,name,created_at) VALUES ('project','Example','2026-10-06');
+            INSERT INTO app_state(key,value) VALUES ('seeded','1');")
+            .execute(&mut db).await.unwrap();
+        db
+    }
+    async fn title(db: &mut SqliteConnection) -> String {
+        sqlx::query_scalar("SELECT title FROM tasks WHERE id='task'").fetch_one(db).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn snapshot_captures_uncheckpointed_wal_and_restore_keeps_open_readers_coherent() {
+        let f = Fixture::new();
+        let live = f.path("live.db");
+        let mut writer = database(&live).await;
+        assert!(fs::metadata(f.path("live.db-wal")).unwrap().len() > 0);
+        let backup = f.path("backup.db");
+        snapshot(&live, &backup).await.unwrap();
+        let mut saved = open(&backup, false, false).await.unwrap();
+        assert_eq!(title(&mut saved).await, "before");
+        let ops: i64 = sqlx::query_scalar("SELECT count(*) FROM oplog").fetch_one(&mut saved).await.unwrap();
+        assert_eq!(ops, 1);
+        saved.close().await.unwrap();
+        sqlx::query("UPDATE tasks SET title='after'").execute(&mut writer).await.unwrap();
+        // Prime a cached statement on another already-open native connection.
+        let mut reader = open(&live, true, false).await.unwrap();
+        assert_eq!(title(&mut reader).await, "after");
+        restore_snapshot(&backup, &live, &f.path("safety.db")).await.unwrap();
+        assert_eq!(title(&mut reader).await, "before");
+        assert_eq!(title(&mut writer).await, "before");
+        let mut safety = open(&f.path("safety.db"), false, false).await.unwrap();
+        assert_eq!(title(&mut safety).await, "after");
+        validate(&mut writer).await.unwrap();
+        safety.close().await.unwrap(); reader.close().await.unwrap(); writer.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn corrupt_or_foreign_snapshot_never_changes_live_data() {
+        let f = Fixture::new();
+        let live = f.path("live.db");
+        let mut db = database(&live).await;
+        let corrupt = f.path("corrupt.db");
+        fs::write(&corrupt, "not a database").unwrap();
+        assert!(restore_snapshot(&corrupt, &live, &f.path("safety.db")).await.is_err());
+        let foreign = f.path("foreign.db");
+        let other = open(&foreign, true, true).await.unwrap();
+        other.close().await.unwrap();
+        assert!(restore_snapshot(&foreign, &live, &f.path("safety.db")).await.is_err());
+        assert_eq!(title(&mut db).await, "before");
+        assert!(!f.path("safety.db").exists());
+        db.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn required_safety_snapshot_failure_aborts_restore() {
+        let f = Fixture::new();
+        let live = f.path("live.db");
+        let mut db = database(&live).await;
+        let backup = f.path("backup.db");
+        snapshot(&live, &backup).await.unwrap();
+        sqlx::query("UPDATE tasks SET title='keep me'").execute(&mut db).await.unwrap();
+        fs::write(f.path("occupied.db"), "existing snapshot").unwrap();
+        assert!(restore_snapshot(&backup, &live, &f.path("occupied.db")).await.is_err());
+        assert_eq!(title(&mut db).await, "keep me");
+        db.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn failed_backup_transaction_rolls_back_destination() {
+        let f = Fixture::new();
+        let mut src = database(&f.path("source.db")).await;
+        let mut dst = database(&f.path("destination.db")).await;
+        sqlx::query("UPDATE tasks SET title='destination'").execute(&mut dst).await.unwrap();
+        sqlx::query("BEGIN IMMEDIATE").execute(&mut dst).await.unwrap();
+        assert!(online_copy(&mut src, &mut dst).await.is_err());
+        sqlx::query("ROLLBACK").execute(&mut dst).await.unwrap();
+        assert_eq!(title(&mut dst).await, "destination");
+        validate(&mut dst).await.unwrap();
+        src.close().await.unwrap(); dst.close().await.unwrap();
+    }
+
+    #[test]
+    fn backup_names_reject_traversal_and_unrelated_files() {
+        for name in ["../cognote-x.db", "cognote-../x.db", "cognote-\\x.db", "other.db", "cognote-x.pending"] {
+            assert!(checked_name(name).is_err());
+        }
+        assert!(checked_name("cognote-20261006-123456-manual.db").is_ok());
+    }
 }

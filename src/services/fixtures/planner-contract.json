@@ -1,0 +1,500 @@
+[
+  {
+    "name": "normal",
+    "request": {
+      "date": "2026-10-06",
+      "work_start_min": 540,
+      "work_end_min": 1020,
+      "tasks": [
+        {
+          "id": "a",
+          "title": "A",
+          "duration_min": 60,
+          "energy": "med",
+          "deadline": "",
+          "priority": "medium",
+          "importance": 3,
+          "pinned": false,
+          "pinned_start_min": null
+        }
+      ],
+      "busy": []
+    },
+    "valid": true,
+    "scheduled": [
+      "a"
+    ],
+    "unscheduled": []
+  },
+  {
+    "name": "duration zero",
+    "request": {
+      "date": "2026-10-06",
+      "work_start_min": 540,
+      "work_end_min": 1020,
+      "tasks": [
+        {
+          "id": "a",
+          "title": "A",
+          "duration_min": 0,
+          "energy": "med",
+          "deadline": "",
+          "priority": "medium",
+          "importance": 3,
+          "pinned": false,
+          "pinned_start_min": null
+        }
+      ],
+      "busy": []
+    },
+    "valid": false,
+    "scheduled": [
+      "a"
+    ],
+    "unscheduled": []
+  },
+  {
+    "name": "overflow duration",
+    "request": {
+      "date": "2026-10-06",
+      "work_start_min": 540,
+      "work_end_min": 1020,
+      "tasks": [
+        {
+          "id": "a",
+          "title": "A",
+          "duration_min": 4294967295,
+          "energy": "med",
+          "deadline": "",
+          "priority": "medium",
+          "importance": 3,
+          "pinned": false,
+          "pinned_start_min": null
+        }
+      ],
+      "busy": []
+    },
+    "valid": false,
+    "scheduled": [
+      "a"
+    ],
+    "unscheduled": []
+  },
+  {
+    "name": "negative duration",
+    "request": {
+      "date": "2026-10-06",
+      "work_start_min": 540,
+      "work_end_min": 1020,
+      "tasks": [
+        {
+          "id": "a",
+          "title": "A",
+          "duration_min": -1,
+          "energy": "med",
+          "deadline": "",
+          "priority": "medium",
+          "importance": 3,
+          "pinned": false,
+          "pinned_start_min": null
+        }
+      ],
+      "busy": []
+    },
+    "valid": false,
+    "scheduled": [
+      "a"
+    ],
+    "unscheduled": []
+  },
+  {
+    "name": "duplicate ids",
+    "request": {
+      "date": "2026-10-06",
+      "work_start_min": 540,
+      "work_end_min": 1020,
+      "tasks": [
+        {
+          "id": "a",
+          "title": "A",
+          "duration_min": 60,
+          "energy": "med",
+          "deadline": "",
+          "priority": "medium",
+          "importance": 3,
+          "pinned": false,
+          "pinned_start_min": null
+        },
+        {
+          "id": "a",
+          "title": "A",
+          "duration_min": 60,
+          "energy": "med",
+          "deadline": "",
+          "priority": "medium",
+          "importance": 3,
+          "pinned": false,
+          "pinned_start_min": null
+        }
+      ],
+      "busy": []
+    },
+    "valid": false,
+    "scheduled": [
+      "a"
+    ],
+    "unscheduled": []
+  },
+  {
+    "name": "invalid date",
+    "request": {
+      "date": "2026-02-30",
+      "work_start_min": 540,
+      "work_end_min": 1020,
+      "tasks": [
+        {
+          "id": "a",
+          "title": "A",
+          "duration_min": 60,
+          "energy": "med",
+          "deadline": "",
+          "priority": "medium",
+          "importance": 3,
+          "pinned": false,
+          "pinned_start_min": null
+        }
+      ],
+      "busy": []
+    },
+    "valid": false,
+    "scheduled": [
+      "a"
+    ],
+    "unscheduled": []
+  },
+  {
+    "name": "inverted work",
+    "request": {
+      "date": "2026-10-06",
+      "work_start_min": 540,
+      "work_end_min": 530,
+      "tasks": [
+        {
+          "id": "a",
+          "title": "A",
+          "duration_min": 60,
+          "energy": "med",
+          "deadline": "",
+          "priority": "medium",
+          "importance": 3,
+          "pinned": false,
+          "pinned_start_min": null
+        }
+      ],
+      "busy": []
+    },
+    "valid": false,
+    "scheduled": [
+      "a"
+    ],
+    "unscheduled": []
+  },
+  {
+    "name": "inverted busy",
+    "request": {
+      "date": "2026-10-06",
+      "work_start_min": 540,
+      "work_end_min": 1020,
+      "tasks": [
+        {
+          "id": "a",
+          "title": "A",
+          "duration_min": 60,
+          "energy": "med",
+          "deadline": "",
+          "priority": "medium",
+          "importance": 3,
+          "pinned": false,
+          "pinned_start_min": null
+        }
+      ],
+      "busy": [
+        {
+          "start_min": 700,
+          "end_min": 690,
+          "title": "Bad"
+        }
+      ]
+    },
+    "valid": false,
+    "scheduled": [
+      "a"
+    ],
+    "unscheduled": []
+  },
+  {
+    "name": "invalid energy",
+    "request": {
+      "date": "2026-10-06",
+      "work_start_min": 540,
+      "work_end_min": 1020,
+      "tasks": [
+        {
+          "id": "a",
+          "title": "A",
+          "duration_min": 60,
+          "energy": "unknown",
+          "deadline": "",
+          "priority": "medium",
+          "importance": 3,
+          "pinned": false,
+          "pinned_start_min": null
+        }
+      ],
+      "busy": []
+    },
+    "valid": false,
+    "scheduled": [
+      "a"
+    ],
+    "unscheduled": []
+  },
+  {
+    "name": "invalid importance",
+    "request": {
+      "date": "2026-10-06",
+      "work_start_min": 540,
+      "work_end_min": 1020,
+      "tasks": [
+        {
+          "id": "a",
+          "title": "A",
+          "duration_min": 60,
+          "energy": "med",
+          "deadline": "",
+          "priority": "medium",
+          "importance": 255,
+          "pinned": false,
+          "pinned_start_min": null
+        }
+      ],
+      "busy": []
+    },
+    "valid": false,
+    "scheduled": [
+      "a"
+    ],
+    "unscheduled": []
+  },
+  {
+    "name": "curve wrong length",
+    "request": {
+      "date": "2026-10-06",
+      "work_start_min": 540,
+      "work_end_min": 1020,
+      "tasks": [
+        {
+          "id": "a",
+          "title": "A",
+          "duration_min": 60,
+          "energy": "med",
+          "deadline": "",
+          "priority": "medium",
+          "importance": 3,
+          "pinned": false,
+          "pinned_start_min": null
+        }
+      ],
+      "busy": [],
+      "energy_curve": [
+        1,
+        2
+      ]
+    },
+    "valid": false,
+    "scheduled": [
+      "a"
+    ],
+    "unscheduled": []
+  },
+  {
+    "name": "curve invalid rank",
+    "request": {
+      "date": "2026-10-06",
+      "work_start_min": 540,
+      "work_end_min": 1020,
+      "tasks": [
+        {
+          "id": "a",
+          "title": "A",
+          "duration_min": 60,
+          "energy": "med",
+          "deadline": "",
+          "priority": "medium",
+          "importance": 3,
+          "pinned": false,
+          "pinned_start_min": null
+        }
+      ],
+      "busy": [],
+      "energy_curve": [
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3
+      ]
+    },
+    "valid": false,
+    "scheduled": [
+      "a"
+    ],
+    "unscheduled": []
+  },
+  {
+    "name": "pin without time",
+    "request": {
+      "date": "2026-10-06",
+      "work_start_min": 540,
+      "work_end_min": 1020,
+      "tasks": [
+        {
+          "id": "a",
+          "title": "A",
+          "duration_min": 60,
+          "energy": "med",
+          "deadline": "",
+          "priority": "medium",
+          "importance": 3,
+          "pinned": true,
+          "pinned_start_min": null
+        }
+      ],
+      "busy": []
+    },
+    "valid": true,
+    "scheduled": [],
+    "unscheduled": [
+      "a"
+    ]
+  },
+  {
+    "name": "pin outside work",
+    "request": {
+      "date": "2026-10-06",
+      "work_start_min": 540,
+      "work_end_min": 1020,
+      "tasks": [
+        {
+          "id": "a",
+          "title": "A",
+          "duration_min": 60,
+          "energy": "med",
+          "deadline": "",
+          "priority": "medium",
+          "importance": 3,
+          "pinned": true,
+          "pinned_start_min": 1020
+        }
+      ],
+      "busy": []
+    },
+    "valid": true,
+    "scheduled": [],
+    "unscheduled": [
+      "a"
+    ]
+  },
+  {
+    "name": "pin meeting conflict",
+    "request": {
+      "date": "2026-10-06",
+      "work_start_min": 540,
+      "work_end_min": 1020,
+      "tasks": [
+        {
+          "id": "a",
+          "title": "A",
+          "duration_min": 60,
+          "energy": "med",
+          "deadline": "",
+          "priority": "medium",
+          "importance": 3,
+          "pinned": true,
+          "pinned_start_min": 600
+        }
+      ],
+      "busy": [
+        {
+          "start_min": 610,
+          "end_min": 620,
+          "title": "Meeting"
+        }
+      ]
+    },
+    "valid": true,
+    "scheduled": [],
+    "unscheduled": [
+      "a"
+    ]
+  },
+  {
+    "name": "pins stable despite input order",
+    "request": {
+      "date": "2026-10-06",
+      "work_start_min": 540,
+      "work_end_min": 1020,
+      "tasks": [
+        {
+          "id": "b",
+          "title": "A",
+          "duration_min": 60,
+          "energy": "med",
+          "deadline": "",
+          "priority": "medium",
+          "importance": 3,
+          "pinned": true,
+          "pinned_start_min": 600
+        },
+        {
+          "id": "a",
+          "title": "A",
+          "duration_min": 60,
+          "energy": "med",
+          "deadline": "",
+          "priority": "medium",
+          "importance": 3,
+          "pinned": true,
+          "pinned_start_min": 600
+        }
+      ],
+      "busy": []
+    },
+    "valid": true,
+    "scheduled": [
+      "a"
+    ],
+    "unscheduled": [
+      "b"
+    ]
+  }
+]

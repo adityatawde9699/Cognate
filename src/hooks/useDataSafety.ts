@@ -15,7 +15,10 @@ export function useDataSafety() {
       if (!cancelled && status !== 'ok') {
         toast(`⚠ Database integrity issue (${status}). Restore a backup in Settings → Data safety.`);
       }
-      if (!cancelled) await maybeAutoBackup();
+      if (!cancelled) {
+        try { await maybeAutoBackup(); }
+        catch (error) { if (!cancelled) toast(`Automatic backup failed: ${error}`); }
+      }
     })();
     return () => {
       cancelled = true;

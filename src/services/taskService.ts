@@ -24,14 +24,14 @@ import {
     updateSortOrders as dbUpdateSortOrders,
     updateTask as dbUpdateTask,
     getAllTasks,
-    getLocalDateString,
     initDb,
 } from '../db';
 import { Project, Recurrence, Task, useStore } from '../store';
 import { redo as historyRedo, undo as historyUndo, record } from './history';
 import { ensureIdentity } from './identity';
-import { backfillFromTasks, logTaskDelete, logTaskRestore, logTaskSoftDelete, logTaskUpsert } from './oplogStore';
+export { nextDeadline } from './recurrenceRules';
 import { notifyTaskComplete } from './webhookService';
+import { toast } from '../utils/toast';
 
 export interface TaskInput {
   title: string;
@@ -61,9 +61,7 @@ function snapshot(): Task[] {
 function rollback(saved: Task[], error: unknown, context: string) {
   console.error(`[taskService] ${context} failed:`, error);
   useStore.getState().setTasks(saved);
-  useStore.getState().setAppError(
-    `Failed to ${context}. Your change was reverted.`
-  );
+  toast(`Failed to ${context}. Your change was reverted.`);
 }
 
 /** Project a full Task back down to the editable input shape (for edit-undo). */
@@ -94,9 +92,8 @@ export async function loadAllTasks(filter: string = 'all'): Promise<void> {
     await initDb();
     const tasks = await getAllTasks(filter);
     useStore.getState().setTasks(tasks as Task[]);
-    // Seed the op-log from any tasks that predate it (Act 2; best-effort).
+    // Identity warm-up is independent of the atomic task write path.
     if (filter === 'all') {
-      void backfillFromTasks(tasks as Task[]);
       void ensureIdentity(); // Act 3: mint/load this device's signing identity early.
     }
   } catch (error) {
@@ -122,8 +119,6 @@ export async function addTask(data: TaskInput): Promise<Task | null> {
     // Then update Zustand with the authoritative task from DB
     useStore.getState().addTaskOptimistic(task);
 
-    // Shadow the mutation into the CRDT op-log (Act 2; best-effort).
-    void logTaskUpsert(task);
 
     // Inverse op: undo soft-deletes it (recoverable), redo restores it.
     record({
@@ -164,8 +159,6 @@ export async function editTask(
     // Reconcile with DB result (priority may have changed)
     useStore.getState().updateTaskOptimistic(id, updated as Partial<Task>);
 
-    // Shadow the edit into the op-log (Act 2; best-effort).
-    void logTaskUpsert(useStore.getState().currentTasks.find((t) => t.id === id) ?? (updated as Task));
 
     // Inverse op: re-apply the prior field values (priority recomputes from them).
     if (before) {
@@ -184,13 +177,21 @@ export async function editTask(
     }
   } catch (error) {
     rollback(saved, error, 'update task');
+    throw error;
   }
 }
 
 /**
  * Delete a task: optimistic removal → DB delete → rollback on failure.
  */
-export async function removeTask(id: string): Promise<void> {
+const pendingMutations = new Set<Promise<void>>();
+export function removeTask(id: string): Promise<void> {
+  const command = removeTaskCommand(id);
+  pendingMutations.add(command);
+  command.finally(() => pendingMutations.delete(command));
+  return command;
+}
+async function removeTaskCommand(id: string): Promise<void> {
   const saved = snapshot();
   const task = saved.find((t) => t.id === id);
 
@@ -202,8 +203,6 @@ export async function removeTask(id: string): Promise<void> {
     const when = new Date().toISOString();
     await dbSoftDeleteTask(id, when);
 
-    // Shadow into the op-log as a field change — the task survives in Trash.
-    void logTaskSoftDelete(id, when);
 
     if (task) {
       record({
@@ -233,15 +232,14 @@ export async function toggleTaskDone(id: string): Promise<void> {
   useStore.getState().toggleTaskOptimistic(id);
 
   try {
-    await dbToggleTask(id);
+    const updated = await dbToggleTask(id);
+    useStore.getState().updateTaskOptimistic(id, updated as Task);
     const task = useStore.getState().currentTasks.find((t) => t.id === id);
-    // Shadow the toggle into the op-log (Act 2; best-effort).
-    if (task) void logTaskUpsert(task);
     if (task?.done) {
       // Announce newly-completed tasks to configured webhooks (fire-and-forget).
       void notifyTaskComplete(task);
       // Recurring tasks spawn their next occurrence on completion.
-      if (task.recurrence && task.recurrence !== 'none') void spawnRecurrence(task);
+      if (task.recurrence && task.recurrence !== 'none') await loadAllTasks(useStore.getState().currentFilter);
     }
 
     // Inverse op flips the done state back; side effects (webhook, recurrence
@@ -253,37 +251,6 @@ export async function toggleTaskDone(id: string): Promise<void> {
     record({ label: 'Toggle task', undo: flip, redo: flip });
   } catch (error) {
     rollback(saved, error, 'toggle task');
-  }
-}
-
-/** Roll a deadline forward by one recurrence interval. Exported for testing. */
-export function nextDeadline(base: string, rec: Recurrence): string {
-  const d = base ? new Date(base + 'T00:00:00') : new Date();
-  if (rec === 'daily') d.setDate(d.getDate() + 1);
-  else if (rec === 'weekly') d.setDate(d.getDate() + 7);
-  else if (rec === 'monthly') d.setMonth(d.getMonth() + 1);
-  return getLocalDateString(d);
-}
-
-/** Create the next occurrence of a recurring task (fresh, not done). */
-async function spawnRecurrence(task: Task): Promise<void> {
-  try {
-    const next = await dbCreateTask({
-      title: task.title,
-      description: task.description,
-      deadline: nextDeadline(task.deadline, task.recurrence),
-      tags: task.tags,
-      importance: task.importance,
-      effort: task.effort,
-      project_id: task.project_id,
-      parent_id: task.parent_id,
-      recurrence: task.recurrence,
-      milestone_id: task.milestone_id,
-      custom_fields: task.custom_fields,
-    });
-    useStore.getState().addTaskOptimistic(next as Task);
-  } catch (e) {
-    console.warn('[taskService] recurrence spawn failed:', e);
   }
 }
 
@@ -448,8 +415,6 @@ export async function addPomodoroToTask(id: string): Promise<void> {
 
   try {
     await dbAddPomodoro(id);
-    const task = useStore.getState().currentTasks.find((t) => t.id === id);
-    if (task) void logTaskUpsert(task); // op-log: record the new focus count
   } catch (error) {
     rollback(saved, error, 'add pomodoro');
   }
@@ -474,7 +439,6 @@ export async function restoreFromTrash(id: string): Promise<void> {
   useStore.getState().removeTaskOptimistic(id);
   try {
     await dbRestoreTask(id);
-    void logTaskRestore(id); // op-log: clear the soft-delete stamp
   } catch (error) {
     rollback(saved, error, 'restore task');
   }
@@ -486,7 +450,6 @@ export async function purgeTask(id: string): Promise<void> {
   useStore.getState().removeTaskOptimistic(id);
   try {
     await dbDeleteTask(id);
-    void logTaskDelete(id); // op-log: a real tombstone
   } catch (error) {
     rollback(saved, error, 'purge task');
   }
@@ -498,7 +461,6 @@ export async function emptyTrash(): Promise<number> {
   useStore.getState().setTasks([]);
   try {
     const n = await dbEmptyTrash();
-    for (const t of saved) void logTaskDelete(t.id); // tombstone each purged task
     return n;
   } catch (error) {
     rollback(saved, error, 'empty Trash');
@@ -510,6 +472,7 @@ export async function emptyTrash(): Promise<number> {
 
 /** Undo the last recorded mutation. Returns its label, or null if nothing to undo. */
 export async function undoLast(): Promise<string | null> {
+  await Promise.all([...pendingMutations]);
   try {
     return await historyUndo();
   } catch {
@@ -520,6 +483,7 @@ export async function undoLast(): Promise<string | null> {
 
 /** Redo the last undone mutation. Returns its label, or null if nothing to redo. */
 export async function redoLast(): Promise<string | null> {
+  await Promise.all([...pendingMutations]);
   try {
     return await historyRedo();
   } catch {

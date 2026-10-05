@@ -29,25 +29,78 @@ type Store = Mutex<HashMap<String, HashMap<String, Value>>>;
 /// which a client treats as "changed" and reconciles — safe by construction.
 type Versions = Mutex<HashMap<String, u64>>;
 
-/// Load the persisted store from disk, or start empty if absent/corrupt.
-fn load_store(path: &str) -> HashMap<String, HashMap<String, Value>> {
-    match std::fs::read_to_string(path) {
-        Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
-        Err(_) => HashMap::new(),
+static REQUESTS:std::sync::atomic::AtomicU64=std::sync::atomic::AtomicU64::new(0);
+static DURABLE_WRITES:std::sync::atomic::AtomicU64=std::sync::atomic::AtomicU64::new(0);
+static STORAGE_FAILURES:std::sync::atomic::AtomicU64=std::sync::atomic::AtomicU64::new(0);
+
+const MAX_BODY: usize = 1_048_576;
+const MAX_STORE: usize = 32 * 1_048_576;
+const MAX_ROOMS: usize = 1000;
+const MAX_ACTORS: usize = 128;
+type Data = HashMap<String,HashMap<String,Value>>;
+
+/// Missing data starts empty; corruption/permission errors fail startup.
+fn load_store(path: &str) -> Result<Data,String> {
+    match std::fs::metadata(path) {
+        Err(error) if error.kind()==std::io::ErrorKind::NotFound => return Ok(HashMap::new()),
+        Err(error) => return Err(error.to_string()),
+        Ok(metadata) if metadata.len()>MAX_STORE as u64 => return Err("Relay store exceeds quota".into()),
+        _ => {},
     }
+    serde_json::from_slice(&std::fs::read(path).map_err(|e|e.to_string())?).map_err(|e|e.to_string())
 }
 
-/// Write-through persist (temp file + rename, so a crash can't leave a half
-/// file). Best-effort: a failed write never breaks request handling.
-fn persist(store: &Store, path: &str) {
-    if let Ok(guard) = store.lock() {
-        if let Ok(json) = serde_json::to_string(&*guard) {
-            let tmp = format!("{path}.tmp");
-            if std::fs::write(&tmp, json).is_ok() {
-                let _ = std::fs::rename(&tmp, path);
-            }
+fn persist_data(data: &Data, path: &str) -> Result<(),String> {
+    use std::io::Write;
+    let json = serde_json::to_vec(data).map_err(|e|e.to_string())?;
+    if json.len()>MAX_STORE {return Err("Relay store quota exceeded".into());}
+    let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e|e.to_string())?.as_nanos();
+    let tmp = format!("{path}.{}.{}.pending",std::process::id(),unique);
+    let result = (|| -> std::io::Result<()> {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)] { use std::os::unix::fs::OpenOptionsExt; options.mode(0o600); }
+        let mut file = options.open(&tmp)?;
+        file.write_all(&json)?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&tmp,path)?;
+        #[cfg(unix)] {
+            let parent = std::path::Path::new(path).parent().filter(|p|!p.as_os_str().is_empty()).unwrap_or(std::path::Path::new("."));
+            std::fs::File::open(parent)?.sync_all()?;
         }
+        Ok(())
+    })();
+    if result.is_err() {let _=std::fs::remove_file(&tmp);}
+    result.map_err(|e|e.to_string())
+}
+#[cfg(test)]
+fn persist(store: &Store, path: &str) -> Result<(),String> {
+    persist_data(&*store.lock().map_err(|e|e.to_string())?,path)
+}
+fn identifier(value: &str) -> bool {
+    !value.is_empty() && value.len()<=128 && value.bytes().all(|b|b.is_ascii_alphanumeric() || b==b'-' || b==b'_')
+}
+
+/// Acknowledge only after the proposed snapshot has been synced and published.
+fn durable_put(store: &Store, versions: &Versions, path: &str, body: &str, data_path: &str) -> (u16,String) {
+    let mut guard = store.lock().unwrap();
+    let candidate = Mutex::new(guard.clone());
+    let candidate_versions = Mutex::new(HashMap::new());
+    let response = route_v(&candidate,&candidate_versions,"PUT",path,body);
+    if response.0!=200 {return response;}
+    let candidate = candidate.into_inner().unwrap();
+    if let Err(error) = persist_data(&candidate,data_path) {
+        STORAGE_FAILURES.fetch_add(1,std::sync::atomic::Ordering::Relaxed);
+        eprintln!("Relay persistence failed: {error}");
+        return (503,json!({"error":"durable storage unavailable; retry","acknowledged":false}).to_string());
     }
+    *guard = candidate;
+    DURABLE_WRITES.fetch_add(1,std::sync::atomic::Ordering::Relaxed);
+    for (room,_) in candidate_versions.into_inner().unwrap() {
+        *versions.lock().unwrap().entry(room).or_insert(0)+=1;
+    }
+    response
 }
 
 /// Convenience wrapper with a throwaway version map — keeps existing callers
@@ -62,14 +115,28 @@ pub fn route(store: &Store, method: &str, path: &str, body: &str) -> (u16, Strin
 pub fn route_v(store: &Store, versions: &Versions, method: &str, path: &str, body: &str) -> (u16, String) {
     let parts: Vec<&str> = path.split('?').next().unwrap_or("").split('/').filter(|s| !s.is_empty()).collect();
 
+    // V2 is an immutable, durable batch journal. Cursors live with ciphertext,
+    // so restart never rewinds a client's incremental position.
+    if parts.first()==Some(&"v2") {
+        return batch_route(store,method,path,body);
+    }
+    if parts.first()==Some(&"rooms") && (parts.len()<2 || !identifier(parts[1]) || (parts.len()==4 && !identifier(parts[3]))) {return (400,json!({"error":"invalid room or actor"}).to_string());}
     match (method, parts.as_slice()) {
         // PUT /rooms/{room}/blobs/{actor}
         ("PUT", ["rooms", room, "blobs", actor]) => {
+            if body.len()>MAX_BODY {return (413,json!({"error":"blob exceeds 1 MB"}).to_string());}
             let blob: Value = match serde_json::from_str(body) {
                 Ok(v) => v,
                 Err(_) => return (400, json!({"error": "body must be JSON"}).to_string()),
             };
+            if blob.get("v")!=Some(&json!(1)) || !blob.get("nonce").is_some_and(|v|v.as_str().is_some_and(|s|!s.is_empty() && s.len()<=256)) || !blob.get("ct").is_some_and(|v|v.as_str().is_some_and(|s|!s.is_empty())) {return (400,json!({"error":"invalid sealed blob"}).to_string());}
             let mut s = store.lock().unwrap();
+            if (!s.contains_key(*room) && s.len()>=MAX_ROOMS) || s.get(*room).is_some_and(|actors|!actors.contains_key(*actor) && actors.len()>=MAX_ACTORS) {return (507,json!({"error":"room/actor quota exceeded"}).to_string());}
+            let old = s.get(*room).and_then(|actors|actors.get(*actor)).cloned();
+            let mut candidate = s.clone();
+            candidate.entry((*room).into()).or_default().insert((*actor).into(),blob.clone());
+            if serde_json::to_vec(&candidate).map_or(true,|data|data.len()>MAX_STORE) {return (507,json!({"error":"store quota exceeded"}).to_string());}
+            if old.as_ref()==Some(&blob) {return (200,json!({"ok":true}).to_string());}
             s.entry((*room).to_string()).or_default().insert((*actor).to_string(), blob);
             *versions.lock().unwrap().entry((*room).to_string()).or_insert(0) += 1;
             (200, json!({"ok": true}).to_string())
@@ -95,8 +162,59 @@ pub fn route_v(store: &Store, versions: &Versions, method: &str, path: &str, bod
             let v = versions.lock().unwrap().get(*room).copied().unwrap_or(0);
             (200, json!({ "version": v }).to_string())
         }
-        ("GET", ["health"]) => (200, json!({"ok": true}).to_string()),
+        ("GET", ["health"]) => (200, json!({"ok": true,"protocol":2}).to_string()),
         _ => (404, json!({"error": "not found"}).to_string()),
+    }
+}
+
+fn batch_route(store: &Store, method: &str, path: &str, body: &str) -> (u16,String) {
+    let parts: Vec<_> = path.split('?').next().unwrap_or("").split('/').filter(|s|!s.is_empty()).collect();
+    if parts.len()<4 || parts[1]!="rooms" || !["batches","version","poll"].contains(&parts[3]) || !identifier(parts[2]) {
+        return (400,json!({"error":"invalid batch path"}).to_string());
+    }
+    let room = format!("@v2:{}",parts[2]);
+    let mut guard = store.lock().unwrap();
+    if method=="GET" && parts.len()==4 && ["version","poll"].contains(&parts[3]) {
+        let version=guard.get(&room).map(|r|r.values().filter_map(|v|v["cursor"].as_u64()).max().unwrap_or(0)).unwrap_or(0);
+        return (200,json!({"version":version}).to_string());
+    }
+    match (method,parts.len()) {
+        ("PUT",5) if identifier(parts[4]) => {
+            if body.len()>MAX_BODY {return (413,json!({"error":"batch exceeds 1 MB"}).to_string());}
+            let mut blob: Value = match serde_json::from_str(body) {Ok(v)=>v,Err(_)=>return (400,json!({"error":"invalid JSON"}).to_string())};
+            if blob.get("v")!=Some(&json!(1)) || !blob.get("nonce").is_some_and(|v|v.as_str().is_some_and(|s|!s.is_empty() && s.len()<=256)) || !blob.get("ct").is_some_and(|v|v.as_str().is_some_and(|s|!s.is_empty())) || blob.as_object().is_none_or(|m|m.len()!=3) {
+                return (400,json!({"error":"invalid sealed batch"}).to_string());
+            }
+            if let Some(old)=guard.get(&room).and_then(|r|r.get(parts[4])) {
+                if old["v"]!=blob["v"] || old["nonce"]!=blob["nonce"] || old["ct"]!=blob["ct"] {return (409,json!({"error":"batch id collision"}).to_string());}
+                return (200,json!({"batch_id":parts[4],"cursor":old["cursor"],"durable":true}).to_string());
+            }
+            if (!guard.contains_key(&room) && guard.len()>=MAX_ROOMS) || guard.get(&room).is_some_and(|r|r.len()>=10000) {return (507,json!({"error":"batch journal quota exceeded"}).to_string());}
+            let cursor=guard.get(&room).map(|r|r.values().filter_map(|v|v["cursor"].as_u64()).max().unwrap_or(0)).unwrap_or(0)+1;
+            blob["batch_id"]=json!(parts[4]); blob["cursor"]=json!(cursor);
+            let mut candidate=guard.clone(); candidate.entry(room).or_default().insert(parts[4].into(),blob);
+            if serde_json::to_vec(&candidate).map_or(true,|d|d.len()>MAX_STORE) {return (507,json!({"error":"store quota exceeded"}).to_string());}
+            *guard=candidate;
+            (200,json!({"batch_id":parts[4],"cursor":cursor,"durable":true}).to_string())
+        },
+        ("GET",4) => {
+            let query=path.split_once('?').map(|(_,q)|q).unwrap_or("");
+            let after=match query.split('&').find_map(|p|p.strip_prefix("after=")) {
+                None=>0, Some(value)=>match value.parse::<u64>() {Ok(n)=>n,Err(_)=>return (400,json!({"error":"invalid cursor"}).to_string())}
+            };
+            let mut batches: Vec<Value>=guard.get(&room).map(|r|r.values().filter(|v|v["cursor"].as_u64().unwrap_or(0)>after).cloned().collect()).unwrap_or_default();
+            batches.sort_by_key(|v|v["cursor"].as_u64().unwrap_or(0));
+            // Bound the encrypted response by bytes as well as count.
+            let mut size=0; let mut page=Vec::new();
+            for batch in batches.into_iter().take(200) {
+                let bytes=serde_json::to_vec(&batch).unwrap().len();
+                if !page.is_empty() && size+bytes>MAX_BODY {break;}
+                size+=bytes; page.push(batch);
+            }
+            let cursor=page.last().and_then(|v|v["cursor"].as_u64()).unwrap_or(after);
+            (200,json!({"batches":page,"cursor":cursor}).to_string())
+        },
+        _=>(404,json!({"error":"unknown batch route"}).to_string())
     }
 }
 
@@ -139,12 +257,16 @@ fn now_secs() -> u64 {
 /// Returns true if the request is allowed; counts it against the window.
 fn rate_ok(rate: &RateMap, ip: &str, now: u64, limit: u32, window: u64) -> bool {
     let mut m = rate.lock().unwrap();
+    if m.len()>=10000 {
+        m.retain(|_,bucket|now.saturating_sub(bucket.window_start)<window);
+        if m.len()>=10000 && !m.contains_key(ip) {return false;}
+    }
     let b = m.entry(ip.to_string()).or_insert(Bucket { window_start: now, count: 0 });
     if now.saturating_sub(b.window_start) >= window {
         b.window_start = now;
         b.count = 0;
     }
-    b.count += 1;
+    b.count = b.count.saturating_add(1);
     b.count <= limit
 }
 
@@ -206,11 +328,14 @@ struct Config {
     token: String,
     rate_limit: u32,
     rate_window: u64,
+    active_polls: std::sync::atomic::AtomicUsize,
+    max_polls: usize,
 }
 
 /// Handle one request end-to-end (CORS, rate limit, auth, route). Runs on a
 /// worker thread, so the blocking `poll` route only ties up that one thread.
 fn serve(mut req: Request, store: &Store, versions: &Versions, rate: &RateMap, cfg: &Config) {
+    REQUESTS.fetch_add(1,std::sync::atomic::Ordering::Relaxed);
     let method = req.method().clone();
     let path = req.url().to_string();
 
@@ -232,27 +357,37 @@ fn serve(mut req: Request, store: &Store, versions: &Versions, rate: &RateMap, c
     }
 
     // Auth gate (health stays open for probes).
-    let is_health = path.split('?').next().unwrap_or("").trim_end_matches('/').ends_with("/health");
+    let is_health = path.split('?').next().unwrap_or("").trim_end_matches('/')=="/health";
     if !is_health && !bearer_ok(req.headers(), &cfg.token) {
         let _ = req.respond(cors_json(401, json!({"error": "unauthorized"}).to_string()));
         return;
     }
 
+    if method==Method::Get && path=="/metrics" {
+        let data=store.lock().unwrap();
+        let payload=json!({"requests_total":REQUESTS.load(std::sync::atomic::Ordering::Relaxed),"durable_writes_total":DURABLE_WRITES.load(std::sync::atomic::Ordering::Relaxed),"storage_failures_total":STORAGE_FAILURES.load(std::sync::atomic::Ordering::Relaxed),"active_polls":cfg.active_polls.load(std::sync::atomic::Ordering::Relaxed),"rooms":data.len(),"records":data.values().map(|room|room.len()).sum::<usize>()}).to_string();
+        drop(data);let _=req.respond(cors_json(200,payload));return;
+    }
     let mut body = String::new();
-    let _ = std::io::Read::read_to_string(req.as_reader(), &mut body);
+    if req.body_length().is_some_and(|len|len>MAX_BODY) {let _=req.respond(cors_json(413,json!({"error":"request too large"}).to_string()));return;}
+    let read = std::io::Read::read_to_string(&mut std::io::Read::take(req.as_reader(),MAX_BODY as u64+1),&mut body);
+    if read.is_err() || body.len()>MAX_BODY {let _=req.respond(cors_json(413,json!({"error":"invalid or oversized request"}).to_string()));return;}
 
     // The long-poll route blocks; handle it here so route_v stays pure/non-blocking.
     let parts: Vec<&str> = path.split('?').next().unwrap_or("").split('/').filter(|s| !s.is_empty()).collect();
     let (status, payload) = if let ("GET", ["rooms", room, "poll"]) = (method.as_str(), parts.as_slice()) {
-        let v = wait_for_change(versions, room, parse_since(&path), POLL_TIMEOUT, POLL_INTERVAL);
-        (200u16, json!({ "version": v }).to_string())
+        if !identifier(room) { (400,json!({"error":"invalid room"}).to_string()) }
+        else if cfg.active_polls.fetch_update(std::sync::atomic::Ordering::AcqRel,std::sync::atomic::Ordering::Acquire,|n|(n<cfg.max_polls).then_some(n+1)).is_err() {
+            (503,json!({"error":"poll capacity exhausted; retry"}).to_string())
+        } else {
+            let v = wait_for_change(versions, room, parse_since(&path), POLL_TIMEOUT, POLL_INTERVAL);
+            cfg.active_polls.fetch_sub(1,std::sync::atomic::Ordering::AcqRel);
+            (200u16, json!({ "version": v }).to_string())
+        }
     } else {
-        route_v(store, versions, method.as_str(), &path, &body)
+        if method==Method::Put {durable_put(store,versions,&path,&body,&cfg.data_path)}
+        else {route_v(store, versions, method.as_str(), &path, &body)}
     };
-
-    if method == Method::Put && status == 200 {
-        persist(store, &cfg.data_path);
-    }
     let _ = req.respond(cors_json(status, payload));
 }
 
@@ -262,14 +397,14 @@ fn main() {
     let token = std::env::var("RELAY_TOKEN").unwrap_or_default();
     let rate_limit = env_u32("RELAY_RATE_LIMIT", 240); // requests…
     let rate_window = env_u32("RELAY_RATE_WINDOW", 60) as u64; // …per this many seconds, per IP
-    let workers = env_u32("RELAY_WORKERS", 16).max(1); // a pool so long-polls don't block others
+    let workers = env_u32("RELAY_WORKERS", 16).clamp(2,64); // a pool so long-polls don't block others
 
     let server = Arc::new(Server::http(&addr).expect("failed to bind relay address"));
-    let store: Arc<Store> = Arc::new(Mutex::new(load_store(&data_path)));
+    let store: Arc<Store> = Arc::new(Mutex::new(load_store(&data_path).expect("Refusing to start with unreadable/corrupt relay data")));
     let versions: Arc<Versions> = Arc::new(Mutex::new(HashMap::new()));
     let rate: Arc<RateMap> = Arc::new(Mutex::new(HashMap::new()));
     let open = token.is_empty();
-    let cfg = Arc::new(Config { data_path, token, rate_limit, rate_window });
+    let cfg = Arc::new(Config { data_path, token, rate_limit, rate_window,active_polls:std::sync::atomic::AtomicUsize::new(0),max_polls:(workers/2) as usize });
     println!(
         "Cognate relay (E2E, ciphertext-only) on http://{addr} (data: {}, auth: {}, limit: {rate_limit}/{rate_window}s, workers: {workers})",
         cfg.data_path,
@@ -413,10 +548,10 @@ mod tests {
         // First "process": store a blob and persist.
         let s1 = empty();
         route(&s1, "PUT", "/rooms/r1/blobs/A", r#"{"v":1,"nonce":"n","ct":"c"}"#);
-        persist(&s1, p);
+        persist(&s1, p).unwrap();
 
         // Second "process": load from disk — the blob survives.
-        let s2: Store = Mutex::new(load_store(p));
+        let s2: Store = Mutex::new(load_store(p).unwrap());
         let (_, body) = route(&s2, "GET", "/rooms/r1/blobs", "");
         let v: Value = serde_json::from_str(&body).unwrap();
         assert_eq!(v["blobs"].as_array().unwrap().len(), 1);
@@ -424,4 +559,91 @@ mod tests {
 
         let _ = std::fs::remove_file(p);
     }
+    #[test]
+    fn failed_disk_commit_is_not_acknowledged_or_visible() {
+        let s=empty();let versions=Mutex::new(HashMap::new());
+        let path=std::env::temp_dir().join(format!("missing-relay-parent-{}",std::process::id())).join("data.json");
+        assert_eq!(durable_put(&s,&versions,"/rooms/r/blobs/a",r#"{"v":1,"nonce":"n","ct":"c"}"#,path.to_str().unwrap()).0,503);
+        assert!(s.lock().unwrap().is_empty());assert_eq!(current_version(&versions,"r"),0);
+    }
+    #[test]
+    fn rejects_oversized_malformed_and_quota_requests() {
+        let s=empty();
+        assert_eq!(route(&s,"PUT","/rooms/r/blobs/a",&"x".repeat(MAX_BODY+1)).0,413);
+        assert_eq!(route(&s,"PUT","/rooms/r/blobs/a","{}").0,400);
+        assert_eq!(route(&s,"PUT","/rooms/../blobs/a",r#"{"v":1,"nonce":"n","ct":"c"}"#).0,400);
+        for i in 0..MAX_ACTORS {assert_eq!(route(&s,"PUT",&format!("/rooms/r/blobs/a{i}"),r#"{"v":1,"nonce":"n","ct":"c"}"#).0,200);}
+        assert_eq!(route(&s,"PUT","/rooms/r/blobs/extra",r#"{"v":1,"nonce":"n","ct":"c"}"#).0,507);
+    }
+    #[test]
+    fn corrupt_store_never_silently_resets() {
+        let path=std::env::temp_dir().join(format!("corrupt-relay-{}.json",std::process::id()));
+        std::fs::write(&path,"broken").unwrap();
+        assert!(load_store(path.to_str().unwrap()).is_err());
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn immutable_batches_keep_cursors_across_restart_and_reject_replacement() {
+        let path=std::env::temp_dir().join(format!("cognate-v2-{}.json",std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let store=empty();let versions=Mutex::new(HashMap::new());
+        let body=r#"{"v":1,"nonce":"nonce","ct":"ciphertext"}"#;
+        let first=durable_put(&store,&versions,"/v2/rooms/r/batches/b1",body,path.to_str().unwrap());
+        assert_eq!(first.0,200);assert_eq!(serde_json::from_str::<Value>(&first.1).unwrap()["cursor"],1);
+        assert_eq!(durable_put(&store,&versions,"/v2/rooms/r/batches/b1",body,path.to_str().unwrap()).1,first.1);
+        assert_eq!(durable_put(&store,&versions,"/v2/rooms/r/batches/b1",r#"{"v":1,"nonce":"nonce","ct":"changed"}"#,path.to_str().unwrap()).0,409);
+        // Legacy actor paths cannot address the reserved v2 storage namespace.
+        assert_eq!(route(&store,"PUT","/rooms/@v2:r/blobs/b1",body).0,400);
+        let restarted=Mutex::new(load_store(path.to_str().unwrap()).unwrap());
+        assert_eq!(durable_put(&restarted,&versions,"/v2/rooms/r/batches/b2",body,path.to_str().unwrap()).0,200);
+        let (_,page)=route(&restarted,"GET","/v2/rooms/r/batches?after=1","");let page:Value=serde_json::from_str(&page).unwrap();
+        assert_eq!(page["cursor"],2);assert_eq!(page["batches"].as_array().unwrap().len(),1);assert_eq!(page["batches"][0]["batch_id"],"b2");
+        assert_eq!(route(&restarted,"GET","/v2/rooms/r/batches?after=no","").0,400);
+        std::fs::remove_file(path).unwrap();
+    }
+    #[test]
+    fn real_http_put_reports_disk_failure_without_advancing_history() {
+        use std::io::{Read,Write};
+        let server=Server::http("127.0.0.1:0").unwrap();let addr=server.server_addr().to_ip().unwrap();
+        let store=Arc::new(empty());let versions=Arc::new(Mutex::new(HashMap::new()));
+        let copy=store.clone();let vc=versions.clone();
+        let worker=thread::spawn(move || {
+            let cfg=Config {data_path:"/nonexistent-cognate-directory/relay.json".into(),token:"test-token".into(),rate_limit:100,rate_window:60,active_polls:std::sync::atomic::AtomicUsize::new(0),max_polls:1};
+            let request=server.recv_timeout(Duration::from_secs(3)).unwrap().unwrap();
+            serve(request,&copy,&vc,&Mutex::new(HashMap::new()),&cfg);
+        });
+        let mut stream=std::net::TcpStream::connect(addr).unwrap();stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        let body=r#"{"v":1,"nonce":"n","ct":"c"}"#;
+        write!(stream,"PUT /v2/rooms/r/batches/b HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer test-token\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",body.len()).unwrap();
+        let mut response=String::new();stream.read_to_string(&mut response).unwrap();worker.join().unwrap();
+        assert!(response.starts_with("HTTP/1.1 503"));assert!(response.contains("\"acknowledged\":false"));assert!(store.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn real_http_poll_saturation_keeps_health_worker_available() {
+        fn get(addr:std::net::SocketAddr,path:&str)->String {
+            use std::io::{Read,Write};
+            let mut client=std::net::TcpStream::connect(addr).unwrap();client.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+            write!(client,"GET {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n").unwrap();
+            let mut result=String::new();client.read_to_string(&mut result).unwrap();result
+        }
+        let server=Arc::new(Server::http("127.0.0.1:0").unwrap());let addr=server.server_addr().to_ip().unwrap();
+        let store=Arc::new(empty());let versions=Arc::new(Mutex::new(HashMap::new()));let rate=Arc::new(Mutex::new(HashMap::new()));
+        let cfg=Arc::new(Config {data_path:"unused".into(),token:String::new(),rate_limit:100,rate_window:60,active_polls:std::sync::atomic::AtomicUsize::new(0),max_polls:1});
+        let stopped=Arc::new(std::sync::atomic::AtomicBool::new(false));let mut workers=Vec::new();
+        for _ in 0..2 {
+            let (server,store,versions,rate,cfg,stopped)=(server.clone(),store.clone(),versions.clone(),rate.clone(),cfg.clone(),stopped.clone());
+            workers.push(thread::spawn(move || {while !stopped.load(std::sync::atomic::Ordering::SeqCst) {if let Some(req)=server.recv_timeout(Duration::from_millis(100)).unwrap() {serve(req,&store,&versions,&rate,&cfg);}}}));
+        }
+        let poll=thread::spawn(move || get(addr,"/rooms/r/poll?since=0"));
+        let deadline=Instant::now()+Duration::from_secs(2);
+        while cfg.active_polls.load(std::sync::atomic::Ordering::SeqCst)==0 && Instant::now()<deadline {thread::sleep(Duration::from_millis(10));}
+        assert_eq!(cfg.active_polls.load(std::sync::atomic::Ordering::SeqCst),1);
+        assert!(get(addr,"/rooms/r/poll?since=0").starts_with("HTTP/1.1 503"));
+        assert!(get(addr,"/health").starts_with("HTTP/1.1 200"));
+        versions.lock().unwrap().insert("r".into(),1);
+        assert!(poll.join().unwrap().starts_with("HTTP/1.1 200"));
+        stopped.store(true,std::sync::atomic::Ordering::SeqCst);for worker in workers {worker.join().unwrap();}
+    }
+
 }

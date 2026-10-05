@@ -25,16 +25,18 @@ export interface CalendarEvent { id: string; title: string; start: string; end: 
 export function getCalendarEvents(): Promise<CalendarEvent[]>;
 export function createCalendarEvent(ev: { title?: string; start: string; end: string; source?: string }): Promise<CalendarEvent>;
 export function deleteCalendarEvent(id: string): Promise<void>;
+export function replaceCalendarSource(source: string, events: { title: string; start: string; end: string }[], metadata?: import('./services/calendarSyncService').CalendarMetadata): Promise<void>;
 export function clearCalendarSource(source: string): Promise<void>;
 export function getLocalDateString(date?: Date): string;
 export const IS_TAURI: boolean;
 
 import type { Op } from './services/oplog';
 export function loadOps(): Promise<Op[]>;
-export function appendOps(ops: Op[]): Promise<void>;
+export function appendOps(ops: Op[], expected?: any): Promise<void>;
 export function upsertTaskRaw(task: any): Promise<void>;
-export function planDedupe(tasks: any[]): Set<string>;
-export function dedupeTasks(): Promise<number>;
+export interface SuspectedTaskDuplicateGroup { title: string; taskIds: string[]; }
+export function findSuspectedTaskDuplicates(tasks: any[]): SuspectedTaskDuplicateGroup[];
+export function getSuspectedTaskDuplicates(): Promise<SuspectedTaskDuplicateGroup[]>;
 
 export interface Project { id: string; name: string; color: string; created_at: string; sort_order: number; }
 export function getProjects(): Promise<Project[]>;
@@ -54,3 +56,14 @@ export interface Template { id: string; name: string; data: any; created_at: str
 export function getTemplates(): Promise<Template[]>;
 export function createTemplate(name: string, data: any): Promise<Template>;
 export function deleteTemplate(id: string): Promise<void>;
+
+export function runDatabaseMaintenance<T>(action: () => Promise<T>, freezeAfterSuccess?: boolean): Promise<T>;
+
+export function commitProjection(ops: Op[], tasks: any[], projects: any[], expected: any, recovery?: {actor:string;pub:string;privateKey:string;kitId:string}): Promise<void>;
+
+export interface PlanningSnapshot {tasks: import('./store').Task[]; calendar: CalendarEvent[]; settings: Record<string,string>}
+export function getPlanningSnapshot(): Promise<PlanningSnapshot>;
+export function commitPlan(date: string, result: import('./services/planService').PlanResult, expected: PlanningSnapshot): Promise<void>;
+
+export const USE_BROWSER_WORKSPACE: boolean;
+export function registerBrowserIdentity(actor:string, privateKey:string, publicKey:string): Promise<{priv:string;pub:string}>;

@@ -73,3 +73,19 @@ describe('recoveryService — encrypted key escrow', () => {
     });
   });
 });
+
+it('restores the original signing identity and task/history snapshot, and refuses populated targets',async()=>{
+  const {createTask,getAllTasks,loadOps}=await import('../db');
+  const {publicIdentity}=await import('./identity');
+  const A=new MemStorage(),B=new MemStorage(),C=new MemStorage();let kit='',identity:{actor:string;pub:string};
+  await as(A,async()=>{await createTask({title:'Saved recovery task',description:'',deadline:'',tags:[],importance:3,effort:3});identity=await publicIdentity();kit=await exportRecoveryKit('recovery-identity-pass');});
+  await as(B,async()=>{const result=await importRecoveryKit(kit,'recovery-identity-pass');expect(result.identity).toBe(true);expect(await publicIdentity()).toEqual(identity!);expect((await getAllTasks('all'))[0].title).toBe('Saved recovery task');expect((await loadOps()).length).toBeGreaterThan(0);await importRecoveryKit(kit,'recovery-identity-pass');});
+  await as(C,async()=>{await createTask({title:'Existing',description:'',deadline:'',tags:[],importance:3,effort:3});await expect(importRecoveryKit(kit,'recovery-identity-pass')).rejects.toThrow('empty replacement');expect((await getAllTasks('all'))[0].title).toBe('Existing');});
+});
+it('changes recovery passphrase with a fresh KDF salt',async()=>{
+  const {changeRecoveryPassphrase}=await import('./recoveryService');const A=new MemStorage(),B=new MemStorage();let kit='';
+  await as(A,async()=>{kit=await exportRecoveryKit('old-recovery-pass');});
+  const changed=await changeRecoveryPassphrase(kit,'old-recovery-pass','new-recovery-pass');
+  expect(JSON.parse(changed).kdf.salt).not.toBe(JSON.parse(kit).kdf.salt);
+  await as(B,async()=>{await expect(importRecoveryKit(changed,'old-recovery-pass')).rejects.toThrow('Decryption');await importRecoveryKit(changed,'new-recovery-pass');});
+});

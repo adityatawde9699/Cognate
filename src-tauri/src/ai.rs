@@ -1,6 +1,18 @@
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use reqwest::Client;
+fn http_client() -> Result<Client,String> {
+    Client::builder().connect_timeout(std::time::Duration::from_secs(10)).timeout(std::time::Duration::from_secs(60))
+        .redirect(reqwest::redirect::Policy::none()).build().map_err(|e|e.to_string())
+}
+fn validate_base(base:&str) -> Result<(),String> {
+    let url=reqwest::Url::parse(base).map_err(|e|e.to_string())?;
+    let local=url.host_str().is_some_and(|host|host=="localhost" || host=="[::1]" || host.parse::<std::net::IpAddr>().is_ok_and(|ip|ip.is_loopback()));
+    if !url.username().is_empty() || url.password().is_some() || url.fragment().is_some() || !(url.scheme()=="https" || (url.scheme()=="http" && local)) {
+        return Err("AI endpoints require HTTPS or a loopback HTTP server, without URL credentials".into());
+    }
+    Ok(())
+}
 
 /// Default Claude model for the Anthropic provider.
 const DEFAULT_ANTHROPIC_MODEL: &str = "claude-opus-4-8";
@@ -120,7 +132,7 @@ async fn anthropic(
         body["system"] = json!(system);
     }
 
-    let resp = Client::new()
+    let resp = http_client()?
         .post(ANTHROPIC_URL)
         .header("x-api-key", api_key)
         .header("anthropic-version", ANTHROPIC_VERSION)
@@ -178,6 +190,7 @@ async fn openai_compatible(
     prompt: &str,
     max_tokens: u32,
 ) -> Result<String, String> {
+    validate_base(base_url)?;
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
 
     let mut messages = Vec::new();
@@ -192,7 +205,7 @@ async fn openai_compatible(
         "messages": messages,
     });
 
-    let mut req = Client::new()
+    let mut req = http_client()?
         .post(&url)
         .header("content-type", "application/json");
     if !api_key.is_empty() {
@@ -230,4 +243,13 @@ async fn openai_compatible(
         return Err("The model returned an empty response.".into());
     }
     Ok(text)
+}
+
+#[cfg(test)]
+mod endpoint_tests {
+    #[test]
+    fn credentials_only_go_to_tls_or_loopback_without_redirects() {
+        for url in ["https://models.example/v1","http://localhost:11434/v1","http://127.0.0.1:8080/v1","http://[::1]:8080/v1"] {assert!(super::validate_base(url).is_ok());}
+        for url in ["http://models.example/v1","http://localhost.evil.example/v1","https://user:password@models.example/v1","file:///tmp/model"] {assert!(super::validate_base(url).is_err());}
+    }
 }

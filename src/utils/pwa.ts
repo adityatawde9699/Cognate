@@ -28,7 +28,14 @@ export function registerServiceWorker(): void {
   if (!shouldRegisterSW(currentEnv())) return;
   window.addEventListener('load', () => {
     navigator.serviceWorker
-      .register('/sw.js')
+      .register('/sw.js',{updateViaCache:'none'})
+      .then(registration=>{
+        const notify=()=>{if(registration.waiting && navigator.serviceWorker.controller) window.dispatchEvent(new Event('cognate-update-ready'));};
+        notify();registration.addEventListener('updatefound',()=>{registration.installing?.addEventListener('statechange',notify);});
+      })
       .catch((e) => console.warn('[pwa] service worker registration failed:', e));
   });
 }
+
+export async function checkPwaUpdate():Promise<void> {await (await navigator.serviceWorker.getRegistration())?.update();}
+export async function requestPersistentStorage():Promise<boolean> {return await navigator.storage?.persist?.() ?? false;}

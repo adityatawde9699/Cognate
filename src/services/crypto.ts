@@ -13,7 +13,6 @@
 
 const PBKDF2_ITERS = 150_000;
 const KEY_SALT = 'cognate-sync-key-v1';
-const ROOM_SALT = 'cognate-sync-room-v1';
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -66,12 +65,13 @@ export async function deriveKey(passphrase: string): Promise<CryptoKey> {
 
 /**
  * Derive the relay "room" id from the passphrase under a distinct label.
- * Knowing the room reveals nothing about the key (different KDF inputs), and
- * the relay only ever sees this opaque hex id.
+ * The versioned, slow KDF prevents a fast room-ID password dictionary check.
+ * Room IDs and ciphertext still permit guessing; use a strong passphrase.
  */
 export async function deriveRoomId(passphrase: string): Promise<string> {
-  const digest = await subtle().digest('SHA-256', enc.encode(`${ROOM_SALT}|${passphrase}`));
-  return toHex(digest).slice(0, 32);
+  const base=await subtle().importKey('raw',enc.encode(passphrase),'PBKDF2',false,['deriveBits']);
+  const digest=await subtle().deriveBits({name:'PBKDF2',salt:enc.encode('cognate-sync-room-v2'),iterations:600000,hash:'SHA-256'},base,256);
+  return toHex(digest).slice(0,32);
 }
 
 /** Encrypt a JSON-serializable value into a sealed blob. */
@@ -182,4 +182,29 @@ export async function verifyBytes(pub: CryptoKey, sig: string, data: Uint8Array)
   } catch {
     return false;
   }
+}
+
+/** Password-protected portable exports use a random salt and explicit KDF
+ * version. Legacy v1 ciphertext remains readable, never generated here. */
+export interface PasswordBlob {v:2;kdf:{name:'PBKDF2-SHA256';iterations:600000;salt:string};sealed:SealedBlob}
+async function passwordKey(passphrase:string,salt:string):Promise<CryptoKey> {
+  const raw=fromB64(salt);
+  if(raw.length!==16) throw new Error('Invalid password-export salt.');
+  const base=await subtle().importKey('raw',enc.encode(passphrase),'PBKDF2',false,['deriveKey']);
+  return subtle().deriveKey({name:'PBKDF2',salt:buf(raw),iterations:600000,hash:'SHA-256'},base,{name:'AES-GCM',length:256},false,['encrypt','decrypt']);
+}
+export async function sealPassword(passphrase:string,value:unknown):Promise<PasswordBlob> {
+  if(passphrase.length<12) throw new Error('Use a recovery passphrase of at least 12 characters.');
+  const salt=toB64(randomBytes(16));
+  return {v:2,kdf:{name:'PBKDF2-SHA256',iterations:600000,salt},sealed:await seal(await passwordKey(passphrase,salt),value)};
+}
+export async function openPassword<T>(passphrase:string,blob:PasswordBlob|SealedBlob):Promise<T> {
+  if(blob.v===1) return open<T>(await deriveKey(passphrase),blob);
+  if(blob.v!==2 || blob.kdf?.name!=='PBKDF2-SHA256' || blob.kdf.iterations!==600000) throw new Error('Unsupported recovery encryption version.');
+  return open<T>(await passwordKey(passphrase,blob.kdf.salt),blob.sealed);
+}
+
+export async function deriveSyncKey(passphrase:string):Promise<CryptoKey> {
+  const base=await subtle().importKey('raw',enc.encode(passphrase),'PBKDF2',false,['deriveKey']);
+  return subtle().deriveKey({name:'PBKDF2',salt:enc.encode('cognate-sync-key-v2'),iterations:600000,hash:'SHA-256'},base,{name:'AES-GCM',length:256},false,['encrypt','decrypt']);
 }

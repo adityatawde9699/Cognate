@@ -120,3 +120,33 @@ describe('CRDT properties (the sync guarantees)', () => {
     expect(converged(aAfter, all)).toBe(true);
   });
 });
+
+describe('adversarial operation admission', () => {
+  it('rejects divergent operation IDs in either arrival order', () => {
+    const a = setOp(new Clock('device'), 'task', 'title', 'one', 1);
+    const b = { ...a, value: 'two' } as Op;
+    expect(() => merge([a], [b])).toThrow('collision');
+    expect(() => merge([b], [a])).toThrow('collision');
+    expect(() => materialize([a,b])).toThrow('collision');
+  });
+  it('rejects equal timestamps with divergent values even if IDs differ', () => {
+    const a = setOp(new Clock('device'), 'task', 'title', 'one', 1);
+    const b = { ...a, id:'other-id', value:'two' } as Op;
+    expect(() => merge([a,b])).toThrow('timestamp');
+    expect(() => materialize([b,a])).toThrow('timestamp');
+  });
+  it('rejects malformed clocks, fields, JSON, and unknown versions', () => {
+    const a = setOp(new Clock('device'), 'task', 'title', 'one', 1);
+    for (const invalid of [
+      { ...a, hlc:{ ...a.hlc, wall:NaN } }, { ...a, hlc:{ ...a.hlc, counter:-1 } },
+      { ...a, field:'__proto__' }, { ...a, value:undefined }, { ...a, version:2 },
+      { ...a, value:Infinity }, { ...a, value:'x'.repeat(65_536) },
+    ]) expect(() => merge([invalid as Op])).toThrow();
+  });
+  it('dedupes canonical equivalent JSON and ignores property insertion order', () => {
+    const a = setOp(new Clock('device'), 'task', 'custom_fields', {a:1,b:2}, 1);
+    const b = { ...a, value:{b:2,a:1} } as Op;
+    expect(merge([a,b])).toHaveLength(1);
+    expect(converged([a], [b])).toBe(true);
+  });
+});

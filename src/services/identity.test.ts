@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { getIdentity, publicIdentity, signLocalOps, _resetForTests as resetIdentity } from './identity';
 import { logTaskUpsert, _resetForTests as resetOplog } from './oplogStore';
 import { verifySignedOps, authorize } from './collab';
-import { loadOps } from '../db';
+import { loadOps, setSetting } from '../db';
 import type { Task } from '../store';
 
 // In-memory localStorage so db.js's browser fallback (and the secrets fallback)
@@ -92,5 +92,27 @@ describe('identity — device signing identity', () => {
     const res = await authorize(otherSigned, { actor: me.actor, pub: me.pub });
     expect(res.admitted).toHaveLength(0);
     expect(res.rejected.length).toBe(otherSigned.length);
+  });
+});
+
+describe('identity recovery guards', () => {
+  beforeEach(() => { (globalThis as any).localStorage = new MemStorage(); resetIdentity(); resetOplog(); });
+  it('refuses a published key without the private key', async () => {
+    await setSetting('crdt_signing_pub','orphan-public-key');
+    await expect(getIdentity()).rejects.toThrow('incomplete');
+  });
+  it('rejects mismatched keys instead of replacing registered identity', async () => {
+    await getIdentity();
+    const {generateSigningKeypair,exportPublicKey} = await import('./crypto');
+    const different = await generateSigningKeypair();
+    await setSetting('crdt_signing_pub',await exportPublicKey(different.publicKey));
+    resetIdentity();
+    await expect(getIdentity()).rejects.toThrow('do not match');
+  });
+  it('rejects actor rebinding', async () => {
+    await getIdentity();
+    await setSetting('crdt_actor','replacement');
+    resetIdentity(); resetOplog();
+    await expect(getIdentity()).rejects.toThrow('binding changed');
   });
 });

@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react';
 import { IS_TAURI, getSetting, setSetting } from '../../db';
 import {
-  CAL_PROVIDERS, beginConnect, completeConnect, syncFreeBusy,
+  CAL_PROVIDERS, beginConnect, cancelConnect, completeConnect, syncFreeBusy,
   isCalendarConnected, disconnectCalendar, type CalProvider,
 } from '../../services/oauthCalendarService';
 import { toast } from '../../utils/toast';
@@ -23,24 +23,38 @@ export function CalendarAccount() {
   const [msg, setMsg] = useState('');
 
   useEffect(() => {
-    isCalendarConnected().then(setConnected);
+    isCalendarConnected().then(setConnected).catch(e=>setMsg(e.message));
     getSetting(CLIENT_ID_KEY, '').then(setClientId);
   }, []);
 
+  useEffect(()=>{
+    if(!IS_TAURI) return;
+    let disposed=false; let unlisten:(()=>void)|undefined;
+    import('@tauri-apps/api/event').then(({listen})=>listen<string>('calendar-oauth-callback',async event=>{
+      setBusy(true);
+      try {await completeConnect(event.payload);setConnected(true);setAuthUrl('');setCode('');await syncFreeBusy(7);setMsg('Connected. Calendar availability refreshed.');}
+      catch(error:any){setMsg(error.message);}
+      finally {setBusy(false);}
+    })).then(stop=>{if(disposed)stop();else unlisten=stop;}).catch(error=>setMsg(error.message));
+    return ()=>{disposed=true;unlisten?.();};
+  },[]);
+  const cancel=async()=>{await cancelConnect();setAuthUrl('');setCode('');setMsg('Sign-in cancelled.');};
   const connect = async () => {
     setBusy(true); setMsg('');
     try {
       await setSetting(CLIENT_ID_KEY, clientId.trim());
       const url = await beginConnect(provider, clientId);
       setAuthUrl(url);
-      setMsg('Open the link, approve read-only access, then paste the "code" from the redirected URL below.');
+      const {open}=await import('@tauri-apps/plugin-shell');
+      await open(url);
+      setMsg('Open the link, approve read-only access, then return here. Sign-in completes automatically. You can also paste the full callback URL.');
     } catch (e: any) {
       setMsg(e?.message || 'Could not start sign-in.');
     } finally { setBusy(false); }
   };
 
   const finish = async () => {
-    if (!code.trim()) { setMsg('Paste the authorization code first.'); return; }
+    if (!code.trim()) { setMsg('Paste the complete redirected URL first.'); return; }
     setBusy(true); setMsg('');
     try {
       await completeConnect(code);
@@ -103,12 +117,13 @@ export function CalendarAccount() {
 
           {authUrl && (
             <div style={{ marginTop: '8px' }}>
+              <button className="btn-ghost" onClick={cancel}>Cancel sign-in</button>
               <a href={authUrl} target="_blank" rel="noreferrer" className="form-hint" style={{ color: 'var(--accent)', wordBreak: 'break-all' }}>
                 Open the consent page ↗
               </a>
               <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
                 <input
-                  type="text" value={code} placeholder="Paste the authorization code…"
+                  type="text" value={code} placeholder="Paste the complete callback URL…"
                   onChange={(e) => setCode(e.target.value)} style={{ flex: 1 }} autoComplete="off"
                 />
                 <button className="btn-soft" onClick={finish} disabled={busy}>

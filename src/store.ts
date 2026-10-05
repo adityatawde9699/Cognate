@@ -30,6 +30,8 @@ export interface Task {
   scheduled_end?: string | null;
   energy?: 'hi' | 'med' | 'lo';
   pinned?: boolean;
+  min_block?: number;
+  max_block?: number;
 }
 
 export type Energy = 'hi' | 'med' | 'lo';

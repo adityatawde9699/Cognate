@@ -12,6 +12,7 @@ mod ai;
 mod background_reminders;
 mod secrets;
 mod backup;
+mod operation_store;
 mod planner;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -178,6 +179,7 @@ pub fn run() {
             set_pomodoro_config,
             integrations::send_notification,
             integrations::start_oauth,
+            integrations::cancel_oauth,
             integrations::oauth_token,
             integrations::oauth_api,
             integrations::fetch_ics,
@@ -185,6 +187,13 @@ pub fn run() {
             ai::ai_generate,
             secrets::secret_get,
             secrets::secret_set,
+            operation_store::append_operations,
+            operation_store::mutate_tasks,
+            operation_store::mutate_entity_batch,
+            operation_store::commit_projection,
+            operation_store::replace_calendar_source,
+            operation_store::planning_snapshot,
+            operation_store::commit_plan,
             backup::backup_database,
             backup::list_backups,
             backup::restore_backup,
@@ -207,6 +216,7 @@ fn app_ready() -> String {
 /// Pure over its input; see `planner.rs`.
 #[tauri::command]
 fn plan_day(req: planner::PlanRequest) -> Result<planner::PlanResult, String> {
+    planner::validate(&req)?;
     Ok(planner::plan(&req))
 }
 

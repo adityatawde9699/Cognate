@@ -15,7 +15,7 @@ const PROJECTED_KEYS = [
   'title', 'description', 'tags', 'deadline', 'importance', 'effort', 'done',
   'created_at', 'completed_at', 'pomodoros_spent', 'priority', 'sort_order',
   'project_id', 'parent_id', 'recurrence', 'milestone_id', 'custom_fields',
-  'deleted_at', 'duration_min', 'scheduled_start', 'scheduled_end', 'energy', 'pinned',
+  'deleted_at', 'min_block', 'max_block', 'duration_min', 'scheduled_start', 'scheduled_end', 'energy', 'pinned',
 ] as const;
 
 /** Rebuild a full Task from its projected field map, filling sane defaults. */
@@ -45,6 +45,8 @@ export function entityStateToTask(id: string, s: EntityState): Task {
     scheduled_end: (s.scheduled_end as string | null) ?? null,
     energy: (s.energy as Task['energy']) ?? 'med',
     pinned: (s.pinned as boolean) ?? false,
+    ...(s.min_block !== undefined ? { min_block: s.min_block as number } : {}),
+    ...(s.max_block !== undefined ? { max_block: s.max_block as number } : {}),
   };
 }
 
@@ -52,7 +54,7 @@ export function entityStateToTask(id: string, s: EntityState): Task {
  *  `member:` roster entry, a `comment:` thread, or a shared `project:` record
  *  must never project to a Task. */
 export function isTaskEntity(id: string): boolean {
-  return !id.startsWith('member:') && !id.startsWith('comment:') && !id.startsWith('project:');
+  return !id.startsWith('audit:') && !id.startsWith('member:') && !id.startsWith('comment:') && !id.startsWith('project:');
 }
 
 /** Project an op-log to the full set of live + trashed tasks it represents. */

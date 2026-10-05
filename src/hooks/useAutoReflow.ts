@@ -24,26 +24,33 @@ export function useAutoReflow(): void {
   useEffect(() => {
     let lastReflow = 0;
     let stopped = false;
+    let running = false;
+    const controller = new AbortController();
 
-    const scan = async () => {
-      if (stopped) return;
-      if (Date.now() - lastReflow < COOLDOWN_MS) return;
+    const scan = async (force=false) => {
+      if (stopped || running) return;
+      if (!force && Date.now() - lastReflow < COOLDOWN_MS) return;
+      running = true;
       try {
-        const r = await reflowIfDisrupted(todayStr());
+        const r = await reflowIfDisrupted(todayStr(),controller.signal);
+        if (stopped) return;
         if (r) {
           lastReflow = Date.now();
           const n = r.result.blocks.length;
           notify('Day re-planned', `Adjusted around ${r.disruption.reason}.`);
           toast(`🔄 Re-planned around ${r.disruption.reason} · ${n} block${n === 1 ? '' : 's'}`);
         }
-      } catch {
-        // Reflow is best-effort; never surface scheduler errors here.
-      }
+      } catch (error) {
+        if (!stopped) console.warn('[planner] Reflow did not commit:',error);
+      } finally { running = false; }
     };
 
     // Delay the first scan so tasks/events have hydrated.
+    let debounce:ReturnType<typeof setTimeout>|undefined;
+    const changed=()=>{clearTimeout(debounce);debounce=setTimeout(()=>void scan(true),1000);};
+    window.addEventListener('calendar-changed',changed);
     const first = setTimeout(scan, 12000);
     const interval = setInterval(scan, CHECK_MS);
-    return () => { stopped = true; clearTimeout(first); clearInterval(interval); };
+    return () => { stopped = true; controller.abort(); clearTimeout(first); clearInterval(interval);clearTimeout(debounce);window.removeEventListener('calendar-changed',changed); };
   }, []);
 }

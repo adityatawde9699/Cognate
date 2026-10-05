@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { logTaskUpsert, logTaskDelete, projectEntities, _resetForTests } from './oplogStore';
 import type { Task } from '../store';
 
@@ -53,4 +53,20 @@ describe('oplogStore (shadow recording → projection)', () => {
     expect(projected.get('t1')?.tags).toEqual(['work', 'urgent']);
     expect(projected.get('t1')?.custom_fields).toEqual({ ticket: 'ENG-42' });
   });
+});
+
+it('never reuses operation identities across restart and wall-clock rollback', async () => {
+  const {loadOps,getSetting} = await import('../db');
+  const time = vi.spyOn(Date,'now').mockReturnValue(1900000000000);
+  await logTaskUpsert(task('restart'));
+  const before = await loadOps();
+  expect(await getSetting('crdt_hlc','')).toBeTruthy();
+  _resetForTests();
+  time.mockReturnValue(1800000000000);
+  await logTaskUpsert(task('restart',{title:'after rollback'}));
+  const after = await loadOps();
+  expect(after.length).toBeGreaterThan(before.length);
+  expect(new Set(after.map(op=>op.id)).size).toBe(after.length);
+  expect((await projectEntities()).get('restart')?.title).toBe('after rollback');
+  time.mockRestore();
 });
