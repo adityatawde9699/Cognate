@@ -1,11 +1,11 @@
 # Implementation progress — 2026-10-06
 
-The audit below describes the original checkout, not the current implementation. The ledger records subsequent changes and outstanding acceptance evidence. Cognate remains under production stabilization; no production release has been made.
+The audit below describes the original checkout, not the current implementation. The ledger records subsequent changes and outstanding acceptance evidence. Cognate remains under production stabilization. [v3.1.0-rc.5](https://github.com/adityatawde9699/Cognate/releases/tag/v3.1.0-rc.5) is published as a prerelease; no stable production release has been made.
 
 | Task | Current status | Evidence and remaining work |
 |---|---|---|
 | R01 | Implemented, local checks pass | Startup and Housekeeping only report matching task IDs. Browser preservation/reload and mocked desktop no-write regressions pass. Installed desktop smoke remains external. |
-| R02 | Implemented, remote CI pending | Blocking typecheck/build/artifact gates alongside existing tests/Clippy. Corrected unsupported documentation claims. Rust formatting is still advisory. |
+| R02 | Implemented, tagged remote CI passes | Blocking typecheck/build/artifact gates alongside existing tests/Clippy. Corrected unsupported documentation claims. Rust formatting is still advisory. |
 | R03 | Backup/restore implementation and SQLite fixtures pass; platform matrix pending | SQLite online snapshots include uncheckpointed WAL; integrity/schema validation, fsync/rename publication, mandatory safety snapshot, adapter drain/pool close, transactional restore. Corruption, WAL, safety-snapshot failure, and rollback tests use real SQLite. Hard-kill and previous-release migration/installed OS fixtures remain. |
 | R04 | Audit and explicit repair implemented | Field-level row/history/tombstone comparisons include Trash and projects. Preserved export and local audit snapshot; desktop pre-repair backup; stale snapshot rejection and provenance. Repair leaves task rows untouched. Log-only entities remain flagged for review; no automatic cutover. |
 | R05 | Atomic task/project commands and durable batch outbox implemented | SQLite transactions and IndexedDB workspace transactions commit rows, operations, and local clock together. Injected history/quota failures preserve both layers. R14 now uses durable unacknowledged operations plus a persisted exact-ciphertext pending batch. |
@@ -31,7 +31,7 @@ Local verification is recorded in [TESTING.md](TESTING.md). The production relea
 
 ## Next implementation sequence
 
-R12–R19 now have local implementation and regression evidence. Complete staged/installed acceptance for live OAuth, OS keychains and callbacks, genuine disk-full/slow-client/load faults, mobile install/eviction and large sync histories. Retain the v2 journal and export local bundles before migrating legacy relay clients; v1 live blobs/invites are not silently trusted by the new client. Remaining protocol work includes journal compaction, share-move/offline-rotation transfer policy and protection against a hostile relay withholding epoch markers. Continue R20–R28 after these release blockers have evidence. No release or deployment has been performed.
+R12–R19 now have local implementation and regression evidence. Complete staged/installed acceptance for live OAuth, OS keychains and callbacks, genuine disk-full/slow-client/load faults, mobile install/eviction and large sync histories. Retain the v2 journal and export local bundles before migrating legacy relay clients; v1 live blobs/invites are not silently trusted by the new client. Remaining protocol work includes journal compaction, share-move/offline-rotation transfer policy and protection against a hostile relay withholding epoch markers. Continue R20–R28 after these release blockers have evidence. A stabilization prerelease is published; no production deployment has been performed.
 
 ---
 
