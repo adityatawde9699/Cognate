@@ -1,3 +1,4 @@
+import {validAvailability} from './teamAvailability';
 /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
    src/services/collabProjection.ts — projecting collaboration state (Act 3)
    ──────────────────────────────────────────────────────
@@ -90,6 +91,7 @@ export function projectRoster(ops: Op[], shareId: string): Member[] {
     const m: Member = { actor, pub: (s.pub as string) ?? '', role: ((s.role as Role) ?? 'viewer') };
     if (typeof s.work_start === 'number') m.work_start_min = s.work_start as number;
     if (typeof s.work_end === 'number') m.work_end_min = s.work_end as number;
+    if(validAvailability(s.availability)) m.availability=s.availability;
     out.push(m);
   }
   return out.sort((a, b) => (a.actor < b.actor ? -1 : 1));

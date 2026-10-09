@@ -23,22 +23,26 @@
    channel; anyone who gets it can read the project.
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 
-import { IS_TAURI, getSetting, setSetting, loadOps, getProjects, upsertProjectRaw } from '../db';
+import { IS_TAURI, getSetting, setSetting, loadOps, getPlanningSnapshot, getProjects, upsertProjectRaw } from '../db';
 import { getSecret, setSecret } from '../utils/secrets';
-import { canonicalJson, materialize, type Op } from './oplog';
-import { isTaskEntity, entityStateToTask, projectTasks } from './projector';
+import { canonicalJson, materialize, type Op, type Json } from './oplog';
+import { isTaskEntity, entityStateToTask } from './projector';
 import { projectActivity, type ActivityEntry } from './activity';
-import { getWorkHours, DEFAULT_WORK_START, DEFAULT_WORK_END } from './planService';
+import { getWorkHours, busyBlocksForDate } from './planService';
 import { planTeam, toTeamPlanTask, type TeamPlanResult, type TeamAssignment } from './teamPlanService';
 import { loadProjects } from './taskService';
 import { generateShareSecret, importShareKey, roomIdForSecret,signBytes,verifyBytes,importPublicKey } from './crypto';
 import { publicIdentity,getIdentity } from './identity';
 import { authorizeVerified, memberActor, type Member, type Role } from './collab';
 import { projectComments, projectRoster, projectAssignees, projectSharedProjects, type Comment } from './collabProjection';
-import { logCollabSet, logCollabDel,logCollabCheckpoint, actorId } from './oplogStore';
+import { logCollabSet, logCollabBatch, logCollabDel,logCollabCheckpoint, actorId } from './oplogStore';
 import { mergeIntoApp } from './syncService';
 import { httpGet } from './relayTransport';
 
+import {availabilityStatus,validAvailability,type TeamAvailability} from './teamAvailability';
+import {calendarWarnings,ensureCalendarCoverage} from './calendarSyncService';
+import {fingerprint,normalizedTask} from './historyAudit';
+import {planInputKey} from './planReview';
 import { pushBatches, pullBatches, withSyncLock,checkRetryWindow } from './batchSync';
 
 const METAS_KEY = 'shares_v1';
@@ -294,7 +298,13 @@ export async function getComments(taskId: string): Promise<Comment[]> {
 
 /** Assign a task to a member (an editor-level op), then push best-effort. */
 export async function setAssignee(shareId: string, taskId: string, actor: string): Promise<void> {
-  await logCollabSet(taskId, 'assignee', actor);
+  const share=await getShare(shareId);if(!share) throw new Error('Unknown share.');
+  await assertCurrentEpoch(share);const me=await actorId();const expected=await teamSnapshot();
+  const roster=projectRoster(expected.ops,shareId);
+  if(!editable(roster,me)) throw new Error('Only an owner or editor can assign tasks.');
+  if(actor && !editable(roster,actor)) throw new Error('Choose a current owner/editor who can act on assigned tasks.');
+  if(!expected.planning.tasks.some(t=>t.id===taskId && t.project_id===share.projectId && !t.deleted_at)) throw new Error('Task is outside this shared project.');
+  await logCollabBatch([{entity:taskId,field:'assignee',value:actor}],expected);
   await pushBestEffort(shareId);
 }
 
@@ -328,49 +338,73 @@ export async function shareForProject(projectId: string): Promise<ShareMeta | nu
 
 // ── Team auto-planning ───────────────────────────────────
 
-/**
- * Balance and schedule a shared project's open tasks across its roster for a
- * day. Each member's tasks (explicit assignee + balanced unassigned) are laid
- * out with the deterministic solver. NOTE: we only know our own work hours /
- * calendar; teammates default to standard hours with no busy blocks until
- * presence/calendar sharing lands.
- */
-export async function planTeamForShare(shareId: string, date: string): Promise<TeamPlanResult> {
-  const meta = (await loadMetas()).find((m) => m.id === shareId);
-  if (!meta) throw new Error('Unknown share.');
-  const ops = await loadOps();
-  const roster = projectRoster(ops, shareId);
-  if (roster.length === 0) throw new Error('No members to plan for yet — sync the share first.');
+export interface TeamPlanProposal extends TeamPlanResult {
+  token:string;date:string;unavailable:Array<{actor:string;reason:string}>;taskTitles:Record<string,string>;
+}
+const proposals=new Map<string,{shareId:string;actor:string;date:string;epoch:number;expires:number;expected:Awaited<ReturnType<typeof teamSnapshot>>;assignments:TeamAssignment[]}>();
+async function teamSnapshot() {
+  const planning=await getPlanningSnapshot();
+  return {tasks:planning.tasks.map(normalizedTask),projects:await getProjects(),ops:await loadOps(),planning,normalizeTask:normalizedTask,fingerprint};
+}
+function editable(roster:Member[],actor:string) {return roster.some(m=>m.actor===actor && (m.role==='owner' || m.role==='editor'));}
 
-  const assignees = projectAssignees(ops);
-  const me = await actorId();
-  const work = await getWorkHours();
-
-  // Prefer each member's self-declared hours; fall back to our live hours for
-  // ourselves, or standard hours for teammates who haven't published any.
-  const members = roster.map((m) => ({
-    actor: m.actor,
-    work_start_min: m.work_start_min ?? (m.actor === me ? work.start : DEFAULT_WORK_START),
-    work_end_min: m.work_end_min ?? (m.actor === me ? work.end : DEFAULT_WORK_END),
-    busy: [],
-  }));
-
-  const tasks = projectTasks(ops)
-    .filter((t) => t.project_id === meta.projectId && !t.done && !t.deleted_at && !t.parent_id)
-    .map((t) => toTeamPlanTask(t, assignees.get(t.id) ?? null));
-
-  const req = { date, members, tasks };
-  // Use the deterministic Rust solver on desktop; the TS mirror everywhere else.
-  if (IS_TAURI) {
-    const { invoke } = await import('@tauri-apps/api/core');
-    return invoke<TeamPlanResult>('plan_team', { req });
-  }
-  return planTeam(req);
+/** Publish only interval minutes and work bounds; calendar names/titles stay local. */
+export async function publishMyAvailability(shareId:string,date:string):Promise<void> {
+  const share=await getShare(shareId);if(!share) throw new Error('Unknown share.');
+  await assertCurrentEpoch(share);const me=await actorId();
+  await ensureCalendarCoverage(date);
+  const warnings=await calendarWarnings(date);if(warnings.length) throw new Error('Refresh calendar availability before sharing: '+warnings.join(' '));
+  const expected=await teamSnapshot();
+  if(!projectRoster(expected.ops,shareId).some(m=>m.actor===me)) throw new Error('Sync to confirm your roster membership before sharing availability.');
+  const work=await getWorkHours();
+  const occupied=expected.planning.tasks.filter(t=>t.scheduled_start && t.scheduled_end && !t.deleted_at && (t.done || t.project_id!==share.projectId)).map(t=>({id:t.id,title:'',start:t.scheduled_start!,end:t.scheduled_end!,source:'local',created_at:''}));
+  const busy=busyBlocksForDate([...expected.planning.calendar,...occupied],date).map(b=>({start_min:b.start_min,end_min:b.end_min}));
+  const availability:TeamAvailability={version:1,date,published_at:new Date().toISOString(),work_start_min:work.start,work_end_min:work.end,busy};
+  if(!validAvailability(availability)) throw new Error('Availability exceeds the supported interval count or has invalid working hours.');
+  await logCollabBatch([{entity:`member:${shareId}:${me}`,field:'availability',value:availability as unknown as Json}],expected);
+  await pushBestEffort(shareId);
 }
 
-/** Persist a balancing proposal as assignee ops, then push (editor-level). */
-export async function applyTeamAssignments(shareId: string, assignments: TeamAssignment[]): Promise<void> {
-  for (const a of assignments) await logCollabSet(a.task_id, 'assignee', a.actor);
+/** Missing/stale calendars are excluded, never interpreted as free time. */
+export async function planTeamForShare(shareId:string,date:string):Promise<TeamPlanProposal> {
+  const share=await getShare(shareId);if(!share) throw new Error('Unknown share.');
+  await assertCurrentEpoch(share);const me=await actorId();const expected=await teamSnapshot();
+  const roster=projectRoster(expected.ops,shareId);
+  if(!editable(roster,me)) throw new Error('Only a current owner or editor can propose assignments.');
+  const unavailable:Array<{actor:string;reason:string}>=[];
+  const members=roster.flatMap(m=>{
+    const status=availabilityStatus(m.availability,date);
+    if(!editable(roster,m.actor) || status!=='known') {unavailable.push({actor:m.actor,reason:!editable(roster,m.actor)?'Read-only role':status==='stale'?'Availability expired; share it again':'Availability not shared for this day'});return [];}
+    const a=m.availability!;
+    return [{actor:m.actor,work_start_min:a.work_start_min,work_end_min:a.work_end_min,busy:a.busy.map((b,i)=>({...b,id:`busy-${i}`,title:'Busy'}))}];
+  });
+  const assignees=projectAssignees(expected.ops);
+  const tasks=expected.planning.tasks.filter(t=>t.project_id===share.projectId && !t.done && !t.deleted_at && !t.parent_id).map(t=>toTeamPlanTask(t,assignees.get(t.id) ?? null,date));
+  const req={date,members,tasks};
+  const result=IS_TAURI ? await (await import('@tauri-apps/api/core')).invoke<TeamPlanResult>('plan_team',{req}) : planTeam(req);
+  const token=crypto.randomUUID();
+  if(proposals.size>=20) proposals.delete(proposals.keys().next().value!);
+  proposals.set(token,{shareId,actor:me,date,epoch:share.epoch ?? 1,expires:Date.now()+15*60_000,expected,assignments:result.assignments.map(a=>({...a}))});
+  return {...result,token,date,unavailable,taskTitles:Object.fromEntries(tasks.map(t=>[t.id,t.title]))};
+}
+
+/** Apply the reviewed proposal as one guarded history transaction. No schedules are reserved. */
+export async function applyTeamAssignments(shareId:string,proposal:TeamPlanProposal):Promise<void> {
+  const saved=proposals.get(proposal.token);
+  if(!saved || saved.shareId!==shareId || saved.date!==proposal.date || saved.expires<Date.now() || canonicalJson(saved.assignments as unknown as Json)!==canonicalJson(proposal.assignments as unknown as Json)) throw new Error('Proposal expired or changed. Balance workload again.');
+  const share=await getShare(shareId);if(!share || (share.epoch ?? 1)!==saved.epoch) throw new Error('Share epoch changed. Review a new proposal.');
+  await assertCurrentEpoch(share);const me=await actorId();const current=await teamSnapshot();
+  if(fingerprint(current.tasks,current.projects,current.ops)!==fingerprint(saved.expected.tasks,saved.expected.projects,saved.expected.ops) || planInputKey(current.planning)!==planInputKey(saved.expected.planning)) throw new Error('Tasks, roster or availability changed. Review a fresh proposal.');
+  const roster=projectRoster(current.ops,shareId);
+  if(saved.actor!==me) throw new Error('Proposal belongs to another device identity.');
+  if(!editable(roster,me)) throw new Error('Your role no longer permits assignments.');
+  for(const a of saved.assignments) {
+    if(!current.planning.tasks.some(t=>t.id===a.task_id && t.project_id===share.projectId && !t.deleted_at && !t.done)) throw new Error('Task changed. Review a fresh proposal.');
+    const member=roster.find(m=>m.actor===a.actor);
+    if(!member || !editable(roster,a.actor) || availabilityStatus(member.availability,proposal.date)!=='known') throw new Error('Availability expired or membership changed. Review a fresh proposal.');
+  }
+  await logCollabBatch(saved.assignments.map(a=>({entity:a.task_id,field:'assignee',value:a.actor})),saved.expected);
+  proposals.delete(proposal.token);
   await pushBestEffort(shareId);
 }
 

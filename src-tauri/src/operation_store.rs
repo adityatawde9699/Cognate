@@ -46,7 +46,7 @@ impl Operation {
 }
 
 #[derive(Deserialize)]
-pub struct HistoryPrecondition { tasks: Vec<Value>, projects: Vec<Value>, ops: Vec<Operation> }
+pub struct HistoryPrecondition { tasks: Vec<Value>, projects: Vec<Value>, ops: Vec<Operation>, #[serde(default)] planning: Option<Value> }
 
 pub(crate) async fn current_rows(db: &mut SqliteConnection, table: &str) -> Result<Vec<Value>, String> {
     let fields: &[&str] = if table == "tasks" { &[
@@ -83,6 +83,9 @@ async fn append_checked(connection: &mut SqliteConnection, ops: &[Operation], ex
     for op in ops { op.validate()?; }
     let mut transaction = connection.begin().await.map_err(|e|e.to_string())?;
     if let Some(expected) = expected {
+        if let Some(planning)=expected.planning {
+            if planning_state(&mut transaction).await? != planning {return Err("Planning inputs changed; review a fresh proposal.".into());}
+        }
         if !same_rows(expected.tasks, current_rows(&mut transaction,"tasks").await?) ||
             !same_rows(expected.projects,current_rows(&mut transaction,"projects").await?) {
             return Err("Local rows changed since the audit. Export a fresh audit before repairing.".into());
@@ -475,6 +478,14 @@ mod tests {
         db
     }
     #[tokio::test]
+    async fn assignments_reject_calendar_changes_inside_the_transaction() {
+        let mut db=task_db().await;
+        let expected=HistoryPrecondition {tasks:current_rows(&mut db,"tasks").await.unwrap(),projects:current_rows(&mut db,"projects").await.unwrap(),ops:vec![],planning:Some(planning_state(&mut db).await.unwrap())};
+        sqlx::query("INSERT INTO calendar_events(id,start,end,created_at) VALUES ('new','2026-10-09T09:00:00','2026-10-09T10:00:00','today')").execute(&mut db).await.unwrap();
+        assert!(append_checked(&mut db,&[op("assignment","A")],Some(expected)).await.unwrap_err().contains("Planning inputs changed"));
+        assert_eq!(sqlx::query_scalar::<_,i64>("SELECT count(*) FROM oplog").fetch_one(&mut db).await.unwrap(),0);
+    }
+    #[tokio::test]
     async fn failed_operation_insert_rolls_back_task_edit_and_identity() {
         let mut db = task_db().await;
         sqlx::raw_sql("CREATE TRIGGER fail_ops BEFORE INSERT ON oplog BEGIN SELECT RAISE(ABORT,'injected failure'); END;")
@@ -504,7 +515,7 @@ mod tests {
     async fn stale_historical_audit_cannot_append_repairs() {
         let mut db = task_db().await;
         let expected = HistoryPrecondition {tasks:current_rows(&mut db,"tasks").await.unwrap(),
-            projects:current_rows(&mut db,"projects").await.unwrap(),ops:vec![]};
+            projects:current_rows(&mut db,"projects").await.unwrap(),ops:vec![],planning:None};
         sqlx::query("UPDATE tasks SET title='concurrent edit'").execute(&mut db).await.unwrap();
         assert!(append_checked(&mut db,&[op("repair","old")],Some(expected)).await.is_err());
         let count: i64 = sqlx::query_scalar("SELECT count(*) FROM oplog").fetch_one(&mut db).await.unwrap();
@@ -515,7 +526,7 @@ mod tests {
     async fn projection_insert_failure_retains_rows_and_history() {
         let mut db = task_db().await;
         let tasks = current_rows(&mut db,"tasks").await.unwrap();
-        let expected = HistoryPrecondition {tasks:tasks.clone(), projects:vec![], ops:vec![]};
+        let expected = HistoryPrecondition {tasks:tasks.clone(), projects:vec![], ops:vec![],planning:None};
         let mut replacement = tasks.clone();
         replacement[0]["title"] = Value::String("remote".into());
         sqlx::raw_sql("CREATE TRIGGER fail_projection BEFORE INSERT ON tasks BEGIN SELECT RAISE(ABORT,'injected failure'); END;")
@@ -572,7 +583,7 @@ mod tests {
         sqlx::query("DELETE FROM tasks").execute(&mut db).await.unwrap();
         sqlx::raw_sql("CREATE TRIGGER fail_recovery BEFORE INSERT ON app_state WHEN NEW.key='recovery_completed_data' BEGIN SELECT RAISE(ABORT,'injected failure'); END;").execute(&mut db).await.unwrap();
         let identity=RecoveryIdentity {actor:"recovered".into(),pub_key:"pub".into(),kit_id:"kit".into()};
-        assert!(apply_projection_with_identity(&mut db,vec![op("recovered-op","original")],replacement,vec![],HistoryPrecondition {tasks:vec![],projects:vec![],ops:vec![]},Some(identity)).await.is_err());
+        assert!(apply_projection_with_identity(&mut db,vec![op("recovered-op","original")],replacement,vec![],HistoryPrecondition {tasks:vec![],projects:vec![],ops:vec![],planning:None},Some(identity)).await.is_err());
         assert!(current_rows(&mut db,"tasks").await.unwrap().is_empty());
         assert_eq!(sqlx::query_scalar::<_,i64>("SELECT count(*) FROM oplog").fetch_one(&mut db).await.unwrap(),0);
         assert_eq!(sqlx::query_scalar::<_,i64>("SELECT count(*) FROM app_state").fetch_one(&mut db).await.unwrap(),0);

@@ -84,7 +84,7 @@ export function TaskComments({ taskId, projectId }: { taskId: string; projectId:
           style={{ padding: '9px 12px', fontSize: '.87rem', color: 'var(--text)', background: 'var(--surface-2)', border: '1px solid var(--border-strong)', borderRadius: '9px', outline: 'none', width: '100%', boxSizing: 'border-box' }}
         >
           <option value="">Unassigned</option>
-          {roster.map((m) => <option key={m.actor} value={m.actor}>{short(m.actor)} · {m.role}</option>)}
+          {roster.map((m) => <option key={m.actor} value={m.actor} disabled={m.role!=='owner' && m.role!=='editor'}>{short(m.actor)} · {m.role}</option>)}
         </select>
       </div>
 

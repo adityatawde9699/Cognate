@@ -2,6 +2,7 @@ import {encryptBrowserSecret,isEncryptedSecret} from './utils/browserVault';
 import { readBrowserWorkspace, patchBrowserWorkspace } from './services/browserStorage';
 import { merge, Clock, hlcCompare, entityToOps, delOp, canonicalJson } from './services/oplog';
 import { nextDeadline, recurrenceId } from './services/recurrenceRules';
+import { planInputKey } from './services/planReview';
 import { taskRecord } from './services/taskFields';
 /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
    src/db.js — SQLite database abstraction layer
@@ -973,10 +974,6 @@ function browserPlanningSnapshot() {
 export async function getPlanningSnapshot() {
     if (!IS_TAURI) {
         await ensureBrowserStorage();
-        if (!USE_INDEXED_DB) {
-            const settings = Object.fromEntries(PLANNING_KEYS.map(key => [key,localStorage.getItem(`cn_set_${key}`)]).filter(([,value]) => value!==null));
-            return {...browserPlanningSnapshot(),settings};
-        }
         return browserPlanningSnapshot();
     }
     await db();
@@ -986,7 +983,7 @@ export async function getPlanningSnapshot() {
 /** Reject stale solves and commit schedules, history, revision, and explanations together. */
 export async function commitPlan(date, result, expected) {
     if (!IS_TAURI) await ensureBrowserStorage();
-    const record = JSON.stringify({revision:uuid(),created_at:new Date().toISOString(),...result});
+    const record = JSON.stringify({revision:uuid(),created_at:new Date().toISOString(),...result,inputs:planInputKey(expected,date,result)});
     if (!IS_TAURI) {
         if (canonicalJson(browserPlanningSnapshot()) !== canonicalJson(expected)) throw new Error('Tasks, calendar, or working hours changed while planning. Retry the plan.');
         const blocks = new Map(result.blocks.map(block => [block.task_id,block]));
@@ -1182,6 +1179,7 @@ export async function appendOps(ops, expected = null) {
     if (!ops || ops.length === 0) return;
     if (!IS_TAURI) {
         if (expected) {
+            if(expected.planning && canonicalJson(browserPlanningSnapshot())!==canonicalJson(expected.planning)) throw new Error('Planning inputs changed; review a fresh proposal.');
             const currentTasks = localLoad().map(rowToTask).map(expected.normalizeTask);
             const currentProjects = localLoadProjects();
             if (expected.fingerprint(currentTasks, currentProjects, localLoadOps()) !== expected.fingerprint(expected.tasks, expected.projects, expected.ops)) {
@@ -1196,7 +1194,7 @@ export async function appendOps(ops, expected = null) {
         : { id: op.id, hlc: { wall: op.hlc.wall, counter: op.hlc.counter, actor: op.hlc.actor }, kind: op.kind, entity: op.entity });
     await db(); // Ensure plugin migrations have completed.
     const { invoke } = await import('@tauri-apps/api/core');
-    await guardedCall({ append: () => invoke('append_operations', { ops: valid, expected: expected ? { tasks: expected.tasks, projects: expected.projects, ops: expected.ops } : null }) }, 'append', []);
+    await guardedCall({ append: () => invoke('append_operations', { ops: valid, expected: expected ? { tasks: expected.tasks, projects: expected.projects, ops: expected.ops, planning: expected.planning ?? null } : null }) }, 'append', []);
 }
 
 /** Transactional import with a local-state precondition. No generated local

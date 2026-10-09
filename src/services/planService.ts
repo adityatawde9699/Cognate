@@ -293,6 +293,10 @@ export interface PlanOptions {
  * `fromMin` lets a mid-day reflow plan only the *remaining* hours so slipped
  * work moves forward rather than being re-laid into the past.
  */
+export class PlanRefreshError extends Error {
+  constructor() {super('Plan saved, but the screen could not refresh. Reload before making further changes.');this.name='PlanRefreshError';}
+}
+
 export async function planDay(date: string, opts: PlanOptions = {}): Promise<PlanResult> {
   if (opts.signal?.aborted) throw new Error('Planning cancelled.');
   await initDb();
@@ -332,7 +336,9 @@ export async function planDay(date: string, opts: PlanOptions = {}): Promise<Pla
   }
   if (opts.signal?.aborted) throw new Error('Planning cancelled.');
   await commitPlan(date,result,snapshot);
-  useStore.getState().setTasks(await getAllTasks(useStore.getState().currentFilter) as Task[]);
+  try {useStore.getState().setTasks(await getAllTasks(useStore.getState().currentFilter) as Task[]);}
+  catch {throw new PlanRefreshError();}
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('plan-changed'));
   return result;
 }
 

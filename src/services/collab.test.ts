@@ -245,3 +245,19 @@ it('does not let another key self-claim an already bound actor',async()=>{
   expect(result.accepted).toHaveLength(0);
   expect(result.roster.get('owner')?.pub).toBe(owner.pub);
 });
+
+it('admits availability only from the bound member, even when another signer is owner',async()=>{
+ const owner=await makeActor('owner'),bob=await makeActor('bob'),impostor=await makeActor('bob');
+ const invite=await owner.signMany([owner.content('member:bob','pub',bob.pub),owner.content('member:bob','role','editor')]);
+ bob.recv(invite);impostor.recv(invite);owner.recv(invite);
+ const availability={version:1,date:'2026-10-09',published_at:'2026-10-09T12:00:00Z',work_start_min:540,work_end_min:1020,busy:[]};
+ const valid=await bob.sign(bob.content('member:bob','availability',availability));
+ impostor.recv([valid]);
+ const forged=await impostor.sign(impostor.content('member:bob','availability',availability));
+ const onBehalf=await owner.sign(owner.content('member:bob','availability',availability));
+ bob.recv([forged]);
+ const malformed=await bob.sign(bob.content('member:bob','availability',{...availability,busy:[{start_min:600,end_min:540}]}));
+ const result=await authorize([...invite,valid,forged,onBehalf,malformed],owner.genesis);
+ expect(result.rejected.map(o=>o.id)).toEqual(expect.arrayContaining([forged.op.id,onBehalf.op.id,malformed.op.id]));
+ expect(result.accepted.map(o=>o.id)).toContain(valid.op.id);
+});

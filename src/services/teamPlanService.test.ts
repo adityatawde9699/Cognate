@@ -94,3 +94,16 @@ describe('teamPlanService.planTeam', () => {
     expect(norm(b)).toEqual(norm(a));
   });
 });
+
+it('subtracts overlapping busy intervals once and leaves excess unassigned',()=>{
+ const res=planTeam({date:'2026-10-09',members:[member('A',{busy:[{title:'Busy',start_min:540,end_min:600},{title:'Busy',start_min:570,end_min:630}]})],tasks:[t('too-large',480)]});
+ expect(res.loads[0].capacity_min).toBe(390);expect(res.assignments).toHaveLength(0);expect(res.unroutable).toEqual(['too-large']);
+});
+it('does not silently reassign tasks whose explicit assignee left the roster',()=>{
+ const res=planTeam({date:'2026-10-09',members:[member('A')],tasks:[t('orphan',30,'removed')]});
+ expect(res.assignments).toEqual([]);expect(res.unroutable).toEqual(['orphan']);
+});
+it('rejects duplicate members and invalid capacity instead of double-counting it',()=>{
+ expect(()=>planTeam({date:'2026-10-09',members:[member('A'),member('A')],tasks:[]})).toThrow('Invalid');
+ expect(()=>planTeam({date:'2026-10-09',members:[member('A',{capacity_min:-1})],tasks:[]})).toThrow('Invalid');
+});

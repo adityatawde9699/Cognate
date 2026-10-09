@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTask, updateTask, getAllTasks, loadOps, getPlanningSnapshot, commitPlan, createCalendarEvent } from '../db';
-import { planDay } from './planService';
+import * as db from '../db';
+import { planDay, PlanRefreshError } from './planService';
 import { useStore } from '../store';
 import { projectTasks } from './projector';
 import { taskRecord } from './taskFields';
@@ -65,4 +66,13 @@ it('cancellation leaves the prior plan and operation history intact',async()=>{
   const before=localStorage.getItem('cn_atomic_workspace_v1'),controller=new AbortController();controller.abort();
   await expect(planDay('2026-10-06',{signal:controller.signal})).rejects.toThrow('cancelled');
   expect(localStorage.getItem('cn_atomic_workspace_v1')).toBe(before);
+});
+
+it('distinguishes a committed plan from a failed UI refresh',async()=>{
+  await createTask(input);
+  const read=vi.spyOn(db,'getAllTasks').mockRejectedValueOnce(new Error('read unavailable'));
+  try {
+    await expect(planDay('2026-10-06')).rejects.toBeInstanceOf(PlanRefreshError);
+    expect((await getPlanningSnapshot()).tasks[0].scheduled_start).toBeTruthy();
+  } finally {read.mockRestore();}
 });

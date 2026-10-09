@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+    initDb,
+    getPlanningSnapshot,
     createCalendarEvent,
     deleteCalendarEvent,
     getCalendarEvents,
-    getSetting,
     updateScheduling,
 } from '../db';
 import { advisePlan } from '../services/aiService';
@@ -18,10 +19,13 @@ import {
     isoAt,
     minutesOf,
     planDay,
+    PlanRefreshError,
 } from '../services/planService';
 import { toggleTaskDone } from '../services/taskService';
 import { useStore, type CalendarEvent, type Task } from '../store';
 import { toast } from '../utils/toast';
+import { reviewPlan, type PlanReview } from '../services/planReview';
+import { useFocusTrap } from '../hooks/useFocusTrap';
 import { ChiefOfStaff } from './ChiefOfStaff';
 
 // Padding reserved at top/bottom of the timeline canvas (px)
@@ -58,6 +62,14 @@ export function PlanView() {
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [reasons, setReasons] = useState<Record<string, string>>({});
   const [planning, setPlanning] = useState(false);
+  const [review, setReview] = useState<PlanReview | null>(null);
+  const [actionError, setActionError] = useState('');
+  const [move, setMove] = useState<{task:Task;time:string;duration:number} | null>(null);
+  const [moveError,setMoveError] = useState('');
+  const moveRef=useRef<HTMLDivElement>(null);
+  const moveTrigger=useRef<HTMLElement | null>(null);
+  useEffect(()=>{if(!move && moveTrigger.current?.isConnected) {moveTrigger.current.focus();moveTrigger.current=null;}},[move]);
+  useFocusTrap(moveRef, Boolean(move));
   const [enriching, setEnriching] = useState(false);
   const [syncing, setSyncing] = useState(false);
   useEffect(()=>{ calendarWarnings(date).then(setCalendarStatus).catch(()=>setCalendarStatus(['Calendar status unavailable. Refresh before planning.'])); },[date, syncing]);
@@ -69,6 +81,12 @@ export function PlanView() {
   // Measured inner height of the timeline container (px). Drives pxPerMin so
   // the day fills the container when it can, and scrolls when it can't.
   const [containerH, setContainerH] = useState(0);
+  const [narrow,setNarrow]=useState(false);
+  useEffect(()=>{
+    const media=window.matchMedia('(max-width: 760px)');
+    const update=()=>setNarrow(media.matches);update();media.addEventListener('change',update);
+    return ()=>media.removeEventListener('change',update);
+  },[]);
   const timelineRef = useRef<HTMLDivElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const [nowMin, setNowMin] = useState(() => new Date().getHours() * 60 + new Date().getMinutes());
@@ -91,14 +109,27 @@ export function PlanView() {
     return ()=>window.removeEventListener('calendar-changed',update);
   }, [date]);
   useEffect(() => {
-    let active = true;
-    getSetting(`plan:${date}`,'').then(raw => {
-      if (!active || !raw) return;
-      const saved = JSON.parse(raw);
-      setReasons(Object.fromEntries(saved.blocks.map((block: {task_id:string;reason:string}) => [block.task_id,block.reason])));
-    }).catch(error => console.warn('[planner] Could not load saved explanations:',error));
-    return () => {active=false;};
-  },[date]);
+    let active=true, generation=0;
+    const refresh=async()=>{
+      const turn=++generation;
+      try {
+        await initDb();
+        const snapshot=await getPlanningSnapshot();
+        if(!active || turn!==generation) return;
+        const next=reviewPlan(snapshot,date);
+        setReview(next);setReasons(next.reasons);setLastOverflow(next.unscheduled.map(u=>u.task_id));
+      } catch {
+        if(active && turn===generation) setReview({state:'invalid',message:'Plan status unavailable. Your existing schedule is preserved; retry after checking storage.',reasons:{},unscheduled:[]});
+      }
+    };
+    setReview(null);void refresh();
+    const changed=()=>void refresh();
+    window.addEventListener('plan-changed',changed);
+    window.addEventListener('calendar-changed',changed);
+    window.addEventListener('settings-changed',changed);
+    window.addEventListener('focus',changed);
+    return ()=>{active=false;window.removeEventListener('plan-changed',changed);window.removeEventListener('calendar-changed',changed);window.removeEventListener('settings-changed',changed);window.removeEventListener('focus',changed);};
+  },[date,tasks]);
 
   // Keep containerH in sync with the timeline wrapper's rendered height.
   useEffect(() => {
@@ -152,7 +183,7 @@ export function PlanView() {
   // below a floor that keeps a 30-minute block legible — long days scroll
   // instead of crushing blocks into each other.
   // Fall back to 1.4 before the first measurement arrives.
-  const MIN_PX_PER_MIN = 1.1;
+  const MIN_PX_PER_MIN = narrow ? 3.6 : 1.1;
   const workMinutes = work.end - work.start;
   const pxPerMin = containerH > 0
     ? Math.max(MIN_PX_PER_MIN, (containerH - PAD_TOP - PAD_BOT) / workMinutes)
@@ -178,6 +209,8 @@ export function PlanView() {
   }, [firstStart, date, containerH, work.start]);
 
   const handleAutoPlan = async () => {
+    if(planning) return;
+    setActionError('');
     setPlanning(true);
     try {
       const result = await planDay(date);
@@ -192,6 +225,7 @@ export function PlanView() {
           : `🗓 Your day is planned — ${n} task${n === 1 ? '' : 's'}`
       );
     } catch (e: any) {
+      setActionError(e instanceof PlanRefreshError ? e.message : `Planning failed: ${e?.message || e}. Your previous plan is preserved.`);
       toast(`Planning failed: ${e?.message || e}`);
     } finally {
       setPlanning(false);
@@ -245,8 +279,10 @@ export function PlanView() {
   };
 
   const togglePin = async (t: Task) => {
+    try {
     await updateScheduling(t.id, { duration_min: t.duration_min ?? 0, energy: (t.energy as any) || 'med', pinned: !t.pinned });
     useStore.getState().updateTaskOptimistic(t.id, { pinned: !t.pinned } as Partial<Task>);
+    } catch(error) {setActionError(error instanceof Error ? error.message : 'Pin could not be saved.');}
   };
 
   // ── Drag a block to a new time → pin it there → re-solve the rest ──
@@ -254,6 +290,7 @@ export function PlanView() {
   const onGripDown = (e: React.PointerEvent, taskId: string, startMin: number, endMin: number) => {
     e.stopPropagation();
     e.preventDefault();
+    if(planning || move) return;
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
     setDrag({ id: taskId, dur: Math.max(endMin - startMin, SNAP), startY: e.clientY, origMin: startMin, curMin: startMin });
   };
@@ -277,6 +314,22 @@ export function PlanView() {
       setLastOverflow(result.unscheduled.map(item=>item.task_id));
       toast('📌 Pinned — plan updated');
     } catch(error) {toast(error instanceof Error ? error.message : 'Move could not be saved.');}
+    finally {setPlanning(false);}
+  };
+
+  const openMove=(task:Task,start:number,end:number)=>{
+    moveTrigger.current=document.activeElement as HTMLElement;
+    setMoveError('');setMove({task,time:`${String(Math.floor(start/60)).padStart(2,'0')}:${String(start%60).padStart(2,'0')}`,duration:end-start});
+  };
+  const saveMove=async(e:React.FormEvent)=>{
+    e.preventDefault();if(!move || planning) return;
+    const start=parseClock(move.time);
+    if(start===null || start<0 || start>=1440 || !Number.isInteger(move.duration) || move.duration<15 || move.duration>1440) {setMoveError('Enter a valid time and a duration of 15–1440 minutes.');return;}
+    setPlanning(true);setMoveError('');
+    try {
+      await planDay(date,{pin:{taskId:move.task.id,startMin:start,durationMin:move.duration}});
+      setMove(null);toast('Pinned time saved; remaining tasks re-planned.');
+    } catch(error) {if(error instanceof PlanRefreshError) {setMove(null);setActionError(error.message);} else setMoveError(error instanceof Error ? error.message : 'Move could not be saved. Your input is preserved.');}
     finally {setPlanning(false);}
   };
 
@@ -318,6 +371,8 @@ export function PlanView() {
 
   return (
     <section className="plan-view" aria-label="Plan">
+      <p className={`plan-review ${review?.state || 'loading'}`} role="status">{review?.message || 'Checking saved plan…'}</p>
+      {actionError && <p className="plan-action-error" role="alert">{actionError}</p>}
       <header className="plan-header">
         <div className="plan-heading">
           {calendarStatus.length>0 && <p role="status">{calendarStatus.join(' ')}</p>}
@@ -332,10 +387,12 @@ export function PlanView() {
           </p>
         </div>
         <div className="plan-actions">
+          <button className="btn-ghost" onClick={()=>setTaskModalOpen(true)}>Capture task</button>
+          <button className="btn-ghost" onClick={()=>useStore.getState().setFilter('all')}>Review inbox</button>
           <div className="plan-datenav">
-            <button className="btn-ghost" onClick={() => setDate(shiftDate(date, -1))} aria-label="Previous day"><i className="fa-solid fa-chevron-left"></i></button>
-            <button className="btn-ghost" onClick={() => setDate(todayStr())}>Today</button>
-            <button className="btn-ghost" onClick={() => setDate(shiftDate(date, 1))} aria-label="Next day"><i className="fa-solid fa-chevron-right"></i></button>
+            <button className="btn-ghost" disabled={planning} onClick={() => setDate(shiftDate(date, -1))} aria-label="Previous day"><i className="fa-solid fa-chevron-left"></i></button>
+            <button className="btn-ghost" disabled={planning} onClick={() => setDate(todayStr())}>Today</button>
+            <button className="btn-ghost" disabled={planning} onClick={() => setDate(shiftDate(date, 1))} aria-label="Next day"><i className="fa-solid fa-chevron-right"></i></button>
           </div>
           <button className="btn-ghost" onClick={addBusy} title="Add a busy block"><i className="fa-solid fa-plus"></i> Busy time</button>
           <button className="btn-ghost plan-sync" onClick={handleSyncCalendar} disabled={syncing} title="Subscribe to or import a calendar (.ics)">
@@ -409,15 +466,14 @@ export function PlanView() {
                 key={task.id}
                 className={`plan-block prio-${task.priority} ${h < 46 ? 'is-compact' : ''} ${dragging ? 'is-dragging' : ''} ${task.done ? 'is-done' : ''}`}
                 style={{ top: `${toY(top)}px`, height: `${Math.max(h - 2, 22)}px` }}
-                onClick={() => { if (!dragging) setTaskModalOpen(true, task); }}
-                role="button"
-                tabIndex={0}
+                role="group"
+                aria-label={`${task.title}, ${fmtClock(top)} to ${fmtClock(blkEnd)}`}
                 title={ENERGY_LABEL[task.energy || 'med']}
               >
                 <div className="plan-block-top">
                   <button
                     className={`plan-check ${task.done ? 'checked' : ''}`}
-                    onClick={(e) => { e.stopPropagation(); toggleTaskDone(task.id); }}
+                    onClick={(e) => { e.stopPropagation(); void toggleTaskDone(task.id).catch(error=>setActionError(String(error))); }}
                     role="checkbox"
                     aria-checked={task.done}
                     aria-label={task.done ? `Mark "${task.title}" not done` : `Mark "${task.title}" done`}
@@ -428,7 +484,7 @@ export function PlanView() {
                   <span
                     className="plan-grip"
                     title="Drag to reschedule"
-                    aria-label="Drag to reschedule"
+                    aria-hidden="true"
                     onClick={(e) => e.stopPropagation()}
                     onPointerDown={(e) => onGripDown(e, task.id, start, end)}
                     onPointerMove={onGripMove}
@@ -436,12 +492,15 @@ export function PlanView() {
                   >
                     <i className="fa-solid fa-grip-vertical"></i>
                   </span>
-                  <span className="plan-block-title">{task.title}</span>
+                  <button className="plan-block-title" onClick={()=>setTaskModalOpen(true,task)} aria-label={`Edit ${task.title}`}>{task.title}</button>
+                  {!task.done && <button className="plan-move" onClick={()=>openMove(task,start,end)} disabled={planning} aria-label={`Reschedule ${task.title}`}>Move</button>}
                   <button
                     className={`plan-pin ${task.pinned ? 'is-pinned' : ''}`}
                     onClick={(e) => { e.stopPropagation(); togglePin(task); }}
                     title={task.pinned ? 'Unpin (let the planner move it)' : 'Pin to this time'}
                     aria-label={task.pinned ? 'Unpin task' : 'Pin task'}
+                    aria-pressed={Boolean(task.pinned)}
+                    disabled={planning}
                   >
                     <i className="fa-solid fa-thumbtack"></i>
                   </button>
@@ -474,11 +533,10 @@ export function PlanView() {
                 <li
                   key={t.id}
                   className={`plan-backlog-item prio-${t.priority} ${lastOverflow.includes(t.id) ? 'is-overflow' : ''}`}
-                  onClick={() => setTaskModalOpen(true, t)}
                 >
-                  <span className="plan-backlog-title">{t.title}</span>
+                  <button className="plan-backlog-title" onClick={()=>setTaskModalOpen(true,t)} aria-label={`Review ${t.title}`}>{t.title}</button>
                   <span className="plan-backlog-meta">
-                    {lastOverflow.includes(t.id) && <span className="plan-overflow-tag">didn't fit</span>}
+                    {lastOverflow.includes(t.id) && <span className="plan-overflow-tag">{review?.unscheduled.find(u=>u.task_id===t.id)?.reason || "didn't fit"}</span>}
                     {t.deadline && <span><i className="fa-regular fa-calendar"></i> {t.deadline.slice(5)}</span>}
                   </span>
                 </li>
@@ -487,6 +545,18 @@ export function PlanView() {
           )}
         </aside>
       </div>
+      {move && <div className="modal-overlay open">
+        <div className="modal-panel plan-move-dialog" ref={moveRef} role="dialog" aria-modal="true" aria-labelledby="move-title" onKeyDown={e=>{if(e.key==='Escape' && !planning) {e.stopPropagation();setMove(null);}}}>
+          <h2 id="move-title">Reschedule {move.task.title}</h2>
+          <p>Choose a time. This task will be pinned and the remaining plan updated together.</p>
+          <form onSubmit={saveMove}>
+            <label htmlFor="move-time">Start time</label><input id="move-time" type="time" value={move.time} onChange={e=>setMove({...move,time:e.target.value})} required autoFocus />
+            <label htmlFor="move-duration">Duration (minutes)</label><input id="move-duration" type="number" min="15" max="1440" value={move.duration} onChange={e=>setMove({...move,duration:Number(e.target.value)})} required />
+            {moveError && <p role="alert">{moveError}</p>}
+            <div className="plan-actions"><button type="button" className="btn-ghost" disabled={planning} onClick={()=>setMove(null)}>Cancel</button><button type="submit" className="btn-primary" disabled={planning}>{planning?'Saving…':'Save and pin'}</button></div>
+          </form>
+        </div>
+      </div>}
     </section>
   );
 }

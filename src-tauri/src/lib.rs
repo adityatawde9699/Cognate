@@ -224,6 +224,7 @@ fn plan_day(req: planner::PlanRequest) -> Result<planner::PlanResult, String> {
 /// Deterministic mirror of src/services/teamPlanService.ts. See `planner.rs`.
 #[tauri::command]
 fn plan_team(req: planner::TeamPlanRequest) -> Result<planner::TeamPlanResult, String> {
+    planner::validate_team(&req)?;
     Ok(planner::plan_team(&req))
 }
 

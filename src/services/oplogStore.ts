@@ -115,6 +115,15 @@ export async function logCollabSet(entity: string, field: string, value: Json): 
   }
 }
 
+/** Commit collaboration fields together, optionally against a reviewed workspace. */
+export async function logCollabBatch(fields:Array<{entity:string;field:string;value:Json}>, expected?:unknown):Promise<Op[]> {
+  await refreshClock();
+  if(!clock) throw new Error('Operation clock unavailable.');
+  const ops=fields.map(f=>setOp(clock!,f.entity,f.field,f.value));
+  await appendOps(ops,expected);
+  return ops;
+}
+
 /** Tombstone a collaboration entity (e.g. remove a member). */
 export async function logCollabDel(entity: string): Promise<Op | null> {
   try {

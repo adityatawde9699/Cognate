@@ -29,6 +29,7 @@
        decrypted. Owners are mutually trusted (TOFU on the genesis owner).
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 
+import {validAvailability,type TeamAvailability} from './teamAvailability';
 import { hlcCompare, validateOps, merge, type Op } from './oplog';
 import { importPublicKey, signBytes, verifyBytes } from './crypto';
 
@@ -44,12 +45,13 @@ export interface Member {
   // Self-declared scheduling capacity (Act 3 follow-up) — used by team planning.
   work_start_min?: number;
   work_end_min?: number;
+  availability?: TeamAvailability;
 }
 
 /** Member fields a member may set on THEIR OWN entry without being an owner:
  *  their public key (identity) and their own working hours (self-info). Role
  *  and other members' entries always require an owner. */
-const SELF_FIELDS = new Set(['pub', 'work_start', 'work_end']);
+const SELF_FIELDS = new Set(['pub', 'work_start', 'work_end', 'availability']);
 
 /** A signed op as it travels in a shared doc: the op, the signer's public key,
  *  and an ECDSA signature over the op's canonical bytes. */
@@ -162,6 +164,7 @@ function applyMemberOp(roster: Map<string, Member>, op: Op): void {
   if (op.field === 'role' && isRole(op.value)) cur.role = op.value;
   if (op.field === 'work_start' && typeof op.value === 'number') cur.work_start_min = op.value;
   if (op.field === 'work_end' && typeof op.value === 'number') cur.work_end_min = op.value;
+  if(op.field==='availability' && validAvailability(op.value)) cur.availability=op.value;
   roster.set(actor, cur);
 }
 
@@ -234,6 +237,7 @@ export function applyAccessControl(
         memberActor(op.entity) === author &&
         SELF_FIELDS.has(op.field) &&
         (op.field !== 'pub' || (op.value === pub && (!roster.get(author)?.pub || roster.get(author)?.pub===pub)));
+      if(op.kind==='set' && op.field==='availability' && (!validAvailability(op.value) || !bound || memberActor(op.entity)!==author)) {rejected.push(op);continue;}
       if (ownerBound || selfClaim) {
         applyMemberOp(roster, op);
         adminOps.push(op);

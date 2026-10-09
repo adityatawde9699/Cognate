@@ -66,7 +66,7 @@ export function Sidebar() {
     { id: 'plan', label: 'Plan', icon: 'fa-wand-magic-sparkles', count: 0 },
     { id: 'dashboard', label: 'Dashboard', icon: 'fa-table-columns', count: 0 },
     { id: 'all', label: 'Tasks', icon: 'fa-inbox', count: inboxCount },
-    { id: 'today', label: 'Today', icon: 'fa-sun', count: todayCount },
+    { id: 'today', label: 'Due today', icon: 'fa-sun', count: todayCount },
     { id: 'week', label: 'This Week', icon: 'fa-calendar-week', count: weekCount },
     { id: 'high', label: 'Flagged', icon: 'fa-flag', count: flaggedCount, danger: true },
   ];

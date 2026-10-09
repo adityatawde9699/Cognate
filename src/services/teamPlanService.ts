@@ -19,6 +19,7 @@
 import {
   planLocally, effortToDuration,
   DEFAULT_WORK_START, DEFAULT_WORK_END,
+  validatePlanRequest,
   type PlanTask, type BusyBlock, type PlanResult,
 } from './planService';
 
@@ -69,8 +70,17 @@ export interface TeamPlanResult {
   unroutable: string[];
 }
 
-const capacityOf = (m: TeamMember): number =>
-  m.capacity_min ?? ((m.work_end_min ?? DEFAULT_WORK_END) - (m.work_start_min ?? DEFAULT_WORK_START));
+const capacityOf = (m:TeamMember):number => {
+ const start=m.work_start_min ?? DEFAULT_WORK_START, end=m.work_end_min ?? DEFAULT_WORK_END;
+ let occupied=0, until=start;
+ for(const b of [...(m.busy ?? [])].sort((a,b)=>a.start_min-b.start_min)) {
+  const from=Math.max(start,b.start_min,until), to=Math.min(end,b.end_min);
+  if(to>from) occupied+=to-from;
+  until=Math.max(until,to);
+ }
+ const available=Math.max(0,end-start-occupied);
+ return Math.min(available,m.capacity_min ?? available);
+};
 
 /** Highest-priority-first ordering (mirrors planLocally's pending sort). */
 function byPriority(a: TeamPlanTask, b: TeamPlanTask): number {
@@ -88,6 +98,9 @@ function byPriority(a: TeamPlanTask, b: TeamPlanTask): number {
  * each member with the solo solver. Pure — no DB, network, or store.
  */
 export function planTeam(req: TeamPlanRequest): TeamPlanResult {
+  if(req.members.length>200 || new Set(req.members.map(m=>m.actor)).size!==req.members.length || req.members.some(m=>!m.actor || (m.capacity_min!==undefined && (!Number.isInteger(m.capacity_min) || m.capacity_min<0 || m.capacity_min>1440)))) throw new Error('Invalid team members or capacity.');
+  validatePlanRequest({date:req.date,work_start_min:DEFAULT_WORK_START,work_end_min:DEFAULT_WORK_END,tasks:req.tasks.map(stripAssignee),busy:[]});
+  for(const m of req.members) validatePlanRequest({date:req.date,work_start_min:m.work_start_min ?? DEFAULT_WORK_START,work_end_min:m.work_end_min ?? DEFAULT_WORK_END,tasks:req.tasks.map(stripAssignee),busy:m.busy ?? []});
   const members = [...req.members].sort((a, b) => a.actor.localeCompare(b.actor));
   const unroutable: string[] = [];
 
@@ -105,9 +118,8 @@ export function planTeam(req: TeamPlanRequest): TeamPlanResult {
     if (t.assignee && buckets.has(t.assignee)) {
       buckets.get(t.assignee)!.push(t);
       load.set(t.assignee, load.get(t.assignee)! + durOf(t));
-    } else {
-      free.push(t);
-    }
+    } else if(t.assignee) {unroutable.push(t.id);}
+    else {free.push(t);}
   }
 
   // Phase 1b — distribute the rest to the least-loaded member with room.
@@ -115,12 +127,14 @@ export function planTeam(req: TeamPlanRequest): TeamPlanResult {
     const d = durOf(t);
     // Prefer members who stay within capacity; tie-break on lowest resulting load.
     const pick = members
+      .filter(m=>load.get(m.actor)!+d<=capacityOf(m))
       .map((m) => ({ m, after: load.get(m.actor)! + d, cap: capacityOf(m) }))
       .sort((a, b) => {
         const aFits = a.after <= a.cap ? 0 : 1;
         const bFits = b.after <= b.cap ? 0 : 1;
         return aFits - bFits || a.after - b.after || a.m.actor.localeCompare(b.m.actor);
-      })[0].m;
+      })[0]?.m;
+    if(!pick) {unroutable.push(t.id);continue;}
     buckets.get(pick.actor)!.push(t);
     load.set(pick.actor, load.get(pick.actor)! + d);
     assignments.push({ task_id: t.id, actor: pick.actor });
@@ -164,8 +178,8 @@ function stripAssignee(t: TeamPlanTask): PlanTask {
 /** Map a Task-ish record to a TeamPlanTask (duration from effort if unset). */
 export function toTeamPlanTask(t: {
   id: string; title: string; duration_min?: number; energy?: string; deadline?: string;
-  priority?: string; importance?: number; pinned?: boolean; effort?: number;
-}, assignee: string | null): TeamPlanTask {
+  priority?: string; importance?: number; pinned?: boolean; effort?: number; scheduled_start?: string | null;
+}, assignee: string | null, date?:string): TeamPlanTask {
   return {
     id: t.id,
     title: t.title,
@@ -175,7 +189,7 @@ export function toTeamPlanTask(t: {
     priority: (t.priority as TeamPlanTask['priority']) || 'medium',
     importance: t.importance ?? 3,
     pinned: !!t.pinned,
-    pinned_start_min: null,
+    pinned_start_min: t.pinned && t.scheduled_start && (!date || t.scheduled_start.slice(0,10)===date) ? Number(t.scheduled_start.slice(11,13))*60+Number(t.scheduled_start.slice(14,16)) : null,
     assignee,
   };
 }

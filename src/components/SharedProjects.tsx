@@ -14,10 +14,10 @@ import type { ActivityEntry } from '../services/activity';
 import {
   listShares, createShare, joinShare, syncShare, grantRole, removeMember,
   removeShare, inviteFor, getRoster, getActivity, getShare,
-  planTeamForShare, applyTeamAssignments, type ShareMeta,
+  planTeamForShare, publishMyAvailability, applyTeamAssignments, type TeamPlanProposal, type ShareMeta,
 } from '../services/shareService';
-import type { TeamPlanResult } from '../services/teamPlanService';
-import { fmtClock } from '../services/planService';
+import {getLocalDateString} from '../db';
+import {availabilityStatus} from '../services/teamAvailability';
 import { getPresence, type Presence } from '../services/presenceService';
 import { exportRecoveryKit, importRecoveryKit,changeRecoveryPassphrase } from '../services/recoveryService';
 import { loadAllTasks } from '../services/taskService';
@@ -32,7 +32,7 @@ export function SharedProjects() {
   const [presence, setPresence] = useState<Record<string, Presence[]>>({});
   const [activity, setActivity] = useState<Record<string, ActivityEntry[]>>({});
   const [showFeed, setShowFeed] = useState<Record<string, boolean>>({});
-  const [teamPlan, setTeamPlan] = useState<Record<string, TeamPlanResult>>({});
+  const [teamPlan, setTeamPlan] = useState<Record<string, TeamPlanProposal>>({});
   const [me, setMe] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
@@ -62,7 +62,7 @@ export function SharedProjects() {
     setPresence(p);
   };
 
-  useEffect(() => { void refresh(); }, []);
+  useEffect(() => { void refresh().catch(error=>setMsg(error instanceof Error ? error.message : 'Roster could not be loaded.')); }, []);
 
   const copyInvite = async (id: string) => {
     try {
@@ -95,7 +95,9 @@ export function SharedProjects() {
     setBusy(true); setMsg('');
     try {
       const share = await joinShare(joinToken.trim());
-      const res = await syncShare(share.id);
+      let res;
+      try {res=await syncShare(share.id);}
+      catch(error) {await refresh();setMsg(`Invitation saved locally; sync is pending. ${error instanceof Error ? error.message : 'Relay unavailable.'}`);return;}
       setJoinToken('');
       await refresh();
       await loadAllTasks('all');
@@ -137,7 +139,8 @@ export function SharedProjects() {
       setMsg('Member removed and read key rotated. Copy the new invite and send it securely to each remaining member. Old invites cannot read future updates.');
       await syncShare(shareId).catch(() => {});
       await refresh();
-    } finally { setBusy(false); }
+    } catch(error) {setMsg(error instanceof Error ? error.message : 'Member removal did not complete.');}
+    finally { setBusy(false); }
   };
 
   const handleLeave = async (id: string) => {
@@ -149,7 +152,7 @@ export function SharedProjects() {
   const handleTeamPlan = async (id: string) => {
     setBusy(true); setMsg('');
     try {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = getLocalDateString();
       const plan = await planTeamForShare(id, today);
       setTeamPlan((t) => ({ ...t, [id]: plan }));
     } catch (e: any) {
@@ -157,12 +160,20 @@ export function SharedProjects() {
     } finally { setBusy(false); }
   };
 
+  const handleAvailability=async(id:string)=>{
+    setBusy(true);setMsg('');
+    try {await publishMyAvailability(id,getLocalDateString());await refresh();setMsg('Saved today’s availability for sharing. Sync delivers busy intervals and working hours without event titles; availability expires after 15 minutes.');}
+    catch(error) {setMsg(error instanceof Error ? error.message : 'Availability was not shared.');}
+    finally {setBusy(false);}
+  };
+
   const handleApplyAssignments = async (id: string) => {
     const plan = teamPlan[id];
     if (!plan?.assignments.length) return;
     setBusy(true);
     try {
-      await applyTeamAssignments(id, plan.assignments);
+      await applyTeamAssignments(id, plan);
+      setTeamPlan(previous=>{const next={...previous};delete next[id];return next;});
       await refresh();
       await loadAllTasks('all');
       setMsg(`Applied ${plan.assignments.length} assignment${plan.assignments.length === 1 ? '' : 's'}.`);
@@ -298,6 +309,7 @@ export function SharedProjects() {
                           ></span>
                           <span style={{ flex: 1, fontFamily: 'monospace', opacity: m.actor === me ? 1 : 0.8 }}>
                             {m.actor.slice(0, 8)}{m.actor === me ? ' (you)' : ''}
+                            <small style={{display:'block'}}>{availabilityStatus(m.availability,getLocalDateString())==='known'?'Availability shared':availabilityStatus(m.availability,getLocalDateString())==='stale'?'Availability expired':'Availability not shared'}</small>
                           </span>
                           {isOwner && m.actor !== me ? (
                             <>
@@ -346,6 +358,7 @@ export function SharedProjects() {
                         <span style={{ fontSize: '.68rem', letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--text-d)', flex: 1 }}>
                           Team plan <span className="opt-tag">today</span>
                         </span>
+                        <button className="btn-soft" onClick={()=>handleAvailability(s.id)} disabled={busy}>Share my busy times</button>
                         <button className="btn-soft" onClick={() => handleTeamPlan(s.id)} disabled={busy}>
                           <i className="fa-solid fa-people-arrows"></i> Balance workload
                         </button>
@@ -353,6 +366,8 @@ export function SharedProjects() {
 
                       {teamPlan[s.id] && (
                         <div style={{ marginTop: '8px' }}>
+                          {teamPlan[s.id].unavailable.map(m=><p key={m.actor} role="status">{m.actor.slice(0,8)}: {m.reason}. Excluded from automatic assignments.</p>)}
+                          {teamPlan[s.id].unroutable.length>0 && <p role="status">{teamPlan[s.id].unroutable.length} task(s) remain unassigned or cannot be planned with their current assignee. Review capacity and membership.</p>}
                           <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
                             {teamPlan[s.id].loads.map((l) => {
                               const pct = l.capacity_min > 0 ? Math.min(100, Math.round((l.scheduled_min / l.capacity_min) * 100)) : 0;
@@ -371,13 +386,14 @@ export function SharedProjects() {
                               );
                             })}
                           </ul>
+                          {teamPlan[s.id].assignments.length>0 && <ul aria-label="Proposed assignments">{teamPlan[s.id].assignments.map(a=><li key={a.task_id}>{teamPlan[s.id].taskTitles[a.task_id]} → {a.actor.slice(0,8)}</li>)}</ul>}
                           {teamPlan[s.id].assignments.length > 0 && (
                             <button className="btn-soft" style={{ marginTop: '8px' }} onClick={() => handleApplyAssignments(s.id)} disabled={busy}>
                               <i className="fa-solid fa-check"></i> Apply {teamPlan[s.id].assignments.length} assignment{teamPlan[s.id].assignments.length === 1 ? '' : 's'}
                             </button>
                           )}
                           <small className="form-hint" style={{ display: 'block', marginTop: '4px' }}>
-                            Teammates use standard hours until calendar sharing lands. {fmtClock(9 * 60)}–{fmtClock(17 * 60)} default.
+                            Only fresh, explicitly shared availability is used. Busy interval times and working hours are shared without event titles. Review assignments before applying; schedules are previews, not calendar reservations.
                           </small>
                         </div>
                       )}
@@ -421,7 +437,7 @@ export function SharedProjects() {
         </small>
       </div>
 
-      {msg && <small className="form-hint">{msg}</small>}
+      {msg && <small className="form-hint" role="status">{msg}</small>}
       <small className="form-hint">
         The relay stores only ciphertext. Edits are signed; only roster members with a sufficient role can write —
         unauthorized edits are dropped on every device.

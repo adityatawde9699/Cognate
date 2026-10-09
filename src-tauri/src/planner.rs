@@ -390,11 +390,16 @@ pub struct TeamPlanResult {
 }
 
 fn capacity_of(m: &TeamMember) -> u32 {
-    m.capacity_min.unwrap_or_else(|| {
-        m.work_end_min
-            .unwrap_or(DEFAULT_WORK_END)
-            .saturating_sub(m.work_start_min.unwrap_or(DEFAULT_WORK_START))
-    })
+    let start=m.work_start_min.unwrap_or(DEFAULT_WORK_START);
+    let end=m.work_end_min.unwrap_or(DEFAULT_WORK_END);
+    let mut busy=m.busy.clone();busy.sort_by_key(|b|b.start_min);
+    let mut until=start;let mut occupied=0;
+    for b in busy {
+        let from=start.max(b.start_min).max(until);let to=end.min(b.end_min);
+        occupied+=to.saturating_sub(from);until=until.max(to);
+    }
+    let available=end.saturating_sub(start).saturating_sub(occupied);
+    available.min(m.capacity_min.unwrap_or(available))
 }
 
 /// Balancing order: deadline ↑, priority/importance ↓, longer-first, id.
@@ -405,6 +410,19 @@ fn by_priority(a: &PlanTask, b: &PlanTask) -> std::cmp::Ordering {
         .then(b.importance.cmp(&a.importance))
         .then(dur_of(b).cmp(&dur_of(a)))
         .then(a.id.cmp(&b.id))
+}
+
+pub fn validate_team(req: &TeamPlanRequest) -> Result<(), String> {
+    let mut actors = HashSet::new();
+    if req.members.len() > 200 || req.members.iter().any(|m| m.actor.is_empty() || !actors.insert(&m.actor) || m.capacity_min.is_some_and(|n|n>1440)) {
+        return Err("Invalid team members or capacity.".into());
+    }
+    let tasks = req.tasks.iter().map(|t|t.task.clone()).collect::<Vec<_>>();
+    validate(&PlanRequest {date:req.date.clone(),work_start_min:DEFAULT_WORK_START,work_end_min:DEFAULT_WORK_END,tasks:tasks.clone(),busy:vec![],energy_curve:vec![]})?;
+    for m in &req.members {
+        validate(&PlanRequest {date:req.date.clone(),work_start_min:m.work_start_min.unwrap_or(DEFAULT_WORK_START),work_end_min:m.work_end_min.unwrap_or(DEFAULT_WORK_END),tasks:tasks.clone(),busy:m.busy.clone(),energy_curve:vec![]})?;
+    }
+    Ok(())
 }
 
 pub fn plan_team(req: &TeamPlanRequest) -> TeamPlanResult {
@@ -425,6 +443,7 @@ pub fn plan_team(req: &TeamPlanRequest) -> TeamPlanResult {
     let mut load: HashMap<String, u32> = members.iter().map(|m| (m.actor.clone(), 0u32)).collect();
     let mut assignments: Vec<TeamAssignment> = Vec::new();
 
+    let mut unroutable=Vec::new();
     // Phase 1a — honour explicit assignments.
     let mut free: Vec<TeamPlanTask> = Vec::new();
     for t in &req.tasks {
@@ -433,7 +452,8 @@ pub fn plan_team(req: &TeamPlanRequest) -> TeamPlanResult {
                 *load.get_mut(a).unwrap() += dur_of(&t.task);
                 buckets.get_mut(a).unwrap().push(t.clone());
             }
-            _ => free.push(t.clone()),
+            Some(_) => unroutable.push(t.task.id.clone()),
+            None => free.push(t.clone()),
         }
     }
 
@@ -443,6 +463,7 @@ pub fn plan_team(req: &TeamPlanRequest) -> TeamPlanResult {
         let d = dur_of(&t.task);
         let pick = members
             .iter()
+            .filter(|m|load[&m.actor].saturating_add(d)<=capacity_of(m))
             .min_by(|a, b| {
                 let aa = load[&a.actor] + d;
                 let ba = load[&b.actor] + d;
@@ -450,9 +471,8 @@ pub fn plan_team(req: &TeamPlanRequest) -> TeamPlanResult {
                 let bf = u8::from(ba > capacity_of(b));
                 af.cmp(&bf).then(aa.cmp(&ba)).then(a.actor.cmp(&b.actor))
             })
-            .unwrap()
-            .actor
-            .clone();
+            .map(|m|m.actor.clone());
+        let Some(pick)=pick else {unroutable.push(t.task.id.clone());continue;};
         *load.get_mut(&pick).unwrap() += d;
         assignments.push(TeamAssignment { task_id: t.task.id.clone(), actor: pick.clone() });
         buckets.get_mut(&pick).unwrap().push(t);
@@ -486,7 +506,7 @@ pub fn plan_team(req: &TeamPlanRequest) -> TeamPlanResult {
         by_member.insert(m.actor.clone(), result);
     }
 
-    TeamPlanResult { by_member, loads, assignments, unroutable: vec![] }
+    TeamPlanResult { by_member, loads, assignments, unroutable }
 }
 
 #[cfg(test)]
@@ -702,6 +722,19 @@ mod tests {
         let req = TeamPlanRequest { date: "2026-06-25".into(), members: vec![], tasks: vec![ttask("t1", 60, None)] };
         let out = plan_team(&req);
         assert_eq!(out.unroutable, vec!["t1".to_string()]);
+    }
+    #[test]
+    fn team_busy_union_and_missing_assignee_are_not_available_capacity() {
+        let mut member=tmember("A");member.work_start_min=Some(540);member.work_end_min=Some(1020);
+        member.busy=vec![BusyBlock{start_min:540,end_min:600,title:"".into()},BusyBlock{start_min:570,end_min:630,title:"".into()}];
+        let req=TeamPlanRequest{date:"2026-10-09".into(),members:vec![member],tasks:vec![ttask("large",480,None),ttask("orphan",30,Some("removed"))]};
+        validate_team(&req).unwrap();let out=plan_team(&req);
+        assert_eq!(out.loads[0].capacity_min,390);assert!(out.assignments.is_empty());assert_eq!(out.unroutable,vec!["orphan","large"]);
+    }
+    #[test]
+    fn team_contract_validates_even_without_members() {
+        let req=TeamPlanRequest{date:"invalid".into(),members:vec![],tasks:vec![]};assert!(validate_team(&req).is_err());
+        let req=TeamPlanRequest{date:"2026-10-09".into(),members:vec![tmember("A"),tmember("A")],tasks:vec![]};assert!(validate_team(&req).is_err());
     }
     #[test]
     fn shared_adversarial_planner_contract() {
