@@ -32,6 +32,12 @@ gh release edit v<VERSION> --draft=false --prerelease --latest=false
 
 Do not promote a candidate to stable until the outstanding production roadmap acceptance evidence has been obtained. Do not publish incomplete candidate drafts.
 
+## Published candidate — 2026-10-09
+
+[v3.1.0-rc.6](https://github.com/adityatawde9699/Cognate/releases/tag/v3.1.0-rc.6), tag commit `cc08164`, is published as a prerelease. Implementation commit `f3b7d78` adds R20 saved-plan review, core R21 keyboard/touch planner controls and local R22 availability/assignment workflows. The [tagged workflow](https://github.com/adityatawde9699/Cognate/actions/runs/37970133360) passed all blocking checks and Linux amd64, macOS arm64 and Windows x64 packaging.
+
+All six artifact and trusted-comment updater signatures were independently verified against the embedded public key. All nine manifest entries match the final versioned asset URLs. Downloaded filenames and sizes matched GitHub metadata; `SHA256SUMS` covers all 14 original assets. The published release has 15 assets including checksums, and all public download links, the updater manifest and checksum contents were verified. Stable v3.0.3 remains the latest automatic-update release. Installed-platform, OS signing/notarization and production acceptance remain pending.
+
 ## Published candidate — 2026-10-06
 
 [v3.1.0-rc.5](https://github.com/adityatawde9699/Cognate/releases/tag/v3.1.0-rc.5), tag commit `55a2186`, is published as a prerelease. The [tagged workflow](https://github.com/adityatawde9699/Cognate/actions/runs/37378212787) passed all checks and Linux amd64, macOS arm64 and Windows x64 packaging. Six updater signatures were independently verified against the embedded public key, all nine updater manifest entries matched the uploaded assets, and `SHA256SUMS` covers the 14 original assets. The release has 15 assets including checksums. Stable v3.0.3 remains the latest automatic-update release.
