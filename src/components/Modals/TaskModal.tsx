@@ -185,10 +185,10 @@ export function TaskModal() {
         setTaskModalOpen(false);
       }
     }}>
-      <div ref={panelRef} className="editor-panel" role="dialog" aria-modal="true" aria-label={editingTask ? 'Edit task' : 'New task'} style={{ display: 'flex', flexDirection: 'column', width: '480px', height: '100%', background: '#131316', overflowY: 'hidden' }}>
-        <div className="editor-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 18px', borderBottom: '1px solid rgba(255,255,255,.1)', flexShrink: 0 }}>
+      <div ref={panelRef} className="editor-panel" role="dialog" aria-modal="true" aria-label={editingTask ? 'Edit task' : 'New task'} style={{ display: 'flex', flexDirection: 'column', width: '480px', height: '100%', background: 'var(--bg-1)', overflowY: 'hidden' }}>
+        <div className="editor-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 18px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
           <div className="editor-head-l">
-            <span className="editor-kicker" style={{ color: '#a1a1aa', fontSize: '.82rem' }}>{editingTask ? 'Edit task' : 'New task'}</span>
+            <span className="editor-kicker" style={{ color: 'var(--text-m)', fontSize: '.82rem' }}>{editingTask ? 'Edit task' : 'New task'}</span>
             <span className={`editor-prio-pill ${priorityPreview || 'medium'}`}>
               <span className="p-dot"></span>
               {P_LABEL[priorityPreview] || priorityPreview}
@@ -204,24 +204,26 @@ export function TaskModal() {
           <div style={{ marginBottom: '16px' }}>
             <input
               className="editor-title"
+              aria-label="Task title"
               type="text"
               value={title}
               onChange={e => setTitle(e.target.value)}
               placeholder="What needs doing?"
               autoFocus
-              style={{ display: 'block', width: '100%', minHeight: '44px', fontSize: '1.15rem', fontWeight: 700, color: '#fafafa', background: '#202027', border: '1px solid rgba(255,255,255,.18)', borderRadius: '9px', padding: '12px 14px', boxSizing: 'border-box', outline: 'none', WebkitAppearance: 'none', appearance: 'none' as any }}
+              style={{ display: 'block', width: '100%', minHeight: '44px', fontSize: '1.15rem', fontWeight: 700, color: 'var(--text)', background: 'var(--bg-2)', border: '1px solid rgba(255,255,255,.18)', borderRadius: '9px', padding: '12px 14px', boxSizing: 'border-box', outline: 'none', WebkitAppearance: 'none', appearance: 'none' as any }}
             />
           </div>
 
           <div style={{ marginBottom: '16px' }}>
-            <span style={{ display: 'block', color: '#a1a1aa', fontSize: '.82rem', marginBottom: '6px' }}>Description</span>
+            <span style={{ display: 'block', color: 'var(--text-m)', fontSize: '.82rem', marginBottom: '6px' }}>Description</span>
             <textarea
               className="editor-desc"
+              aria-label="Description"
               rows={4}
               value={description}
               onChange={e => setDescription(e.target.value)}
               placeholder="Add details, context, or a checklist…"
-              style={{ display: 'block', width: '100%', minHeight: '88px', fontSize: '.9rem', color: '#a1a1aa', background: '#202027', border: '1px solid rgba(255,255,255,.18)', borderRadius: '9px', padding: '12px 14px', boxSizing: 'border-box', outline: 'none', resize: 'vertical', WebkitAppearance: 'none', appearance: 'none' as any }}
+              style={{ display: 'block', width: '100%', minHeight: '88px', fontSize: '.9rem', color: 'var(--text-m)', background: 'var(--bg-2)', border: '1px solid rgba(255,255,255,.18)', borderRadius: '9px', padding: '12px 14px', boxSizing: 'border-box', outline: 'none', resize: 'vertical', WebkitAppearance: 'none', appearance: 'none' as any }}
             ></textarea>
           </div>
 
@@ -236,28 +238,30 @@ export function TaskModal() {
             </button>
           </div>
 
-          <div style={{ borderTop: '1px solid rgba(255,255,255,.08)', paddingTop: '12px' }}>
-            <div style={{ fontSize: '.68rem', letterSpacing: '.12em', textTransform: 'uppercase' as const, color: '#71717a', fontWeight: 600, padding: '4px 0 8px' }}>Properties</div>
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: '12px' }}>
+            <div style={{ fontSize: '.68rem', letterSpacing: '.12em', textTransform: 'uppercase' as const, color: 'var(--text-d)', fontWeight: 600, padding: '4px 0 8px' }}>Properties</div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '130px 1fr', alignItems: 'center', gap: '12px', padding: '7px 0' }}>
-              <label style={{ color: '#a1a1aa', fontSize: '.83rem' }}><i className="fa-solid fa-calendar-day" style={{ marginRight: '8px', color: '#71717a' }}></i>Deadline</label>
+            <div style={{ display: 'grid', gridTemplateColumns: '110px minmax(0, 1fr)', alignItems: 'center', gap: '12px', padding: '7px 0' }}>
+              <label style={{ color: 'var(--text-m)', fontSize: '.83rem' }}><i className="fa-solid fa-calendar-day" style={{ marginRight: '8px', color: 'var(--text-d)' }}></i>Deadline</label>
               <input
+                aria-label="Deadline"
                 type="date"
                 value={deadline}
                 onChange={e => setDeadline(e.target.value)}
-                style={{ padding: '9px 12px', fontSize: '.87rem', color: '#fafafa', background: '#202027', border: '1px solid rgba(255,255,255,.18)', borderRadius: '9px', outline: 'none', width: '100%', boxSizing: 'border-box', WebkitAppearance: 'none', appearance: 'none' as any }}
+                style={{ padding: '9px 12px', fontSize: '.87rem', color: 'var(--text)', background: 'var(--bg-2)', border: '1px solid rgba(255,255,255,.18)', borderRadius: '9px', outline: 'none', width: '100%', boxSizing: 'border-box', WebkitAppearance: 'none', appearance: 'none' as any }}
               />
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '130px 1fr', alignItems: 'center', gap: '12px', padding: '7px 0' }}>
-              <label style={{ color: '#a1a1aa', fontSize: '.83rem' }}><i className="fa-solid fa-hashtag" style={{ marginRight: '8px', color: '#71717a' }}></i>Tags</label>
+            <div style={{ display: 'grid', gridTemplateColumns: '110px minmax(0, 1fr)', alignItems: 'center', gap: '12px', padding: '7px 0' }}>
+              <label style={{ color: 'var(--text-m)', fontSize: '.83rem' }}><i className="fa-solid fa-hashtag" style={{ marginRight: '8px', color: 'var(--text-d)' }}></i>Tags</label>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <input
                   type="text"
                   value={tags}
                   onChange={e => setTags(e.target.value)}
+                  aria-label="Tags"
                   placeholder="work, marketing"
-                  style={{ flex: 1, padding: '9px 12px', fontSize: '.87rem', color: '#fafafa', background: '#202027', border: '1px solid rgba(255,255,255,.18)', borderRadius: '9px', outline: 'none', boxSizing: 'border-box', WebkitAppearance: 'none', appearance: 'none' as any }}
+                  style={{ flex: 1, padding: '9px 12px', fontSize: '.87rem', color: 'var(--text)', background: 'var(--bg-2)', border: '1px solid rgba(255,255,255,.18)', borderRadius: '9px', outline: 'none', boxSizing: 'border-box', WebkitAppearance: 'none', appearance: 'none' as any }}
                 />
                 <button type="button" className="btn-ai btn-ai-inline" disabled={!!aiBusy} onClick={handleSuggestTags} style={{ padding: '6px 10px', borderRadius: '8px', fontSize: '.8rem', flexShrink: 0 }}>
                   <i className={`fa-solid ${aiBusy === 'tags' ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'}`}></i>
@@ -266,17 +270,17 @@ export function TaskModal() {
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '130px 1fr', alignItems: 'center', gap: '12px', padding: '7px 0' }}>
-              <label style={{ color: '#a1a1aa', fontSize: '.83rem' }}><i className="fa-solid fa-folder" style={{ marginRight: '8px', color: '#71717a' }}></i>Project</label>
-              <select value={projectId} onChange={e => setProjectId(e.target.value)} style={{ padding: '9px 12px', fontSize: '.87rem', color: '#fafafa', background: '#202027', border: '1px solid rgba(255,255,255,.18)', borderRadius: '9px', outline: 'none', width: '100%', boxSizing: 'border-box', WebkitAppearance: 'none', appearance: 'none' as any }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '110px minmax(0, 1fr)', alignItems: 'center', gap: '12px', padding: '7px 0' }}>
+              <label style={{ color: 'var(--text-m)', fontSize: '.83rem' }}><i className="fa-solid fa-folder" style={{ marginRight: '8px', color: 'var(--text-d)' }}></i>Project</label>
+              <select aria-label="Project" value={projectId} onChange={e => setProjectId(e.target.value)} style={{ padding: '9px 12px', fontSize: '.87rem', color: 'var(--text)', background: 'var(--bg-2)', border: '1px solid rgba(255,255,255,.18)', borderRadius: '9px', outline: 'none', width: '100%', boxSizing: 'border-box', WebkitAppearance: 'none', appearance: 'none' as any }}>
                 <option value="">No project</option>
                 {(projects || []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '130px 1fr', alignItems: 'center', gap: '12px', padding: '7px 0' }}>
-              <label style={{ color: '#a1a1aa', fontSize: '.83rem' }}><i className="fa-solid fa-flag-checkered" style={{ marginRight: '8px', color: '#71717a' }}></i>Milestone</label>
-              <select value={milestoneId} onChange={e => setMilestoneId(e.target.value)} style={{ padding: '9px 12px', fontSize: '.87rem', color: '#fafafa', background: '#202027', border: '1px solid rgba(255,255,255,.18)', borderRadius: '9px', outline: 'none', width: '100%', boxSizing: 'border-box', WebkitAppearance: 'none', appearance: 'none' as any }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '110px minmax(0, 1fr)', alignItems: 'center', gap: '12px', padding: '7px 0' }}>
+              <label style={{ color: 'var(--text-m)', fontSize: '.83rem' }}><i className="fa-solid fa-flag-checkered" style={{ marginRight: '8px', color: 'var(--text-d)' }}></i>Milestone</label>
+              <select aria-label="Milestone" value={milestoneId} onChange={e => setMilestoneId(e.target.value)} style={{ padding: '9px 12px', fontSize: '.87rem', color: 'var(--text)', background: 'var(--bg-2)', border: '1px solid rgba(255,255,255,.18)', borderRadius: '9px', outline: 'none', width: '100%', boxSizing: 'border-box', WebkitAppearance: 'none', appearance: 'none' as any }}>
                 <option value="">No milestone</option>
                 {milestones
                   .filter(m => !m.project_id || !projectId || m.project_id === projectId)
@@ -284,9 +288,9 @@ export function TaskModal() {
               </select>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '130px 1fr', alignItems: 'center', gap: '12px', padding: '7px 0' }}>
-              <label style={{ color: '#a1a1aa', fontSize: '.83rem' }}><i className="fa-solid fa-repeat" style={{ marginRight: '8px', color: '#71717a' }}></i>Repeat</label>
-              <select value={recurrence} onChange={e => setRecurrence(e.target.value as any)} style={{ padding: '9px 12px', fontSize: '.87rem', color: '#fafafa', background: '#202027', border: '1px solid rgba(255,255,255,.18)', borderRadius: '9px', outline: 'none', width: '100%', boxSizing: 'border-box', WebkitAppearance: 'none', appearance: 'none' as any }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '110px minmax(0, 1fr)', alignItems: 'center', gap: '12px', padding: '7px 0' }}>
+              <label style={{ color: 'var(--text-m)', fontSize: '.83rem' }}><i className="fa-solid fa-repeat" style={{ marginRight: '8px', color: 'var(--text-d)' }}></i>Repeat</label>
+              <select aria-label="Repeat" value={recurrence} onChange={e => setRecurrence(e.target.value as any)} style={{ padding: '9px 12px', fontSize: '.87rem', color: 'var(--text)', background: 'var(--bg-2)', border: '1px solid rgba(255,255,255,.18)', borderRadius: '9px', outline: 'none', width: '100%', boxSizing: 'border-box', WebkitAppearance: 'none', appearance: 'none' as any }}>
                 <option value="none">Does not repeat</option>
                 <option value="daily">Daily</option>
                 <option value="weekly">Weekly</option>
@@ -295,13 +299,14 @@ export function TaskModal() {
             </div>
 
             {customFieldDefs.map(f => (
-              <div style={{ display: 'grid', gridTemplateColumns: '130px 1fr', alignItems: 'center', gap: '12px', padding: '7px 0' }} key={f.id}>
-                <label style={{ color: '#a1a1aa', fontSize: '.83rem' }}><i className="fa-solid fa-sliders" style={{ marginRight: '8px', color: '#71717a' }}></i>{f.name}</label>
+              <div style={{ display: 'grid', gridTemplateColumns: '110px minmax(0, 1fr)', alignItems: 'center', gap: '12px', padding: '7px 0' }} key={f.id}>
+                <label style={{ color: 'var(--text-m)', fontSize: '.83rem' }}><i className="fa-solid fa-sliders" style={{ marginRight: '8px', color: 'var(--text-d)' }}></i>{f.name}</label>
                 {f.type === 'select' ? (
                   <select
+                    aria-label={f.name}
                     value={customFields[f.id] || ''}
                     onChange={e => setCustomFields(c => ({ ...c, [f.id]: e.target.value }))}
-                    style={{ padding: '9px 12px', fontSize: '.87rem', color: '#fafafa', background: '#202027', border: '1px solid rgba(255,255,255,.18)', borderRadius: '9px', outline: 'none', width: '100%', boxSizing: 'border-box', WebkitAppearance: 'none', appearance: 'none' as any }}
+                    style={{ padding: '9px 12px', fontSize: '.87rem', color: 'var(--text)', background: 'var(--bg-2)', border: '1px solid rgba(255,255,255,.18)', borderRadius: '9px', outline: 'none', width: '100%', boxSizing: 'border-box', WebkitAppearance: 'none', appearance: 'none' as any }}
                   >
                     <option value="">—</option>
                     {(f.options || []).map(o => <option key={o} value={o}>{o}</option>)}
@@ -309,49 +314,52 @@ export function TaskModal() {
                 ) : (
                   <input
                     type={f.type === 'number' ? 'number' : f.type === 'date' ? 'date' : f.type === 'url' ? 'url' : 'text'}
+                    aria-label={f.name}
                     value={customFields[f.id] || ''}
                     onChange={e => setCustomFields(c => ({ ...c, [f.id]: e.target.value }))}
-                    style={{ padding: '9px 12px', fontSize: '.87rem', color: '#fafafa', background: '#202027', border: '1px solid rgba(255,255,255,.18)', borderRadius: '9px', outline: 'none', width: '100%', boxSizing: 'border-box', WebkitAppearance: 'none', appearance: 'none' as any }}
+                    style={{ padding: '9px 12px', fontSize: '.87rem', color: 'var(--text)', background: 'var(--bg-2)', border: '1px solid rgba(255,255,255,.18)', borderRadius: '9px', outline: 'none', width: '100%', boxSizing: 'border-box', WebkitAppearance: 'none', appearance: 'none' as any }}
                   />
                 )}
               </div>
             ))}
 
             <div style={{ padding: '7px 0' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#a1a1aa', fontSize: '.83rem', marginBottom: '8px' }}>
-                <i className="fa-solid fa-star" style={{ color: '#71717a' }}></i>
-                Importance <span style={{ color: '#34d399', fontFamily: 'monospace', fontSize: '.78rem', marginLeft: '6px' }}>{importance}</span>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-m)', fontSize: '.83rem', marginBottom: '8px' }}>
+                <i className="fa-solid fa-star" style={{ color: 'var(--text-d)' }}></i>
+                Importance <span style={{ color: 'var(--accent)', fontFamily: 'monospace', fontSize: '.78rem', marginLeft: '6px' }}>{importance}</span>
               </label>
               <input
                 type="range"
                 min="1" max="5"
+                aria-label="Importance"
                 value={importance}
                 onChange={e => setImportance(parseInt(e.target.value))}
-                style={{ width: '100%', accentColor: '#34d399' }}
+                style={{ width: '100%', accentColor: 'var(--accent)' }}
               />
             </div>
 
             <div style={{ padding: '7px 0' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#a1a1aa', fontSize: '.83rem', marginBottom: '8px' }}>
-                <i className="fa-solid fa-gauge-high" style={{ color: '#71717a' }}></i>
-                Effort <span style={{ color: '#34d399', fontFamily: 'monospace', fontSize: '.78rem', marginLeft: '6px' }}>{effort}</span>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-m)', fontSize: '.83rem', marginBottom: '8px' }}>
+                <i className="fa-solid fa-gauge-high" style={{ color: 'var(--text-d)' }}></i>
+                Effort <span style={{ color: 'var(--accent)', fontFamily: 'monospace', fontSize: '.78rem', marginLeft: '6px' }}>{effort}</span>
               </label>
               <input
                 type="range"
                 min="1" max="5"
+                aria-label="Effort"
                 value={effort}
                 onChange={e => setEffort(parseInt(e.target.value))}
-                style={{ width: '100%', accentColor: '#34d399' }}
+                style={{ width: '100%', accentColor: 'var(--accent)' }}
               />
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '130px 1fr', alignItems: 'center', gap: '12px', padding: '7px 0' }}>
-              <label style={{ color: '#a1a1aa', fontSize: '.83rem' }}><i className="fa-solid fa-signal" style={{ marginRight: '8px', color: '#71717a' }}></i>Priority</label>
+            <div style={{ display: 'grid', gridTemplateColumns: '110px minmax(0, 1fr)', alignItems: 'center', gap: '12px', padding: '7px 0' }}>
+              <label style={{ color: 'var(--text-m)', fontSize: '.83rem' }}><i className="fa-solid fa-signal" style={{ marginRight: '8px', color: 'var(--text-d)' }}></i>Priority</label>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <strong style={{ color: P_COLOR[priorityPreview] || 'inherit', fontSize: '.9rem', textTransform: 'capitalize' as const }}>
                   {P_LABEL[priorityPreview] || priorityPreview}
                 </strong>
-                <span style={{ fontSize: '.7rem', color: '#71717a' }}>computed</span>
+                <span style={{ fontSize: '.7rem', color: 'var(--text-d)' }}>computed</span>
                 <button type="button" className="btn-ai btn-ai-inline" disabled={!!aiBusy} onClick={handleSuggestPriority} style={{ marginLeft: 'auto', padding: '6px 10px', borderRadius: '8px', fontSize: '.8rem' }}>
                   <i className={`fa-solid ${aiBusy === 'priority' ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'}`}></i>
                   {' '}Suggest
@@ -365,13 +373,13 @@ export function TaskModal() {
           )}
 
           {editingTask && (
-            <p style={{ fontSize: '.74rem', color: '#71717a', paddingTop: '4px' }}>
+            <p style={{ fontSize: '.74rem', color: 'var(--text-d)', paddingTop: '4px' }}>
               Created {new Date(editingTask.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
               {editingTask.pomodoros_spent > 0 && ` · ${editingTask.pomodoros_spent} pomodoros`}
             </p>
           )}
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '16px', paddingTop: '8px' }}>
+          <div className="task-editor-actions">
             <button type="button" className="btn-ghost" onClick={() => setTaskModalOpen(false)} style={{ padding: '10px 18px', borderRadius: '9px', fontSize: '.87rem' }}>Cancel</button>
             <button type="submit" disabled={saving} className="btn-primary" style={{ padding: '10px 18px', borderRadius: '9px', fontSize: '.87rem' }}>{editingTask ? 'Save changes' : 'Create task'}</button>
           </div>

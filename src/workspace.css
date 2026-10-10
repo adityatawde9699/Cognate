@@ -1,0 +1,169 @@
+/* Workspace finish: shared chrome, planner hierarchy, and compact layouts. */
+:root { color-scheme: dark; --radius-m: 12px; }
+[data-theme="light"] { color-scheme: light; --text-d: #706a65; --accent: #0f766e; --accent-strong: #115e59; }
+button:disabled { cursor: not-allowed; }
+.btn-primary:disabled { opacity: .55; transform: none; box-shadow: none; }
+.cmdbar.is-web { cursor: default; }
+.cmd-brand { min-width: calc(var(--sidebar-w) - 20px); }
+.cmd-logo { height: 38px; }
+.cmd-center, .cmd-search input { min-width: 0; }
+.cmd-search { border-radius: 10px; padding: 8px 12px; max-height: 38px; }
+.cmd-right { min-width: auto; }
+.cmd-clear { flex: none; display: grid; place-items: center; min-width: 28px; min-height: 28px; border-radius: 6px; color: var(--text-m); }
+.cmd-clear:hover { background: var(--surface-hover); color: var(--text); }
+.cmd-btn:focus-visible, .nav-btn:focus-visible { outline-offset: -2px; }
+
+/* Operational notices stay legible without dominating the workspace. */
+.app-notice {
+  flex: none; display: flex; align-items: center; gap: 12px;
+  padding: 8px 24px; background: var(--bg-1); border-bottom: 1px solid var(--border);
+  color: var(--text-m); font-size: 12px; line-height: 1.5;
+}
+.app-notice > i { color: var(--accent); }
+.app-notice p { flex: 1; }
+.app-notice .btn-ghost { font-size: 12px; padding: 5px 9px; white-space: nowrap; }
+.app-notice p .btn-ghost { margin-left: 8px; }
+
+.plan-view { padding: 28px 28px 0; }
+.plan-header { flex: none; align-items: center; padding-bottom: 20px; gap: 18px; border: 0; }
+.plan-title { font-size: clamp(28px, 2.4vw, 36px); font-weight: 600; letter-spacing: -.045em; margin: 7px 0 8px; line-height: 1.15; }
+.plan-eyebrow { font-size: 10px; letter-spacing: .14em; }
+.plan-sub { color: var(--text-m); font-size: 12px; flex-wrap: wrap; gap: 8px; }
+.plan-actions { gap: 8px; }
+.plan-actions .btn-ghost, .plan-autoplan { min-height: 38px; }
+.plan-datenav { margin: 0 6px 0 0; }
+.plan-datenav .btn-ghost { min-height: 30px; }
+.plan-toolbox { flex: none; }
+.plan-toolbox > summary { display: none; }
+.plan-tools {
+  flex: none; display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  padding: 10px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+}
+.plan-tools .btn-ghost { display: inline-flex; gap: 7px; align-items: center; padding: 7px 10px; font-size: 12px; border-color: transparent; }
+.plan-tools .btn-ghost i { color: var(--text-d); }
+.plan-tools .plan-inbox { margin-left: auto; }
+.plan-review {
+  flex: none; display: flex; align-items: baseline; gap: 8px; margin: 12px 0;
+  border: 0; background: transparent; padding: 0; color: var(--text-m); font-size: 12px; line-height: 1.6;
+}
+.plan-review.current > i { color: var(--accent); }
+.plan-review.stale > i, .plan-review.invalid > i { color: var(--warning); }
+.plan-action-error { flex: none; padding: 12px 14px; border: 1px solid var(--danger); border-radius: var(--radius); color: var(--danger); background: var(--danger-glow); line-height: 1.5; }
+.plan-view .cos-banner { flex-shrink: 0; }
+.plan-body { gap: 20px; padding-top: 4px; padding-bottom: 20px; grid-template-columns: minmax(0, 1fr) 288px; }
+.plan-section-heading { flex: none; display: flex; align-items: center; justify-content: space-between; padding: 0 2px 12px; }
+.plan-section-heading h2 { font-size: 13px; font-weight: 600; }
+.plan-section-heading span { color: var(--text-d); font-size: 11px; }
+.plan-timeline { background: var(--bg-1); }
+.plan-backlog { background: var(--bg-1); padding: 18px 16px; }
+.plan-backlog h3 { color: var(--text); text-transform: none; letter-spacing: 0; margin-bottom: 6px; }
+.plan-backlog-count { color: var(--text-m); margin-left: auto; }
+.plan-backlog-hint { color: var(--text-d); font-size: 11px; line-height: 1.5; margin-bottom: 16px; }
+.plan-backlog-list { gap: 8px; }
+.plan-backlog-item { gap: 7px; padding: 12px; background: var(--surface); }
+button.plan-backlog-title { font-size: 13px; font-weight: 500; line-height: 1.5; white-space: normal; }
+.plan-backlog-meta { flex-wrap: wrap; line-height: 1.45; color: var(--text-m); }
+.plan-overflow-tag { font-weight: 400; }
+.plan-block:focus-within .plan-pin, .plan-block:focus-within .plan-grip { opacity: 1; }
+.plan-pin { opacity: .65; }
+.plan-block-why, .plan-block-time { color: var(--text-m); }
+.plan-move-dialog { background: var(--bg-1); box-shadow: var(--shadow-lg); }
+.plan-move-dialog h2 { font-size: 22px; letter-spacing: -.025em; margin-bottom: 20px; }
+.plan-move-dialog label { color: var(--text-m); font-size: 13px; }
+.plan-move-dialog .plan-actions { justify-content: flex-end; margin-top: 10px; }
+
+/* Retain the opaque WebKit input surfaces; let the panel follow its theme. */
+.editor-panel { color: var(--text); }
+.editor-panel form { min-height: 0; }
+.editor-panel input:not([type="range"]), .editor-panel textarea, .editor-panel select { min-width: 0; }
+.editor-panel .ai-actions { flex-wrap: wrap; }
+.editor-panel select {
+  padding-right: 30px !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='m2 2 4 4 4-4' fill='none' stroke='%23787880' stroke-width='1.5'/%3E%3C/svg%3E") !important;
+  background-repeat: no-repeat; background-position: right 12px center;
+}
+.task-editor-actions {
+  position: sticky; bottom: -22px; display: flex; justify-content: flex-end; gap: 10px;
+  background: var(--bg-1); border-top: 1px solid var(--border);
+  padding: 16px 0; margin-top: 22px; z-index: 1;
+}
+[data-theme="light"] .btn-primary, [data-theme="light"] .btn-add { color: #fff; }
+[data-theme="light"] .plan-block { background: #fff; }
+[data-theme="light"] .plan-sub, [data-theme="light"] .plan-hour-label { color: var(--text-m); }
+
+/* Tablet: allow both the timetable and backlog to scroll into view. */
+@media (min-width: 769px) and (max-width: 1100px) {
+  .plan-view { overflow-y: auto; }
+  .plan-body { flex: none; overflow: visible; grid-template-columns: 1fr; }
+  .plan-timeline-wrap { height: 520px; }
+  .plan-backlog { height: auto; overflow: visible; }
+  .plan-backlog-list { flex: none; overflow: visible; }
+}
+
+.mobile-nav { display: none; }
+@media (max-width: 768px) {
+  .cmdbar { height: auto; min-height: 104px; padding: 10px 14px; display: grid; grid-template-columns: 1fr auto; gap: 8px 12px; }
+  .cmd-brand { min-width: 0; }
+  .cmd-logo { height: 32px; }
+  .cmd-right { grid-column: 2; grid-row: 1; gap: 4px; }
+  .cmd-btn { width: 36px; height: 36px; }
+  .cmd-center { grid-column: 1 / -1; grid-row: 2; }
+  .cmd-search { width: 100%; max-height: none; min-height: 40px; }
+  .cmd-search input { font-size: 14px; }
+  .cmd-kbd { display: none; }
+  .app-notice { flex-wrap: wrap; gap: 4px 8px; padding: 8px 14px; font-size: 11px; }
+  .app-notice > i { display: none; }
+  .app-notice p { flex-basis: 100%; }
+  .app-notice .btn-ghost { font-size: 11px; padding: 4px 6px; }
+  .app-notice p .btn-ghost { margin-left: 0; }
+  .app-notice > .btn-ghost { display: none; }
+  .plan-view { padding: 20px 16px 0; overflow-y: auto; }
+  .plan-header { align-items: flex-start; gap: 16px; padding-bottom: 16px; }
+  .plan-heading { width: 100%; }
+  .plan-title { font-size: 30px; }
+  .plan-actions { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .plan-datenav { grid-column: 1 / -1; margin: 0; width: 100%; }
+  .plan-datenav .btn-ghost:nth-child(2) { flex: 1; }
+  .plan-actions .btn-ghost, .plan-actions .btn-primary { min-height: 44px; justify-content: center; }
+  .plan-datenav .btn-ghost { min-height: 36px; }
+  .plan-toolbox > summary { display: flex; align-items: center; gap: 8px; min-height: 44px; cursor: pointer; font-size: 12px; color: var(--text-m); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); list-style: none; }
+  .plan-toolbox > summary::-webkit-details-marker { display: none; }
+  .plan-toolbox > summary span { margin-left: auto; font-size: 11px; color: var(--text-d); }
+  .plan-toolbox > summary i { font-size: 10px; }
+  .plan-toolbox[open] > summary i { transform: rotate(180deg); }
+  .plan-tools { gap: 0; border-top: 0; }
+  .plan-tools .btn-ghost { min-height: 40px; padding: 8px; font-size: 11px; }
+  .plan-tools .plan-inbox { margin-left: 0; }
+  .plan-review { font-size: 11px; }
+  .plan-body { display: flex; flex-direction: column; flex: none; overflow: visible; gap: 16px; }
+  .plan-timeline-wrap { height: 480px; flex: none; }
+  .plan-backlog { flex: none; height: auto; }
+  .plan-backlog-list { flex: none; overflow: visible; }
+  .plan-move-dialog .plan-actions { display: flex; }
+  .layout { padding-bottom: 0; }
+  .mobile-nav {
+    position: static; display: flex; flex: none; align-items: center; justify-content: space-around;
+    height: auto; min-height: 64px; padding: 6px 8px max(6px, env(safe-area-inset-bottom));
+    background: var(--bg-1); border-top: 1px solid var(--border); z-index: 40;
+  }
+  .mobile-nav-btn { min-height: 48px; min-width: 0; font-size: 10px; gap: 5px; border-radius: 10px; }
+  .mobile-nav-btn i { font-size: 16px; }
+  .mobile-nav-btn.active { background: var(--accent-muted); color: var(--accent); }
+  .mobile-capture i { background: var(--accent); color: var(--bg-0); padding: 7px; border-radius: 9px; margin-top: -4px; }
+  .toast { bottom: calc(96px + env(safe-area-inset-bottom)); left: 16px; right: 16px; }
+  .canvas-header { flex-wrap: wrap; padding: 20px 16px 14px; gap: 14px; }
+  .canvas-title { font-size: 28px; }
+  .canvas-sub { font-size: 13px; }
+  .canvas-actions { width: 100%; justify-content: space-between; gap: 8px; }
+  .view-switch { min-width: 0; }
+  .view-tab { padding: 8px; min-height: 40px; min-width: 34px; }
+  .canvas-deck { margin: 0 16px 8px; padding: 12px; gap: 12px; }
+  .deck-stats { gap: 20px; }
+  .deck-stat .l { font-size: 9px; letter-spacing: .05em; }
+  .board { padding: 0 4px 12px; display: block; overflow-y: auto; }
+  .col { min-height: auto; }
+  .task-list { overflow: visible; flex: none; }
+  .editor-panel { width: 100vw !important; max-width: 100vw; }
+  .editor-panel input:not([type="range"]), .editor-panel textarea, .editor-panel select { font-size: 16px !important; }
+  .task-editor-actions .btn-primary, .task-editor-actions .btn-ghost { min-height: 44px; }
+}

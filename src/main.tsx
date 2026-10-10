@@ -5,6 +5,7 @@ import '@fontsource-variable/geist';
 import '@fontsource-variable/geist-mono';
 import '@fortawesome/fontawesome-free/css/all.min.css';
 import './style.css';
+import './workspace.css';
 import App from './App';
 import { migrateSecrets } from './utils/secrets';
 import { registerServiceWorker } from './utils/pwa';

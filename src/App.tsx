@@ -4,6 +4,7 @@ import { MilestoneStrip } from './components/MilestoneStrip';
 import { PlanView } from './components/PlanView';
 import { Titlebar } from './components/Titlebar';
 import { Sidebar } from './components/Sidebar';
+import { MobileNav } from './components/MobileNav';
 import { TaskModal } from './components/Modals/TaskModal';
 import { CommandPalette } from './components/CommandPalette';
 import { FocusMode } from './components/FocusMode';
@@ -196,6 +197,8 @@ function App() {
           </Suspense>
         </main>
       </div>
+
+      <MobileNav />
 
       {/* Overlays — heavy ones are code-split and mounted only when opened. */}
       <Suspense fallback={null}>

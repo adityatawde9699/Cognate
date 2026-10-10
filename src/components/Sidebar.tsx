@@ -80,6 +80,7 @@ export function Sidebar() {
           <button
             key={item.id}
             className={`nav-btn ${currentFilter === item.id ? 'active' : ''}`}
+            aria-current={currentFilter === item.id ? 'page' : undefined}
             onClick={() => setFilter(item.id)}
           >
             <i className={`fa-solid ${item.icon}`}></i>

@@ -61,3 +61,6 @@ server/target
 # Relay durable store (runtime data)
 server/relay-data.json
 server/relay-data.json.tmp
+
+# Local visual-review artifacts
+/output/playwright/

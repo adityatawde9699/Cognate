@@ -82,8 +82,9 @@ export function PlanView() {
   // the day fills the container when it can, and scrolls when it can't.
   const [containerH, setContainerH] = useState(0);
   const [narrow,setNarrow]=useState(false);
+  const [toolsOpen,setToolsOpen]=useState(false);
   useEffect(()=>{
-    const media=window.matchMedia('(max-width: 760px)');
+    const media=window.matchMedia('(max-width: 768px)');
     const update=()=>setNarrow(media.matches);update();media.addEventListener('change',update);
     return ()=>media.removeEventListener('change',update);
   },[]);
@@ -371,8 +372,6 @@ export function PlanView() {
 
   return (
     <section className="plan-view" aria-label="Plan">
-      <p className={`plan-review ${review?.state || 'loading'}`} role="status">{review?.message || 'Checking saved plan…'}</p>
-      {actionError && <p className="plan-action-error" role="alert">{actionError}</p>}
       <header className="plan-header">
         <div className="plan-heading">
           {calendarStatus.length>0 && <p role="status">{calendarStatus.join(' ')}</p>}
@@ -387,13 +386,21 @@ export function PlanView() {
           </p>
         </div>
         <div className="plan-actions">
-          <button className="btn-ghost" onClick={()=>setTaskModalOpen(true)}>Capture task</button>
-          <button className="btn-ghost" onClick={()=>useStore.getState().setFilter('all')}>Review inbox</button>
           <div className="plan-datenav">
             <button className="btn-ghost" disabled={planning} onClick={() => setDate(shiftDate(date, -1))} aria-label="Previous day"><i className="fa-solid fa-chevron-left"></i></button>
             <button className="btn-ghost" disabled={planning} onClick={() => setDate(todayStr())}>Today</button>
             <button className="btn-ghost" disabled={planning} onClick={() => setDate(shiftDate(date, 1))} aria-label="Next day"><i className="fa-solid fa-chevron-right"></i></button>
           </div>
+          <button className="btn-ghost plan-capture" onClick={()=>setTaskModalOpen(true)}><i className="fa-solid fa-plus" aria-hidden="true" /> Capture task</button>
+          <button className="btn-primary plan-autoplan" onClick={handleAutoPlan} disabled={planning}>
+            <i className={`fa-solid ${planning ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'}`}></i>
+            <span>{planning ? 'Planning…' : 'Auto-plan'}</span>
+          </button>
+        </div>
+      </header>
+      <details className="plan-toolbox" open={!narrow || toolsOpen} onToggle={e=>{if(narrow)setToolsOpen(e.currentTarget.open);}}>
+        <summary>Planning tools <span>Calendar & AI</span><i className="fa-solid fa-chevron-down" aria-hidden="true" /></summary>
+        <div className="plan-tools" aria-label="Planning tools">
           <button className="btn-ghost" onClick={addBusy} title="Add a busy block"><i className="fa-solid fa-plus"></i> Busy time</button>
           <button className="btn-ghost plan-sync" onClick={handleSyncCalendar} disabled={syncing} title="Subscribe to or import a calendar (.ics)">
             <i className={`fa-solid ${syncing ? 'fa-spinner fa-spin' : 'fa-calendar-plus'}`}></i>
@@ -407,12 +414,14 @@ export function PlanView() {
             <i className={`fa-solid ${briefing ? 'fa-spinner fa-spin' : 'fa-comment-dots'}`}></i>
             <span>{briefing ? 'Briefing…' : 'Brief me'}</span>
           </button>
-          <button className="btn-primary plan-autoplan" onClick={handleAutoPlan} disabled={planning}>
-            <i className={`fa-solid ${planning ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'}`}></i>
-            <span>{planning ? 'Planning…' : 'Auto-plan'}</span>
-          </button>
+          <button className="btn-ghost plan-inbox" onClick={()=>useStore.getState().setFilter('all')}>Review inbox <i className="fa-solid fa-arrow-right" aria-hidden="true" /></button>
         </div>
-      </header>
+      </details>
+      <p className={`plan-review ${review?.state || 'loading'}`} role="status">
+        <i className={`fa-solid ${review?.state === 'current' ? 'fa-circle-check' : review?.state === 'stale' || review?.state === 'invalid' ? 'fa-circle-exclamation' : 'fa-circle-info'}`} aria-hidden="true" />
+        <span>{review?.message || 'Checking saved plan…'}</span>
+      </p>
+      {actionError && <p className="plan-action-error" role="alert">{actionError}</p>}
 
       {note && (
         <div className="plan-note" role="status">
@@ -426,6 +435,7 @@ export function PlanView() {
 
       <div className="plan-body">
         <div className="plan-timeline-wrap" ref={timelineRef}>
+        <div className="plan-section-heading"><h2>Schedule</h2><span>Local time</span></div>
         <div className="plan-timeline" ref={scrollerRef}>
         <div className="plan-canvas" style={{ height: `${dayHeight}px` }}>
           {hours.map((m) => (
@@ -525,6 +535,7 @@ export function PlanView() {
 
         <aside className="plan-backlog">
           <h3>Backlog <span className="plan-backlog-count">{unplanned.length}</span></h3>
+          <p className="plan-backlog-hint">Tasks waiting for a place in your day.</p>
           {unplanned.length === 0 ? (
             <p className="plan-backlog-empty">Everything's on the calendar. ✨</p>
           ) : (

@@ -55,3 +55,9 @@ Typecheck, **299 Vitest tests across 44 files**, **30 Chromium browser tests**, 
 Team tests use real independent device stores, signed operations and a fake immutable-batch relay. They cover opt-in/title-free availability, unknown/expired availability, member-bound signatures, owner/editor/viewer/revoked-device journeys, busy union capacity, departed assignees, atomic quota rollback, stale tasks/calendar, cross-project rejection and altered proposal contents. A browser journey checks roster diagnostics, assignment preview, stale-calendar rejection and successful apply. A real SQLite transaction test rejects calendar changes before any assignment history commits. These tests do not establish deployed-relay or installed OS acceptance.
 
 The [rc.6 tagged workflow](https://github.com/adityatawde9699/Cognate/actions/runs/37970133360) passed the full blocking test workflow (including relay checks) and all three platform packaging jobs. Published artifacts received independent updater signature, manifest, checksum, size and public-link verification; see [RELEASING.md](RELEASING.md). Packaging success does not replace installed-app acceptance.
+
+## Workspace polish run — 2026-10-10
+
+Typecheck, **299 Vitest tests**, **30 Chromium browser tests**, and **two production PWA tests** passed during this polish pass. Manual Chromium checks covered widths of 320, 390, 768, 900 and 1440 pixels without document overflow; mobile navigation, task-list scrolling, keyboard expansion of planning tools, capture, and search from the planner with clearing were checked. Light/dark planner and light task-editor screenshots were reviewed. Mobile notifications sit above the navigation bar.
+
+These checks cover browser layouts and interactions, not a complete accessibility audit or installed native webview acceptance. This polish pass follows the rc.6 release; its changes are not part of the published rc.6 artifacts.

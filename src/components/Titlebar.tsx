@@ -5,6 +5,7 @@ import { useTheme } from '../hooks/useTheme';
 import { queryToPredicate } from '../services/aiService';
 import { toast } from '../utils/toast';
 import { Logo } from './Logo';
+import { IS_TAURI } from '../db';
 
 export function Titlebar() {
   const { theme, toggleTheme } = useTheme();
@@ -39,7 +40,7 @@ export function Titlebar() {
     }
   };
 
-  const clearAiQuery = () => { setAiQuery(null); setValue(''); };
+  const clearAiQuery = () => { setAiQuery(null); setSearchQuery(''); setValue(''); };
 
   // Frameless Tauri windows do not get native drag behavior automatically on
   // every platform/webview. Start the drag explicitly from non-interactive
@@ -65,7 +66,7 @@ export function Titlebar() {
 
   return (
     <header
-      className="cmdbar"
+      className={`cmdbar ${IS_TAURI ? 'is-native' : 'is-web'}`}
       data-tauri-drag-region
       onMouseDown={(e) => { if (e.button === 0) void dragWindow(e); }}
       onDoubleClick={(e) => {
@@ -82,13 +83,22 @@ export function Titlebar() {
           <i className="fa-solid fa-magnifying-glass"></i>
           <input
             id="searchInput"
+            aria-label="Search tasks"
             type="search"
             placeholder="Search tasks, or ask in plain English…"
             autoComplete="off"
             value={value}
-            onChange={(e) => { setValue(e.target.value); setSearchQuery(e.target.value); }}
+            onChange={(e) => {
+              const query = e.target.value;
+              setValue(query);
+              setSearchQuery(query);
+              if (query.trim() && ['plan', 'dashboard'].includes(useStore.getState().currentFilter)) setFilter('all');
+            }}
             onKeyDown={(e) => { if (e.key === 'Enter') runAiQuery(); }}
           />
+          {value && <button className="cmd-clear" aria-label="Clear search" title="Clear search" onClick={clearAiQuery}>
+            <i className="fa-solid fa-xmark" aria-hidden="true" />
+          </button>}
           <button
             className="cmd-ask"
             title="Ask AI to filter (Enter)"
@@ -120,17 +130,19 @@ export function Titlebar() {
           <i className="fa-solid fa-gear"></i>
         </button>
 
-        <span className="cmd-sep" aria-hidden="true"></span>
+        {IS_TAURI && (<>
+          <span className="cmd-sep" aria-hidden="true"></span>
 
-        <button className="cmd-btn wc" title="Minimize" aria-label="Minimize" onClick={() => winAction((w) => w.minimize())}>
-          <i className="fa-solid fa-minus"></i>
-        </button>
-        <button className="cmd-btn wc" title="Maximize" aria-label="Maximize" onClick={toggleWindowSize}>
-          <i className="fa-regular fa-square"></i>
-        </button>
-        <button className="cmd-btn wc danger" title="Close to tray" aria-label="Close to tray" onClick={() => winAction((w) => w.close())}>
-          <i className="fa-solid fa-xmark"></i>
-        </button>
+          <button className="cmd-btn wc" title="Minimize" aria-label="Minimize" onClick={() => winAction((w) => w.minimize())}>
+            <i className="fa-solid fa-minus"></i>
+          </button>
+          <button className="cmd-btn wc" title="Maximize" aria-label="Maximize" onClick={toggleWindowSize}>
+            <i className="fa-regular fa-square"></i>
+          </button>
+          <button className="cmd-btn wc danger" title="Close to tray" aria-label="Close to tray" onClick={() => winAction((w) => w.close())}>
+            <i className="fa-solid fa-xmark"></i>
+          </button>
+        </>)}
       </div>
     </header>
   );
