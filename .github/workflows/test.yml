@@ -119,7 +119,7 @@ jobs:
 
       - name: Exercise real Linux webview, keychain and crash recovery
         run: |
-          dbus-run-session -- bash -c 'eval "$(printf "" | gnome-keyring-daemon --unlock --components=secrets)"; xvfb-run -a npm run test:native'
+          dbus-run-session -- xvfb-run -a bash -c 'eval "$(printf "" | gnome-keyring-daemon --unlock --components=secrets)"; dbus-update-activation-environment --all; npm run test:native'
 
       - name: Upload reliability and measurement evidence
         if: ${{ !cancelled() }}

@@ -164,7 +164,8 @@ async fn snapshot(source: &Path, destination: &Path) -> Result<(), String> {
     dst.close().await.map_err(|e| e.to_string())?;
     src.close().await.map_err(|e| e.to_string())?;
     result?;
-    fs::File::open(&temporary).and_then(|file| file.sync_all()).map_err(|e| format!("snapshot sync failed: {e}"))?;
+    fs::OpenOptions::new().write(true).open(&temporary)
+        .and_then(|file| file.sync_all()).map_err(|e| format!("snapshot sync failed: {e}"))?;
     fs::rename(&temporary, destination).map_err(|e| format!("cannot publish snapshot: {e}"))?;
     #[cfg(unix)]
     fs::File::open(destination.parent().ok_or("snapshot directory unavailable")?)

@@ -47,7 +47,8 @@ try {
   await wait(async()=>{const response=await fetch('http://127.0.0.1:4450/status');return response.ok;});
   await launch();
   checks.push({check:'webview-and-profile',passed:true});
-  const health=await invoke('desktop_health'); checks.push(...health); assert(health.every(c=>c.passed),'Desktop integration probe failed');
+  const health=await invoke('desktop_health'); checks.push(...health);
+  assert(health.every(c=>c.passed),`Desktop integration probe failed: ${JSON.stringify(health)}`);
   await click('.plan-capture');
   const title=await element('input[aria-label="Task title"]');
   await request('POST',`/session/${session}/element/${key(title)}/value`,{text:'Native smoke task',value:[...'Native smoke task']});
