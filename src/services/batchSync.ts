@@ -1,5 +1,6 @@
 /** Durable, immutable sync batches. The operation log itself is the outbox:
  * unacknowledged local operations are never removed when a request fails. */
+import {failureCode} from './diagnostics';
 import { getSetting, setSetting,loadOps } from '../db';
 import { canonicalJson, validateOps, type Op } from './oplog';
 import { getIdentity } from './identity';
@@ -78,7 +79,7 @@ export async function pushBatches(session:BatchSession,ops:Op[]):Promise<number>
       await save(scope,state);
     }
     return pushed;
-  } catch(error) {state.lastError=error instanceof Error?error.message:String(error);state.failures=(state.failures ?? 0)+1;state.retryAt=Date.now()+Math.min(300000,1000*2**Math.min(state.failures,9));await save(scope,state);throw error;}
+  } catch(error) {state.lastError=failureCode(error);state.failures=(state.failures ?? 0)+1;state.retryAt=Date.now()+Math.min(300000,1000*2**Math.min(state.failures,9));await save(scope,state);throw error;}
 }
 /** Commit projection before advancing the cursor. A crash in between replays
  * idempotently; malformed/decryption/authorization failures never skip data. */
@@ -114,7 +115,7 @@ export async function pullBatches<T>(session:BatchSession,admit:(archive:SignedB
       if(!incoming.length) break;
     }
     return {batches:count,result:result!};
-  } catch(error) {state.lastError=error instanceof Error?error.message:String(error);state.failures=(state.failures ?? 0)+1;state.retryAt=Date.now()+Math.min(300000,1000*2**Math.min(state.failures,9));await save(scope,state);throw error;}
+  } catch(error) {state.lastError=failureCode(error);state.failures=(state.failures ?? 0)+1;state.retryAt=Date.now()+Math.min(300000,1000*2**Math.min(state.failures,9));await save(scope,state);throw error;}
 }
 
 export async function checkRetryWindow(room:string,url:string):Promise<void> {

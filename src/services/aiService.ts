@@ -8,6 +8,9 @@ import { getSetting } from '../db';
 import { getSecret } from '../utils/secrets';
 import { Task } from '../store';
 import type { QuickAddAIFields } from './nlQuickAdd';
+import { aiEndpoint, isLocalProvider } from './privateAi';
+import { abortable, withAiRequest } from './aiRequests';
+import * as valid from './aiValidation';
 
 /** Providers that run locally and don't require an API key. */
 const LOCAL_PROVIDERS = ['ollama', 'llamacpp', 'custom'];
@@ -23,16 +26,13 @@ const DEFAULT_MODELS: Record<string, string> = {
 };
 
 /** Low-level call into the Rust backend. */
-async function generate(system: string, prompt: string, maxTokens?: number): Promise<string> {
+export interface EstimateProvenance { provider: string; model: string; local: boolean; estimated_at: string }
+async function generate(system: string, prompt: string, maxTokens?: number, provenance?: (info: EstimateProvenance) => void): Promise<string> {
   if (!(window as any).__TAURI_INTERNALS__) {
     throw new Error('AI features require the desktop app (Tauri).');
   }
 
   const provider = (await getSetting('ai_provider', 'anthropic')) || 'anthropic';
-  const apiKey = await getSecret('ai_api_key');
-  if (!apiKey && !LOCAL_PROVIDERS.includes(provider)) {
-    throw new Error('No API key set. Add one in Settings → AI.');
-  }
   // Older profiles may have an empty model even after selecting a provider.
   // Supply the same safe defaults shown in Settings so estimation works
   // without requiring a manual re-save of the provider field.
@@ -40,23 +40,33 @@ async function generate(system: string, prompt: string, maxTokens?: number): Pro
   const model = configuredModel || DEFAULT_MODELS[provider] || '';
   const baseUrl = await getSetting('ai_base_url', '');
 
-  const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<string>('ai_generate', {
-    args: {
-      apiKey,
-      provider,
-      baseUrl: baseUrl || null,
-      model: model || null,
-      system,
-      prompt,
-      maxTokens: maxTokens ?? null,
-    },
+  const endpoint = aiEndpoint(provider, baseUrl || '');
+  return withAiRequest({ provider, model, endpoint, system, prompt }, async signal => {
+    const apiKey = await getSecret('ai_api_key');
+    if (!apiKey && !LOCAL_PROVIDERS.includes(provider)) throw new Error('No API key set. Add one in Settings → AI.');
+    if (signal.aborted) throw new DOMException('AI request cancelled.', 'AbortError');
+    const { invoke } = await import('@tauri-apps/api/core');
+    if (signal.aborted) throw new DOMException('AI request cancelled.', 'AbortError');
+    const requestId = crypto.randomUUID();
+    const cancel = () => { void invoke('ai_cancel', { requestId }).catch(() => {}); };
+    signal.addEventListener('abort', cancel, { once: true });
+    const timeout = setTimeout(cancel, 65_000);
+    try {
+      const result = await abortable(invoke<string>('ai_generate', { args: {
+        requestId, apiKey, provider, baseUrl: endpoint, model: model || null,
+        system, prompt, maxTokens: maxTokens ?? null,
+      } }), signal);
+      const checked = valid.text(result, 65_536);
+      provenance?.({ provider, model: model || 'provider-default', local: isLocalProvider(provider, endpoint), estimated_at: new Date().toISOString() });
+      return checked;
+    } finally { clearTimeout(timeout); signal.removeEventListener('abort', cancel); }
   });
 }
 
 /** Strip code fences / surrounding prose and parse the first JSON value. */
 export function parseJSON<T>(raw: string): T {
-  let s = (raw ?? '').trim();
+  if (typeof raw !== 'string' || raw.length > 65_536) throw valid.invalidAdvice();
+  let s = raw.trim();
   // Remove ```json … ``` or ``` … ``` fences.
   const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
   if (fence) s = fence[1].trim();
@@ -70,14 +80,12 @@ export function parseJSON<T>(raw: string): T {
   // (e.g. a provider that replies "User error" with HTTP 200). Surface *that*
   // instead of a cryptic "Unexpected token" so the cause is obvious.
   if (s[0] !== '{' && s[0] !== '[') {
-    const snippet = (raw ?? '').trim().slice(0, 200) || '(empty response)';
-    throw new Error(`The AI didn't return JSON — it replied: "${snippet}". Check your provider, model, and API key in Settings → AI.`);
+    throw new Error("The AI didn't return JSON. Check your provider, model, and API key in Settings → AI.");
   }
   try {
     return JSON.parse(s) as T;
   } catch {
-    const snippet = (raw ?? '').trim().slice(0, 200);
-    throw new Error(`The AI returned malformed JSON. It replied: "${snippet}". Try again, or switch model in Settings → AI.`);
+    throw new Error('The AI returned malformed JSON. Try again, or switch model in Settings → AI.');
   }
 }
 
@@ -102,18 +110,26 @@ export async function quickAddParseAI(input: string, todayStr = new Date().toISO
     'title must exclude the date/time/tags you extracted.';
   const prompt = `Today is ${todayStr}. Line: "${input}"`;
   try {
-    return await generateJSON<QuickAddAIFields>(system, prompt, 256);
+    const r = valid.object(await generateJSON<unknown>(system, prompt, 256));
+    const output: QuickAddAIFields = {};
+    if (r.title !== undefined) output.title = valid.text(r.title, 500);
+    if (r.deadline !== undefined) output.deadline = valid.date(r.deadline);
+    if (r.startMin != null) output.startMin = valid.integer(r.startMin, 0, 1439);
+    if (r.durationMin != null) output.durationMin = valid.integer(r.durationMin, 1, 1440);
+    if (r.tags !== undefined) output.tags = valid.tags(r.tags, 4);
+    if (r.importance !== undefined) output.importance = valid.integer(r.importance, 1, 5);
+    return output;
   } catch {
     return {}; // AI unavailable / bad response → caller keeps the deterministic parse
   }
 }
 
 /** Generate and parse a JSON response. */
-async function generateJSON<T>(system: string, prompt: string, maxTokens = 2048): Promise<T> {
+async function generateJSON<T>(system: string, prompt: string, maxTokens = 2048, provenance?: (info: EstimateProvenance) => void): Promise<T> {
   const text = await generate(
     system + ' Respond with ONLY valid JSON — no prose, no markdown fences.',
     prompt,
-    maxTokens
+    maxTokens, provenance
   );
   return parseJSON<T>(text);
 }
@@ -240,16 +256,12 @@ export async function generateTasks(projectDescription: string): Promise<NewTask
     '{ "title": string, "description": string (1 sentence), "tags": string[] (lowercase, 0-3), ' +
     '"deadline": "" or "YYYY-MM-DD", "importance": 1-5, "effort": 1-5 }.';
   const prompt = `Today is ${today()}. Project:\n\n${projectDescription}`;
-  const raw = await generateJSON<any[]>(system, prompt, 6144);
-  if (!Array.isArray(raw)) return [];
-  return raw.slice(0, 30).map((t) => ({
-    title: String(t.title || '').trim(),
-    description: String(t.description || '').trim(),
-    tags: Array.isArray(t.tags) ? t.tags.map((x: any) => String(x).trim().toLowerCase()).filter(Boolean) : [],
-    deadline: typeof t.deadline === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(t.deadline) ? t.deadline : '',
-    importance: Math.min(5, Math.max(1, parseInt(t.importance, 10) || 3)),
-    effort: Math.min(5, Math.max(1, parseInt(t.effort, 10) || 3)),
-  })).filter((t) => t.title);
+  return valid.list(await generateJSON<unknown>(system, prompt, 6144), 30).map(value => {
+    const t = valid.object(value);
+    return { title: valid.text(t.title, 500), description: valid.text(t.description, 4000, true),
+      tags: valid.tags(t.tags, 3), deadline: valid.date(t.deadline),
+      importance: valid.integer(t.importance, 1, 5), effort: valid.integer(t.effort, 1, 5) };
+  });
 }
 
 /* ── Phase 2: Auto-tagging ───────────────────────────────── */
@@ -261,9 +273,7 @@ export async function suggestTags(task: {
   const system =
     'You label tasks with concise, reusable tags (single lowercase words or short hyphenated phrases). ' +
     'Return a JSON array of up to 4 tag strings. No "#", no duplicates of existing tags.';
-  const raw = await generateJSON<any[]>(system, taskContext(task), 256);
-  if (!Array.isArray(raw)) return [];
-  return raw.map((t) => String(t).trim().toLowerCase().replace(/^#/, '')).filter(Boolean).slice(0, 4);
+  return valid.tags(await generateJSON<unknown>(system, taskContext(task), 256), 4);
 }
 
 /* ── Phase 2: Predictive deadline alerts ─────────────────── */
@@ -287,12 +297,12 @@ export async function assessDeadlineRisk(
     'flag the at-risk ones. Return a JSON array of { "id": string, "risk": "low"|"med"|"high", "reason": string (<=12 words) }. ' +
     'Only include tasks with med or high risk.';
   const prompt = `Today is ${today()}. Weekly completions: ${velocity || 'none'}.\nTasks:\n${rows.join('\n')}`;
-  const raw = await generateJSON<any[]>(system, prompt, 1024);
-  if (!Array.isArray(raw)) return [];
-  const ids = new Set(open.map((t) => t.id));
-  return raw
-    .filter((r) => r && ids.has(r.id) && (r.risk === 'med' || r.risk === 'high'))
-    .map((r) => ({ id: String(r.id), risk: r.risk, reason: String(r.reason || '').trim() }));
+  const ids = new Set(open.map(t => t.id)), seen = new Set<string>();
+  return valid.list(await generateJSON<unknown>(system, prompt, 1024), open.length).map(value => {
+    const r = valid.object(value), id = valid.uniqueId(r, ids, seen);
+    if (r.risk !== 'med' && r.risk !== 'high') throw valid.invalidAdvice();
+    return { id, risk: r.risk, reason: valid.text(r.reason, 300) };
+  });
 }
 
 /* ── Act 1: Planner advisor (duration + energy estimation) ── */
@@ -301,14 +311,8 @@ export interface SchedulingEstimate {
   id: string;
   duration_min: number;       // rounded to 15-min increments, 15–240
   energy: 'hi' | 'med' | 'lo'; // cognitive demand
+  provenance: EstimateProvenance;
 }
-
-const clampDuration = (n: number): number => {
-  const v = Math.round((Number(n) || 30) / 15) * 15;
-  return Math.min(240, Math.max(15, v));
-};
-const normEnergy = (e: any): 'hi' | 'med' | 'lo' =>
-  e === 'hi' || e === 'high' ? 'hi' : e === 'lo' || e === 'low' ? 'lo' : 'med';
 
 /**
  * Estimate how long each task will take and how much focus it demands, so the
@@ -332,12 +336,17 @@ export async function estimateScheduling(
     'Return a JSON array of { "id": string, "duration_min": number, "energy": "hi"|"med"|"lo" }. ' +
     'Use the effort hint (1-5) as a prior but adjust for the task itself.';
   const prompt = `Tasks:\n${rows.join('\n')}`;
-  const raw = await generateJSON<any[]>(system, prompt, 1024);
-  if (!Array.isArray(raw)) return [];
-  const ids = new Set(tasks.map((t) => t.id));
-  return raw
-    .filter((r) => r && ids.has(r.id))
-    .map((r) => ({ id: String(r.id), duration_min: clampDuration(r.duration_min), energy: normEnergy(r.energy) }));
+  let provenance: EstimateProvenance | undefined;
+  const raw = await generateJSON<unknown>(system, prompt, 1024, info => { provenance = info; });
+  const ids = new Set(tasks.map(t => t.id)), seen = new Set<string>();
+  const estimates = valid.list(raw, tasks.length);
+  if (estimates.length !== tasks.length) throw valid.invalidAdvice();
+  return estimates.map(value => {
+    const r = valid.object(value), id = valid.uniqueId(r, ids, seen);
+    const duration = valid.integer(r.duration_min, 15, 240);
+    if (duration % 15 || !['hi', 'med', 'lo'].includes(String(r.energy)) || !provenance) throw valid.invalidAdvice();
+    return { id, duration_min: duration, energy: r.energy as SchedulingEstimate['energy'], provenance };
+  });
 }
 
 /**
@@ -391,7 +400,17 @@ export async function queryToPredicate(nl: string, knownTags: string[]): Promise
     'Return {} if nothing applies.';
   const prompt = `Today is ${today()}. Known tags: ${knownTags.join(', ') || 'none'}.\nQuery: "${nl}"`;
   const q = await generateJSON<AiQuery>(system, prompt, 512);
-  return q && typeof q === 'object' ? q : {};
+  const row = valid.object(q);
+  const allowed = new Set(['done', 'priority', 'tag', 'hasDeadline', 'overdue', 'dueWithinDays', 'minImportance', 'maxEffort', 'untouched', 'textIncludes']);
+  for (const [key, value] of Object.entries(row)) {
+    if (!allowed.has(key)) throw valid.invalidAdvice();
+    if (['done', 'hasDeadline', 'overdue', 'untouched'].includes(key) && typeof value !== 'boolean') throw valid.invalidAdvice();
+    if (key === 'priority' && !['low', 'medium', 'high'].includes(String(value))) throw valid.invalidAdvice();
+    if (['tag', 'textIncludes'].includes(key)) valid.text(value, 500);
+    if (key === 'dueWithinDays') valid.integer(value, 0, 3650);
+    if (['minImportance', 'maxEffort'].includes(key)) valid.integer(value, 1, 5);
+  }
+  return row as AiQuery;
 }
 
 /* ── Phase 2: Weekly report ──────────────────────────────── */

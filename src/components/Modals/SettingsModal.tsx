@@ -18,6 +18,7 @@ import { CalendarAccount } from '../Settings/CalendarAccount';
 import { LanguageSelect } from '../Settings/LanguageSelect';
 import { LiveSyncSettings } from '../Settings/LiveSyncSettings';
 import { UpdatesSection } from '../Settings/UpdatesSection';
+import { DiagnosticsSection } from '../Settings/DiagnosticsSection';
 import { SharedProjects } from '../SharedProjects';
 
 /** "09:00" ⇄ minutes-since-midnight, for the work-hours inputs. */
@@ -452,6 +453,7 @@ export function SettingsModal() {
           </small>
         </SettingsSection>
               <UpdatesSection />
+              <DiagnosticsSection />
             </>
           )}
 

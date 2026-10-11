@@ -72,7 +72,7 @@ jobs:
       - name: Install Linux dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf webkitgtk-webdriver xvfb dbus-x11 gnome-keyring
 
       - name: Check Rust formatting
         working-directory: src-tauri
@@ -82,7 +82,7 @@ jobs:
 
       - name: Check Rust linting
         working-directory: src-tauri
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: Run Rust tests
         working-directory: src-tauri
@@ -97,3 +97,67 @@ jobs:
       - name: Run relay tests
         working-directory: server
         run: cargo test
+
+      - name: Check production Rust and TypeScript planner parity
+        run: npm run test:parity
+
+      - name: Measure task and operation regression budgets
+        env:
+          COGNATE_BENCH_CHECK: '1'
+        run: npm run benchmark -- test-results/benchmark.json
+
+      - name: Measure real relay and verify hard-kill recovery
+        env:
+          COGNATE_BENCH_CHECK: '1'
+        run: npm run benchmark:relay -- test-results/relay-benchmark.json
+
+      - name: Install native WebDriver
+        run: cargo install tauri-driver --version 2.0.5 --locked
+
+      - name: Build isolated native smoke application
+        run: npm run tauri build -- --no-bundle --config src-tauri/tauri.smoke.conf.json -- --bin cognate
+
+      - name: Exercise real Linux webview, keychain and crash recovery
+        run: |
+          dbus-run-session -- bash -c 'eval "$(printf "" | gnome-keyring-daemon --unlock --components=secrets)"; xvfb-run -a npm run test:native'
+
+      - name: Upload reliability and measurement evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: reliability-linux
+          path: test-results/
+          retention-days: 14
+
+  native-contracts:
+    name: Native contracts (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+      - name: Native storage, migration, recovery and AI contracts
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
+      - name: Native lint checks
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+      - name: Production planner parity
+        run: npm run test:parity
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: native-contracts-${{ matrix.os }}
+          path: test-results/planner-parity.json

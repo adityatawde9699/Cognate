@@ -9,6 +9,7 @@
    self-hostable), `fetch` in the browser.
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 
+import { measured } from './diagnostics';
 import { getSetting, setSetting, loadOps } from '../db';
 import { getSecret, setSecret } from '../utils/secrets';
 import { deriveSyncKey, deriveRoomId } from './crypto';
@@ -64,6 +65,9 @@ export async function pullRemote(cfg:RelayConfig,key:CryptoKey,room:string) {
   return {pulledBlobs:pulled.batches,mergedOps:pulled.result.applied,upserts:pulled.result.upserts,deletes:pulled.result.deletes};
 }
 export async function syncNow(options:{automatic?:boolean}={}):Promise<SyncResult> {
+  return measured('sync', () => syncNowInner(options));
+}
+async function syncNowInner(options:{automatic?:boolean}):Promise<SyncResult> {
   const cfg=await getConfig();
   if(!cfg) throw new Error('Sync is not set up. Add a relay URL and passphrase in Settings.');
   const key=await deriveSyncKey(cfg.passphrase),room=await deriveRoomId(cfg.passphrase);

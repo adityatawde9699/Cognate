@@ -8,15 +8,19 @@
 
 const SERVICE: &str = "cognate";
 
-fn entry(key: &str) -> Result<keyring::Entry, keyring::Error> {
-    keyring::Entry::new(SERVICE, key)
+fn entry(app: &tauri::AppHandle, key: &str) -> Result<keyring::Entry, keyring::Error> {
+    // Preserve production credentials while isolating differently identified
+    // test builds from the user's real signing identity and provider tokens.
+    let identifier = &app.config().identifier;
+    let service = if identifier == "com.cognate.app" { SERVICE } else { identifier };
+    keyring::Entry::new(service, key)
 }
 
 /// Read a secret from the OS keychain. Returns `None` if unset or
 /// if the platform backend is unavailable.
 #[tauri::command]
-pub fn secret_get(key: String) -> Result<Option<String>, String> {
-    match entry(&key) {
+pub fn secret_get(app: tauri::AppHandle, key: String) -> Result<Option<String>, String> {
+    match entry(&app, &key) {
         Ok(e) => match e.get_password() {
             Ok(v) => Ok(Some(v)),
             Err(keyring::Error::NoEntry) => Ok(None),
@@ -34,8 +38,8 @@ pub fn secret_get(key: String) -> Result<Option<String>, String> {
 
 /// Write (or clear, when `value` is empty) a secret in the OS keychain.
 #[tauri::command]
-pub fn secret_set(key: String, value: String) -> Result<(), String> {
-    let e = entry(&key).map_err(|err| format!("keychain unavailable: {err}"))?;
+pub fn secret_set(app: tauri::AppHandle, key: String, value: String) -> Result<(), String> {
+    let e = entry(&app, &key).map_err(|err| format!("keychain unavailable: {err}"))?;
     if value.is_empty() {
         match e.delete_credential() {
             Ok(_) | Err(keyring::Error::NoEntry) => Ok(()),

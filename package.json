@@ -1,7 +1,7 @@
 {
   "name": "cognate",
   "private": true,
-  "version": "3.1.0-rc.6",
+  "version": "3.1.0-rc.7",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,7 +12,11 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "tauri": "tauri",
-    "test:pwa": "npm run build && playwright test --config playwright.production.config.ts"
+    "test:pwa": "npm run build && playwright test --config playwright.production.config.ts",
+    "test:parity": "cargo build --manifest-path src-tauri/Cargo.toml --bin planner-fixture && node scripts/reliability.mjs",
+    "test:native": "node scripts/native-smoke.mjs",
+    "benchmark": "node scripts/benchmark.mjs",
+    "benchmark:relay": "cargo build --release --manifest-path server/Cargo.toml && node scripts/relay-benchmark.mjs"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.2.9",

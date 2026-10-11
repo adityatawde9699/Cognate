@@ -5,14 +5,34 @@ import { planDay, PlanRefreshError } from './planService';
 import { useStore } from '../store';
 import { projectTasks } from './projector';
 import { taskRecord } from './taskFields';
+import { applySchedulingEstimates } from '../db';
 class Storage {
   data = new Map<string,string>();
   getItem(key:string) { return this.data.get(key) ?? null; }
   setItem(key:string,value:string) { this.data.set(key,value); }
 }
 const input = {title:'Planned task',description:'',deadline:'',tags:[],importance:3,effort:3};
+const provenance = {provider:'ollama',model:'test',local:true,estimated_at:'2026-10-11T00:00:00Z'};
 beforeEach(() => {vi.stubGlobal('localStorage',new Storage());useStore.getState().setTasks([]);useStore.getState().setFilter('all');});
 describe('atomic planning', () => {
+  it('commits estimates and provenance together, with replay parity',async()=>{
+    const a=await createTask(input), b=await createTask({...input,title:'Second'});
+    await applySchedulingEstimates([a,b].map(t=>({id:t.id,duration_min:45,energy:'hi',provenance})),await getPlanningSnapshot());
+    const rows=await getAllTasks('all');
+    expect(rows.every(t=>t.duration_min===45 && JSON.parse(t.custom_fields._cognate_estimate).model==='test')).toBe(true);
+    expect(projectTasks(await loadOps()).map(taskRecord)).toEqual(rows.map(taskRecord));
+  });
+  it('rejects stale advice and quota failures without applying any estimates',async()=>{
+    const a=await createTask(input), b=await createTask({...input,title:'Second'});
+    const estimates=[a,b].map(t=>({id:t.id,duration_min:45,energy:'hi' as const,provenance}));
+    const expected=await getPlanningSnapshot();
+    await updateTask(b.id,{...input,title:'Concurrent edit'});
+    await expect(applySchedulingEstimates(estimates,expected)).rejects.toThrow('changed');
+    const fresh=await getPlanningSnapshot(), before=localStorage.getItem('cn_atomic_workspace_v1');
+    vi.spyOn(localStorage,'setItem').mockImplementationOnce(()=>{throw new Error('quota');});
+    await expect(applySchedulingEstimates(estimates,fresh)).rejects.toThrow('quota');
+    expect(localStorage.getItem('cn_atomic_workspace_v1')).toBe(before);
+  });
   it('plans the durable workspace even when the visible filter is empty', async () => {
     const task = await createTask(input);
     const result = await planDay('2026-10-06');

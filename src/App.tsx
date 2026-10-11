@@ -5,6 +5,7 @@ import { PlanView } from './components/PlanView';
 import { Titlebar } from './components/Titlebar';
 import { Sidebar } from './components/Sidebar';
 import { MobileNav } from './components/MobileNav';
+import { AiRequestReview } from './components/AiRequestReview';
 import { TaskModal } from './components/Modals/TaskModal';
 import { CommandPalette } from './components/CommandPalette';
 import { FocusMode } from './components/FocusMode';
@@ -199,6 +200,7 @@ function App() {
       </div>
 
       <MobileNav />
+      <AiRequestReview />
 
       {/* Overlays — heavy ones are code-split and mounted only when opened. */}
       <Suspense fallback={null}>

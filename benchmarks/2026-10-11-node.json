@@ -1,0 +1,372 @@
+{
+  "format": "cognate-benchmark",
+  "version": 1,
+  "commit": "7a43e5aae97f8b38b8a1da122a02ec73048954f7",
+  "working_tree_modified": true,
+  "captured_at": "2026-10-10T18:36:18.701Z",
+  "runtime": "v24.20.0",
+  "mode": "Vite SSR transforms, Node runtime; not browser or native startup",
+  "hardware": {
+    "platform": "linux",
+    "release": "7.0.0-31-generic",
+    "arch": "x64",
+    "cpu": "13th Gen Intel(R) Core(TM) i7-13620H",
+    "logical_cpus": 16,
+    "total_memory_bytes": 24261328896
+  },
+  "warmups": 2,
+  "repetitions": 7,
+  "process_peak_rss_bytes": 906334208,
+  "rows": [
+    {
+      "name": "typescript-planner",
+      "size": 100,
+      "median_ms": 0.08538999999996122,
+      "p95_ms": 0.13206900000000132,
+      "samples": [
+        {
+          "duration_ms": 0.13206900000000132,
+          "cpu_ms": 0.343,
+          "rss_bytes": 425086976,
+          "heap_delta_bytes": 95008
+        },
+        {
+          "duration_ms": 0.09561200000007375,
+          "cpu_ms": 0.528,
+          "rss_bytes": 425086976,
+          "heap_delta_bytes": -343144
+        },
+        {
+          "duration_ms": 0.08538999999996122,
+          "cpu_ms": 0.091,
+          "rss_bytes": 425086976,
+          "heap_delta_bytes": 209664
+        },
+        {
+          "duration_ms": 0.09726900000009664,
+          "cpu_ms": 0.196,
+          "rss_bytes": 425086976,
+          "heap_delta_bytes": -12936
+        },
+        {
+          "duration_ms": 0.07399999999984175,
+          "cpu_ms": 0.082,
+          "rss_bytes": 425086976,
+          "heap_delta_bytes": 92352
+        },
+        {
+          "duration_ms": 0.07550000000014734,
+          "cpu_ms": 0.082,
+          "rss_bytes": 425086976,
+          "heap_delta_bytes": 92416
+        },
+        {
+          "duration_ms": 0.07758399999988796,
+          "cpu_ms": 0.189,
+          "rss_bytes": 425086976,
+          "heap_delta_bytes": 102032
+        }
+      ]
+    },
+    {
+      "name": "typescript-planner",
+      "size": 1000,
+      "median_ms": 0.31759600000009414,
+      "p95_ms": 0.3774529999998322,
+      "samples": [
+        {
+          "duration_ms": 0.36730000000011387,
+          "cpu_ms": 3.236,
+          "rss_bytes": 425480192,
+          "heap_delta_bytes": 123296
+        },
+        {
+          "duration_ms": 0.3774529999998322,
+          "cpu_ms": 0.382,
+          "rss_bytes": 425611264,
+          "heap_delta_bytes": 585264
+        },
+        {
+          "duration_ms": 0.3699890000000323,
+          "cpu_ms": 2.09,
+          "rss_bytes": 425611264,
+          "heap_delta_bytes": 611024
+        },
+        {
+          "duration_ms": 0.31759600000009414,
+          "cpu_ms": 0.434,
+          "rss_bytes": 425611264,
+          "heap_delta_bytes": 589872
+        },
+        {
+          "duration_ms": 0.30930800000010095,
+          "cpu_ms": 0.314,
+          "rss_bytes": 425611264,
+          "heap_delta_bytes": 588136
+        },
+        {
+          "duration_ms": 0.3110990000000129,
+          "cpu_ms": 0.316,
+          "rss_bytes": 425611264,
+          "heap_delta_bytes": 585216
+        },
+        {
+          "duration_ms": 0.3053780000000188,
+          "cpu_ms": 0.344,
+          "rss_bytes": 425611264,
+          "heap_delta_bytes": 592800
+        }
+      ]
+    },
+    {
+      "name": "typescript-planner",
+      "size": 10000,
+      "median_ms": 3.2281339999999545,
+      "p95_ms": 4.718744000000015,
+      "samples": [
+        {
+          "duration_ms": 3.4375360000001365,
+          "cpu_ms": 6.693,
+          "rss_bytes": 427184128,
+          "heap_delta_bytes": 5996560
+        },
+        {
+          "duration_ms": 3.4402679999998327,
+          "cpu_ms": 9.549,
+          "rss_bytes": 427839488,
+          "heap_delta_bytes": 6004744
+        },
+        {
+          "duration_ms": 3.096813999999995,
+          "cpu_ms": 6.101,
+          "rss_bytes": 428756992,
+          "heap_delta_bytes": 4881808
+        },
+        {
+          "duration_ms": 3.2281339999999545,
+          "cpu_ms": 4.648,
+          "rss_bytes": 429281280,
+          "heap_delta_bytes": 4821512
+        },
+        {
+          "duration_ms": 2.8783579999999347,
+          "cpu_ms": 2.883,
+          "rss_bytes": 429805568,
+          "heap_delta_bytes": 3432752
+        },
+        {
+          "duration_ms": 4.718744000000015,
+          "cpu_ms": 10.651,
+          "rss_bytes": 430800896,
+          "heap_delta_bytes": -59726224
+        },
+        {
+          "duration_ms": 2.8947279999999864,
+          "cpu_ms": 2.901,
+          "rss_bytes": 431325184,
+          "heap_delta_bytes": 3544584
+        }
+      ]
+    },
+    {
+      "name": "operation-admission-merge",
+      "size": 50000,
+      "median_ms": 303.17841599999974,
+      "p95_ms": 310.42675499999996,
+      "samples": [
+        {
+          "duration_ms": 305.0301709999999,
+          "cpu_ms": 346.483,
+          "rss_bytes": 534376448,
+          "heap_delta_bytes": 49887312
+        },
+        {
+          "duration_ms": 296.15888700000005,
+          "cpu_ms": 323.801,
+          "rss_bytes": 544735232,
+          "heap_delta_bytes": 52675192
+        },
+        {
+          "duration_ms": 310.42675499999996,
+          "cpu_ms": 330.897,
+          "rss_bytes": 553099264,
+          "heap_delta_bytes": 51067280
+        },
+        {
+          "duration_ms": 308.68237100000033,
+          "cpu_ms": 330.538,
+          "rss_bytes": 584978432,
+          "heap_delta_bytes": 51036472
+        },
+        {
+          "duration_ms": 303.17841599999974,
+          "cpu_ms": 327.204,
+          "rss_bytes": 633180160,
+          "heap_delta_bytes": 51007576
+        },
+        {
+          "duration_ms": 302.27131299999974,
+          "cpu_ms": 325.795,
+          "rss_bytes": 681623552,
+          "heap_delta_bytes": 50787376
+        },
+        {
+          "duration_ms": 299.808532,
+          "cpu_ms": 323.933,
+          "rss_bytes": 731246592,
+          "heap_delta_bytes": 52186088
+        }
+      ]
+    },
+    {
+      "name": "operation-materialization",
+      "size": 50000,
+      "median_ms": 155.509505,
+      "p95_ms": 183.2325639999999,
+      "samples": [
+        {
+          "duration_ms": 156.1317829999998,
+          "cpu_ms": 190.008,
+          "rss_bytes": 831090688,
+          "heap_delta_bytes": 51350008
+        },
+        {
+          "duration_ms": 156.56823600000007,
+          "cpu_ms": 180.482,
+          "rss_bytes": 863395840,
+          "heap_delta_bytes": 58080640
+        },
+        {
+          "duration_ms": 183.2325639999999,
+          "cpu_ms": 400.46,
+          "rss_bytes": 772210688,
+          "heap_delta_bytes": -495490464
+        },
+        {
+          "duration_ms": 153.55006400000002,
+          "cpu_ms": 182.283,
+          "rss_bytes": 782458880,
+          "heap_delta_bytes": 47109440
+        },
+        {
+          "duration_ms": 155.509505,
+          "cpu_ms": 193.959,
+          "rss_bytes": 791912448,
+          "heap_delta_bytes": -6734928
+        },
+        {
+          "duration_ms": 154.27826000000005,
+          "cpu_ms": 180.127,
+          "rss_bytes": 804364288,
+          "heap_delta_bytes": 49671824
+        },
+        {
+          "duration_ms": 152.77910900000006,
+          "cpu_ms": 171.484,
+          "rss_bytes": 813346816,
+          "heap_delta_bytes": 47313136
+        }
+      ]
+    },
+    {
+      "name": "task-projection",
+      "size": 50000,
+      "median_ms": 156.28256299999975,
+      "p95_ms": 178.63776599999983,
+      "samples": [
+        {
+          "duration_ms": 152.28966600000058,
+          "cpu_ms": 171.745,
+          "rss_bytes": 843460608,
+          "heap_delta_bytes": 53532040
+        },
+        {
+          "duration_ms": 156.28256299999975,
+          "cpu_ms": 189.9,
+          "rss_bytes": 853356544,
+          "heap_delta_bytes": -665888
+        },
+        {
+          "duration_ms": 158.97402500000044,
+          "cpu_ms": 186.294,
+          "rss_bytes": 865808384,
+          "heap_delta_bytes": 53541872
+        },
+        {
+          "duration_ms": 152.39698800000042,
+          "cpu_ms": 175.652,
+          "rss_bytes": 876167168,
+          "heap_delta_bytes": 53510944
+        },
+        {
+          "duration_ms": 156.9628359999997,
+          "cpu_ms": 192.415,
+          "rss_bytes": 885620736,
+          "heap_delta_bytes": -1676736
+        },
+        {
+          "duration_ms": 153.20256400000017,
+          "cpu_ms": 179.432,
+          "rss_bytes": 898072576,
+          "heap_delta_bytes": 54482248
+        },
+        {
+          "duration_ms": 178.63776599999983,
+          "cpu_ms": 359.206,
+          "rss_bytes": 770531328,
+          "heap_delta_bytes": -384198680
+        }
+      ]
+    },
+    {
+      "name": "history-serialization",
+      "size": 50000,
+      "median_ms": 36.75258399999984,
+      "p95_ms": 40.89393100000052,
+      "samples": [
+        {
+          "duration_ms": 36.74417699999958,
+          "cpu_ms": 36.789,
+          "rss_bytes": 825036800,
+          "heap_delta_bytes": 22596288
+        },
+        {
+          "duration_ms": 36.75258399999984,
+          "cpu_ms": 36.76,
+          "rss_bytes": 835129344,
+          "heap_delta_bytes": 22596280
+        },
+        {
+          "duration_ms": 40.89393100000052,
+          "cpu_ms": 49.143,
+          "rss_bytes": 814743552,
+          "heap_delta_bytes": -58172840
+        },
+        {
+          "duration_ms": 36.688584999999875,
+          "cpu_ms": 36.689,
+          "rss_bytes": 824705024,
+          "heap_delta_bytes": 22596360
+        },
+        {
+          "duration_ms": 37.671338000000105,
+          "cpu_ms": 37.679,
+          "rss_bytes": 834666496,
+          "heap_delta_bytes": 22596280
+        },
+        {
+          "duration_ms": 37.49049399999967,
+          "cpu_ms": 37.498,
+          "rss_bytes": 844627968,
+          "heap_delta_bytes": 22596088
+        },
+        {
+          "duration_ms": 36.74943400000029,
+          "cpu_ms": 36.758,
+          "rss_bytes": 854720512,
+          "heap_delta_bytes": 22596336
+        }
+      ]
+    }
+  ]
+}

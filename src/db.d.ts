@@ -63,6 +63,7 @@ export function commitProjection(ops: Op[], tasks: any[], projects: any[], expec
 
 export interface PlanningSnapshot {tasks: import('./store').Task[]; calendar: CalendarEvent[]; settings: Record<string,string>}
 export function getPlanningSnapshot(): Promise<PlanningSnapshot>;
+export function applySchedulingEstimates(estimates: import('./services/aiService').SchedulingEstimate[], expected: PlanningSnapshot): Promise<void>;
 export function commitPlan(date: string, result: import('./services/planService').PlanResult, expected: PlanningSnapshot): Promise<void>;
 
 export const USE_BROWSER_WORKSPACE: boolean;

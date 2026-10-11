@@ -1,0 +1,5 @@
+{
+  "identifier": "com.cognate.smoke",
+  "productName": "Cognate Smoke",
+  "bundle": { "active": false, "createUpdaterArtifacts": false }
+}

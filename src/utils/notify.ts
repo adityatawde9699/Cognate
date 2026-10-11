@@ -6,6 +6,7 @@
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 
 import { getSetting } from '../db';
+import { recordDiagnostic, failureCode } from '../services/diagnostics';
 
 const IS_TAURI = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__;
 
@@ -38,20 +39,22 @@ async function ensurePermission(): Promise<boolean> {
 }
 
 /** Show a desktop notification, respecting the user's `notify_enabled` setting. */
-export async function notify(title: string, body: string): Promise<void> {
+export async function notify(title: string, body: string): Promise<'sent' | 'disabled' | 'permission denied' | 'failed'> {
   try {
     const enabled = await getSetting('notify_enabled', '1');
-    if (enabled !== '1') return;
-    if (!(await ensurePermission())) return;
+    if (enabled !== '1') return 'disabled';
+    if (!(await ensurePermission())) { recordDiagnostic('notification', 'permission'); return 'permission denied'; }
 
     if (IS_TAURI) {
       const { sendNotification } = await import('@tauri-apps/plugin-notification');
       sendNotification({ title, body });
     } else if (typeof Notification !== 'undefined') {
-      new Notification(title, { body });
+      const notification = new Notification(title, { body });
+      notification.onclick = () => { window.focus(); notification.close(); };
     }
+    recordDiagnostic('notification', 'ok'); return 'sent';
   } catch (e) {
     // Notifications are best-effort — never let them break a flow.
-    console.warn('[notify] failed:', e);
+    recordDiagnostic('notification', failureCode(e)); return 'failed';
   }
 }

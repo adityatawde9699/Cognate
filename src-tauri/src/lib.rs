@@ -14,6 +14,8 @@ mod secrets;
 mod backup;
 mod operation_store;
 mod planner;
+#[cfg(desktop)]
+mod desktop_health;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Phase {
@@ -81,7 +83,15 @@ pub fn run() {
         },
     ];
 
-    let mut builder = tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+    #[cfg(desktop)]
+    { builder = builder.plugin(tauri_plugin_single_instance::init(|app, _, _| {
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.show(); let _ = window.unminimize(); let _ = window.set_focus();
+        }
+    })); }
+    builder = builder
+        .manage(ai::AiRequests::default())
         .manage(std::sync::Mutex::new(PomoState {
             time_left: 25 * 60,
             is_active: false,
@@ -120,10 +130,10 @@ pub fn run() {
         // ── System Tray (M7) ─────────────────────────
         .setup(|app| {
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let show_i = MenuItem::with_id(app, "show", "Show Cognote", true, None::<&str>)?;
+            let show_i = MenuItem::with_id(app, "show", "Show Cognate", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
 
-            let _tray = TrayIconBuilder::new()
+            let _tray = TrayIconBuilder::with_id("main-tray")
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
                 .on_menu_event(|app, event| match event.id.as_ref() {
@@ -131,6 +141,7 @@ pub fn run() {
                     "show" => {
                         if let Some(window) = app.get_webview_window("main") {
                             let _ = window.show();
+                            let _ = window.unminimize();
                             let _ = window.set_focus();
                         }
                     }
@@ -146,6 +157,7 @@ pub fn run() {
                         let app = tray.app_handle();
                         if let Some(window) = app.get_webview_window("main") {
                             let _ = window.show();
+                            let _ = window.unminimize();
                             let _ = window.set_focus();
                         }
                     }
@@ -185,6 +197,9 @@ pub fn run() {
             integrations::fetch_ics,
             integrations::relay_fetch,
             ai::ai_generate,
+            ai::ai_cancel,
+            desktop_health::desktop_health,
+            desktop_health::desktop_process_id,
             secrets::secret_get,
             secrets::secret_set,
             operation_store::append_operations,

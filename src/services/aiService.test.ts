@@ -18,9 +18,10 @@ describe('parseJSON', () => {
     expect(parseJSON<any[]>(raw)).toEqual([{ id: 'x' }]);
   });
 
-  it('throws a clear error (echoing the reply) when there is no JSON', () => {
+  it('reports non-JSON without echoing potentially sensitive provider output', () => {
     // A provider/model that returns plain text — e.g. "User error" with HTTP 200.
-    expect(() => parseJSON('User error')).toThrow(/didn't return JSON.*User error/);
+    expect(() => parseJSON('User error secret-value')).toThrow(/didn't return JSON/);
+    try { parseJSON('secret-value'); } catch (error) { expect(String(error)).not.toContain('secret-value'); }
   });
 
   it('throws a clear error when the JSON is malformed', () => {

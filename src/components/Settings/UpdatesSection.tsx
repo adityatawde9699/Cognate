@@ -13,12 +13,13 @@ export function UpdatesSection() {
   const check = async () => {
     setChecking(true);
     setMsg('');
+    setUpdate(null);
     try {
       const found = await checkForUpdate();
       setUpdate(found);
       setMsg(found ? '' : "You're on the latest version.");
-    } catch (e: any) {
-      setMsg(`Update check failed: ${e?.message || e}`);
+    } catch {
+      setMsg('Could not check for updates. Your current version remains installed. Retry when online.');
     } finally {
       setChecking(false);
     }
@@ -30,8 +31,8 @@ export function UpdatesSection() {
     try {
       await installUpdate(update, setProgress);
       // installUpdate relaunches on success; if we get here, it's mid-flight.
-    } catch (e: any) {
-      setMsg(`Install failed: ${e?.message || e}`);
+    } catch {
+      setMsg('Update did not complete. Reopen Cognate to check its version; your pre-update backup is available in Backups.');
       setProgress(null);
     }
   };
@@ -66,7 +67,7 @@ export function UpdatesSection() {
       )}
 
       {msg && <small className="form-hint">{msg}</small>}
-      <small className="form-hint">Updates are cryptographically verified before install.</small>
+      <small className="form-hint">A verified local backup is required before updating. Updates are cryptographically verified before install.</small>
     </div>
   );
 }

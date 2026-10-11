@@ -11,9 +11,10 @@ test('team review excludes unknown capacity and applies only a current proposal'
  });
  await page.goto('/');await expect(page.locator('.plan-autoplan')).toBeVisible();
  await page.evaluate(async()=>{
-  const dbPath='/src/db.js',sharePath='/src/services/shareService.ts';
-  const db=await import(/* @vite-ignore */dbPath),service=await import(/* @vite-ignore */sharePath);
+  const dbPath='/src/db.js',sharePath='/src/services/shareService.ts',identityPath='/src/services/identity.ts';
+  const db=await import(/* @vite-ignore */dbPath),service=await import(/* @vite-ignore */sharePath),identity=await import(/* @vite-ignore */identityPath);
   await db.initDb();
+  await identity.getIdentity();
   const p=await db.createProject('Reviewed team','green');
   await db.createTask({title:'Reviewed assignment',description:'',deadline:'',tags:[],importance:3,effort:3,project_id:p.id});
   await service.createShare(p.id,'Reviewed team','https://relay.example');

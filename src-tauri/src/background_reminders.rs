@@ -28,6 +28,7 @@ pub fn start(app: AppHandle) {
 }
 
 async fn check_reminders(app: &AppHandle) -> Result<(), String> {
+    let _maintenance = crate::backup::MAINTENANCE.lock().await;
     let path = app
         .path()
         .app_config_dir()

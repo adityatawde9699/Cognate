@@ -1057,6 +1057,32 @@ export async function clearDaySchedules(date) {
 }
 
 /** Update a task's scheduling attributes (duration, energy, pinned). */
+export async function applySchedulingEstimates(estimates, expected) {
+    if (!IS_TAURI) await ensureBrowserStorage();
+    const ids = new Set();
+    for (const estimate of estimates) {
+        const task = expected.tasks.find(t => t.id === estimate.id);
+        if (!task || task.done || task.deleted_at || task.duration_min > 0 || ids.has(task.id) ||
+            !Number.isInteger(estimate.duration_min) || estimate.duration_min < 15 || estimate.duration_min > 240 || estimate.duration_min % 15 ||
+            !['hi','med','lo'].includes(estimate.energy) || !estimate.provenance) throw new Error('Invalid scheduling estimate.');
+        ids.add(task.id);
+    }
+    if (!estimates.length) return;
+    const changes = new Map(estimates.map(e => [e.id, {duration_min:e.duration_min, energy:e.energy,
+        custom_fields:{...expected.tasks.find(t=>t.id===e.id).custom_fields,
+            _cognate_estimate:JSON.stringify({...e.provenance,duration_min:e.duration_min,energy:e.energy})}}]));
+    if (!IS_TAURI) {
+        if (canonicalJson(browserPlanningSnapshot()) !== canonicalJson(expected)) throw new Error('Planning inputs changed while estimating. Review a fresh request.');
+        await localSave(localLoad().map(t=>changes.has(t.id) ? {...t,...changes.get(t.id)} : t));
+    } else {
+        await db();
+        const statements = [...changes].map(([id,fields])=>({query:'UPDATE tasks SET duration_min=?,energy=?,custom_fields=? WHERE id=?',
+            values:[fields.duration_min,fields.energy,JSON.stringify(fields.custom_fields),id]}));
+        const {invoke}=await import('@tauri-apps/api/core');
+        await guardedCall({commit:()=>invoke('mutate_entity_batch',{statements,expected})},'commit',[]);
+    }
+}
+
 export async function updateScheduling(id, fields) {
     if (!IS_TAURI) await ensureBrowserStorage();
     const dur = fields.duration_min ?? 0;

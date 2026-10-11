@@ -6,6 +6,9 @@
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 
 import { IS_TAURI } from '../db';
+import { runDatabaseMaintenance } from '../db';
+import { createBackup } from './backupService';
+import { measured } from './diagnostics';
 
 export interface AvailableUpdate {
   version: string;
@@ -21,15 +24,12 @@ export interface AvailableUpdate {
 /** Returns details of a newer signed release, or null if up to date / unavailable. */
 export async function checkForUpdate(): Promise<AvailableUpdate | null> {
   if (!IS_TAURI) return null;
-  try {
+  return measured('update', async () => {
     const { check } = await import('@tauri-apps/plugin-updater');
     const update = await check();
     if (!update) return null;
     return { version: update.version, notes: update.body ?? '', raw: update as any };
-  } catch (e) {
-    console.warn('[updateService] check failed:', e);
-    return null;
-  }
+  });
 }
 
 /**
@@ -40,16 +40,21 @@ export async function installUpdate(
   update: AvailableUpdate,
   onProgress?: (pct: number) => void
 ): Promise<void> {
+  if (!IS_TAURI) throw new Error('Desktop updates require the installed app.');
+  await measured('update', async () => {
+  const backup = await createBackup('pre-update');
+  if (!backup) throw new Error('A verified pre-update backup is required before installation.');
   let total = 0;
   let downloaded = 0;
+  await runDatabaseMaintenance(async () => {
   await update.raw.downloadAndInstall((event: any) => {
     switch (event?.event) {
       case 'Started':
-        total = event.data?.contentLength ?? 0;
+        total = Math.max(0, Number(event.data?.contentLength) || 0);
         onProgress?.(0);
         break;
       case 'Progress':
-        downloaded += event.data?.chunkLength ?? 0;
+        downloaded += Math.max(0, Number(event.data?.chunkLength) || 0);
         if (total > 0) onProgress?.(Math.min(99, Math.round((downloaded / total) * 100)));
         break;
       case 'Finished':
@@ -59,4 +64,6 @@ export async function installUpdate(
   });
   const { relaunch } = await import('@tauri-apps/plugin-process');
   await relaunch();
+  }, true);
+  });
 }

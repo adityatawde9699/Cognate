@@ -282,13 +282,22 @@ pub async fn mutate_tasks(app: AppHandle, query: String, values: Vec<Value>) -> 
 }
 
 #[tauri::command]
-pub async fn mutate_entity_batch(app: AppHandle, statements: Vec<Statement>) -> Result<MutationResult,String> {
+pub async fn mutate_entity_batch(app: AppHandle, statements: Vec<Statement>, expected: Option<Value>) -> Result<MutationResult,String> {
     let _maintenance = crate::backup::MAINTENANCE.lock().await;
     let path = app.path().app_config_dir().map_err(|e|e.to_string())?.join("cognote.db");
     let options = sqlx::sqlite::SqliteConnectOptions::new().filename(path).create_if_missing(false)
         .busy_timeout(std::time::Duration::from_secs(5));
     let mut db = SqliteConnection::connect_with(&options).await.map_err(|e|e.to_string())?;
-    mutate_batch(&mut db,statements).await
+    guarded_mutate(&mut db, statements, expected).await
+}
+async fn guarded_mutate(db: &mut SqliteConnection, statements: Vec<Statement>, expected: Option<Value>) -> Result<MutationResult,String> {
+    if let Some(expected) = expected {
+        let mut tx = db.begin().await.map_err(|e|e.to_string())?;
+        if planning_state(&mut tx).await? != expected { return Err("Planning inputs changed while estimating. Review a fresh request.".into()); }
+        let result = mutate_batch(&mut tx,statements).await?;
+        tx.commit().await.map_err(|e|e.to_string())?;
+        Ok(result)
+    } else { mutate_batch(db,statements).await }
 }
 
 #[cfg(test)]
@@ -476,6 +485,45 @@ mod tests {
         }
         sqlx::query("INSERT INTO tasks(id,title,created_at) VALUES ('task','original','2026-10-06')").execute(&mut db).await.unwrap();
         db
+    }
+    #[tokio::test]
+    async fn guarded_estimates_reject_stale_tasks_and_record_provenance_atomically() {
+        let mut db=task_db().await;
+        let expected=planning_state(&mut db).await.unwrap();
+        sqlx::query("UPDATE tasks SET title='concurrent edit'").execute(&mut db).await.unwrap();
+        let statements=vec![Statement {query:"UPDATE tasks SET duration_min=45,custom_fields=? WHERE id='task'".into(),values:vec![Value::String(r#"{"_cognate_estimate":"synthetic provenance"}"#.into())]}];
+        assert!(guarded_mutate(&mut db,statements,Some(expected)).await.err().unwrap().contains("changed"));
+        assert_eq!(sqlx::query_scalar::<_,i64>("SELECT count(*) FROM oplog").fetch_one(&mut db).await.unwrap(),0);
+        let expected=planning_state(&mut db).await.unwrap();
+        let statements=vec![Statement {query:"UPDATE tasks SET duration_min=45,custom_fields=? WHERE id='task'".into(),values:vec![Value::String(r#"{"_cognate_estimate":"synthetic provenance"}"#.into())]}];
+        guarded_mutate(&mut db,statements,Some(expected)).await.unwrap();
+        assert_eq!(sqlx::query_scalar::<_,i64>("SELECT duration_min FROM tasks").fetch_one(&mut db).await.unwrap(),45);
+        assert!(sqlx::query_scalar::<_,String>("SELECT value FROM oplog WHERE field='custom_fields'").fetch_one(&mut db).await.unwrap().contains("synthetic provenance"));
+    }
+    #[tokio::test]
+    async fn every_historical_schema_upgrades_reopens_and_rolls_back_failed_migration() {
+        let scripts=[include_str!("../migrations/001_init.sql"),include_str!("../migrations/002_projects.sql"),include_str!("../migrations/003_milestones.sql"),include_str!("../migrations/004_trash.sql"),include_str!("../migrations/005_schedule.sql"),include_str!("../migrations/006_oplog.sql")];
+        for prefix in 1..=scripts.len() {
+            let nonce=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+            let path=std::env::temp_dir().join(format!("cognate-upgrade-{prefix}-{}-{nonce}.db",std::process::id()));
+            let options=sqlx::sqlite::SqliteConnectOptions::new().filename(&path).create_if_missing(true);
+            let mut db=SqliteConnection::connect_with(&options).await.unwrap();
+            for script in &scripts[..prefix] {sqlx::raw_sql(script).execute(&mut db).await.unwrap();}
+            sqlx::query("INSERT INTO tasks(id,title,created_at) VALUES ('first','intentional duplicate','2026-01-01'),('second','intentional duplicate','2026-01-01')").execute(&mut db).await.unwrap();
+            db.close().await.unwrap();
+            let mut db=SqliteConnection::connect_with(&options).await.unwrap();
+            for script in &scripts[prefix..] {let mut tx=db.begin().await.unwrap();sqlx::raw_sql(script).execute(&mut *tx).await.unwrap();tx.commit().await.unwrap();}
+            let mut tx=db.begin().await.unwrap();
+            assert!(sqlx::raw_sql("ALTER TABLE tasks ADD COLUMN failed_probe TEXT; UPDATE tasks SET title='must roll back'; INSERT INTO missing_table VALUES (1);").execute(&mut *tx).await.is_err());
+            tx.rollback().await.unwrap();db.close().await.unwrap();
+            let mut db=SqliteConnection::connect_with(&options).await.unwrap();
+            assert_eq!(sqlx::query_scalar::<_,i64>("SELECT count(*) FROM tasks WHERE title='intentional duplicate'").fetch_one(&mut db).await.unwrap(),2);
+            assert_eq!(sqlx::query_scalar::<_,String>("PRAGMA integrity_check").fetch_one(&mut db).await.unwrap(),"ok");
+            assert!(current_rows(&mut db,"tasks").await.is_ok());
+            let columns=sqlx::query("PRAGMA table_info(tasks)").fetch_all(&mut db).await.unwrap();
+            assert!(!columns.iter().any(|row|row.get::<String,_>("name")=="failed_probe"));
+            db.close().await.unwrap();std::fs::remove_file(path).unwrap();
+        }
     }
     #[tokio::test]
     async fn assignments_reject_calendar_changes_inside_the_transaction() {

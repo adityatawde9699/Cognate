@@ -19,7 +19,7 @@ export function LiveSyncSettings() {
   const [on, setOn] = useState(false);
   const [msg, setMsg] = useState('');
   const [health,setHealth]=useState('');
-  const updateHealth=async()=>{const cfg=await getConfig();if(cfg){const d=await syncDiagnostics(await deriveRoomId(cfg.passphrase),cfg.url);setHealth(`Saved cursor ${d.cursor} · ${d.pending} queued operations${d.lastError ? ` · Last error: ${d.lastError}`:''}`);}};
+  const updateHealth=async()=>{const cfg=await getConfig();if(cfg){const d=await syncDiagnostics(await deriveRoomId(cfg.passphrase),cfg.url);setHealth(`Saved cursor ${d.cursor} · ${d.pending} queued operations · Last successful sync: ${d.lastSuccess || 'never'}${d.retryAt && d.retryAt > Date.now() ? ` · Retry after ${new Date(d.retryAt).toLocaleTimeString()}` : ''}${d.lastError ? ' · Previous sync failed; queued edits are retained.':''}`);}};
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -29,7 +29,9 @@ export function LiveSyncSettings() {
       setPass(cfg?.passphrase || '');
     });
     getSecret(TOKEN_KEY).then(setToken).catch(error=>setMsg(error.message));
-    void updateHealth();
+    const refresh=()=>void updateHealth().catch(()=>setHealth('Sync health unavailable. Local edits remain on this device.'));
+    refresh(); window.addEventListener('diagnostics-changed',refresh);
+    return ()=>window.removeEventListener('diagnostics-changed',refresh);
   }, []);
 
   const save = async () => {
@@ -46,7 +48,7 @@ export function LiveSyncSettings() {
     } catch (err: any) {
       setMsg(err?.message || 'Could not connect to the relay.');
     } finally {
-      setBusy(false);void updateHealth();
+      setBusy(false);void updateHealth().catch(()=>setHealth('Sync health unavailable.'));
     }
   };
 
@@ -60,13 +62,13 @@ export function LiveSyncSettings() {
     } catch (err: any) {
       setMsg(err?.message || 'Sync failed.');
     } finally {
-      setBusy(false);void updateHealth();
+      setBusy(false);void updateHealth().catch(()=>setHealth('Sync health unavailable.'));
     }
   };
 
   const turnOff = async () => {
     await disableSync();
-    setOn(false);
+    setOn(false); setHealth('Sync is disabled.');
     setPass('');
     setMsg('Live sync turned off. Your data stays on this device.');
   };

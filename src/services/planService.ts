@@ -18,10 +18,11 @@ import {
   getCalendarEvents,
   getSetting,
 
-  updateScheduling,
+  applySchedulingEstimates,
 } from '../db';
 import {ensureCalendarCoverage} from './calendarSyncService';
 import { useStore, type CalendarEvent, type Energy, type Task } from '../store';
+import { measured } from './diagnostics';
 import { estimateScheduling } from './aiService';
 import { learnEnergyCurve } from './energyModel';
 
@@ -298,6 +299,9 @@ export class PlanRefreshError extends Error {
 }
 
 export async function planDay(date: string, opts: PlanOptions = {}): Promise<PlanResult> {
+  return measured('plan', () => planDayInner(date, opts));
+}
+async function planDayInner(date: string, opts: PlanOptions): Promise<PlanResult> {
   if (opts.signal?.aborted) throw new Error('Planning cancelled.');
   await initDb();
   if (opts.signal?.aborted) throw new Error('Planning cancelled.');
@@ -391,9 +395,8 @@ export function detectDisruption(
  * everyone else. Returns how many tasks were enriched.
  */
 export async function enrichScheduling(): Promise<number> {
-  const open = useStore
-    .getState()
-    .currentTasks.filter((t) => !t.done && !t.parent_id && !t.deleted_at);
+  const snapshot = await getPlanningSnapshot();
+  const open = (snapshot.tasks as Task[]).filter((t) => !t.done && !t.parent_id && !t.deleted_at);
   // Only spend tokens on tasks the user hasn't sized themselves.
   const needsSizing = open.filter((t) => !(t.duration_min && t.duration_min > 0));
   if (needsSizing.length === 0) return 0;
@@ -409,11 +412,8 @@ export async function enrichScheduling(): Promise<number> {
     }))
   );
 
-  for (const e of estimates) {
-    const t = open.find((x) => x.id === e.id);
-    await updateScheduling(e.id, { duration_min: e.duration_min, energy: e.energy, pinned: !!t?.pinned });
-    useStore.getState().updateTaskOptimistic(e.id, { duration_min: e.duration_min, energy: e.energy } as Partial<Task>);
-  }
+  await applySchedulingEstimates(estimates, snapshot);
+  useStore.getState().setTasks(await getAllTasks('all') as Task[]);
   return estimates.length;
 }
 
