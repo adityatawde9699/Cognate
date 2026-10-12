@@ -1,6 +1,6 @@
 # Implementation progress — 2026-10-11
 
-The audit below describes the original checkout, not the current implementation. The ledger records subsequent changes and outstanding acceptance evidence. Cognate remains under production stabilization. [v3.1.0-rc.6](https://github.com/adityatawde9699/Cognate/releases/tag/v3.1.0-rc.6) is published as a prerelease; rc.7 contains R23–R26 and its blocking branch workflow passed on 2026-10-13. Tagged packaging and artifact verification are in progress. No stable production release has been made.
+The audit below describes the original checkout, not the current implementation. The ledger records subsequent changes and outstanding acceptance evidence. Cognate remains under production stabilization. [v3.1.0-rc.6](https://github.com/adityatawde9699/Cognate/releases/tag/v3.1.0-rc.6) and [v3.1.0-rc.7](https://github.com/adityatawde9699/Cognate/releases/tag/v3.1.0-rc.7) are prereleases; rc.7's tagged checks, packaging, signatures, manifest and checksums were verified on 2026-10-13. No stable production release has been made.
 
 | Task | Current status | Evidence and remaining work |
 |---|---|---|
@@ -37,7 +37,7 @@ Local verification is recorded in [TESTING.md](TESTING.md). R23 and the measured
 
 ## Next implementation sequence
 
-R12–R22 have local implementation and regression evidence with deployed/installed acceptance limits recorded above. R23 now has privacy review, strict output contracts, cancellation, offline fallback, persisted provenance, and contract tests; live providers remain to validate. R24's isolated Linux lifecycle suite and R25's reproducible local measurements are implemented. R26's Linux native smoke, database recovery, differential planner, performance, relay replay, browser and PWA gates, plus Windows/macOS native Rust contract jobs, passed remote branch workflow 38301619235. Finish the real Windows/macOS installed-app matrix, provider/OAuth and deployed relay trials, disk/slow-client/load faults, mobile eviction study, and remaining protocol policy work. The rc.7 candidate still requires tagged packaging and artifact verification; no production deployment has been performed.
+R12–R22 have local implementation and regression evidence with deployed/installed acceptance limits recorded above. R23 now has privacy review, strict output contracts, cancellation, offline fallback, persisted provenance, and contract tests; live providers remain to validate. R24's isolated Linux lifecycle suite and R25's reproducible local measurements are implemented. R26's Linux native smoke, database recovery, differential planner, performance, relay replay, browser and PWA gates, plus Windows/macOS native Rust contract jobs, passed remote branch workflow 38301619235 and tagged workflow 38302836329. The rc.7 prerelease's three platform packages, six updater signatures, nine manifest entries and 14-asset checksum file were verified. Finish the real Windows/macOS installed-app matrix, provider/OAuth and deployed relay trials, disk/slow-client/load faults, mobile eviction study, and remaining protocol policy work. No production deployment has been performed.
 
 ---
 
