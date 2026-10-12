@@ -119,7 +119,12 @@ jobs:
 
       - name: Exercise real Linux webview, keychain and crash recovery
         run: |
-          dbus-run-session -- xvfb-run -a bash -c 'eval "$(printf "" | gnome-keyring-daemon --unlock --components=secrets)"; dbus-update-activation-environment --all; npm run test:native'
+          # A fresh runner has no login keyring. Use a throwaway HOME and
+          # initialize a CI-only keyring so Secret Service writes are real,
+          # while keeping every credential and profile out of runner state.
+          export HOME="$RUNNER_TEMP/cognate-native-home"
+          mkdir -p "$HOME"
+          dbus-run-session -- xvfb-run -a bash -c 'printf "cognate-ci-keyring" | gnome-keyring-daemon --unlock --components=secrets; dbus-update-activation-environment --all; npm run test:native'
 
       - name: Upload reliability and measurement evidence
         if: ${{ !cancelled() }}
