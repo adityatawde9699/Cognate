@@ -6,5 +6,6 @@ export default defineConfig({
         globals: true,
         // Unit/integration tests live under src/. e2e/ is Playwright's turf.
         include: ['src/**/*.{test,spec}.{ts,tsx}'],
+        testTimeout: 15000,
     },
 });
