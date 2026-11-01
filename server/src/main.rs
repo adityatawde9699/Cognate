@@ -404,10 +404,44 @@ fn serve(mut req: Request, store: &Store, versions: &Versions, rate: &RateMap, c
     let _ = req.respond(cors_json(status, payload));
 }
 
+fn is_loopback_addr(addr: &str) -> bool {
+    let host = if let Some(stripped) = addr.strip_prefix('[') {
+        stripped.split(']').next().unwrap_or(stripped)
+    } else {
+        addr.split(':').next().unwrap_or(addr)
+    };
+    if host == "localhost" {
+        return true;
+    }
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        return ip.is_loopback();
+    }
+    if let Ok(sock) = addr.parse::<std::net::SocketAddr>() {
+        return sock.ip().is_loopback();
+    }
+    false
+}
+
+fn validate_startup_addr(addr: &str, token: &str, allow_open: bool) -> Result<(), String> {
+    if token.is_empty() && !is_loopback_addr(addr) && !allow_open {
+        return Err(format!(
+            "RELAY_TOKEN is empty and RELAY_ADDR ({addr}) is not loopback. Refusing to start open relay on a non-loopback address without RELAY_ALLOW_OPEN=1."
+        ));
+    }
+    Ok(())
+}
+
 fn main() {
     let addr = std::env::var("RELAY_ADDR").unwrap_or_else(|_| "127.0.0.1:8787".to_string());
     let data_path = std::env::var("RELAY_DATA").unwrap_or_else(|_| "relay-data.json".to_string());
     let token = std::env::var("RELAY_TOKEN").unwrap_or_default();
+    let allow_open = std::env::var("RELAY_ALLOW_OPEN").is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"));
+
+    if let Err(err) = validate_startup_addr(&addr, &token, allow_open) {
+        eprintln!("ERROR: {err}");
+        std::process::exit(1);
+    }
+
     let rate_limit = env_u32("RELAY_RATE_LIMIT", 240); // requests…
     let rate_window = env_u32("RELAY_RATE_WINDOW", 60) as u64; // …per this many seconds, per IP
     let workers = env_u32("RELAY_WORKERS", 16).clamp(2,64); // a pool so long-polls don't block others
@@ -659,4 +693,16 @@ mod tests {
         stopped.store(true,std::sync::atomic::Ordering::SeqCst);for worker in workers {worker.join().unwrap();}
     }
 
+    #[test]
+    fn refuses_to_start_open_on_non_loopback_without_override() {
+        assert!(validate_startup_addr("127.0.0.1:8787", "", false).is_ok());
+        assert!(validate_startup_addr("localhost:8787", "", false).is_ok());
+        assert!(validate_startup_addr("[::1]:8787", "", false).is_ok());
+        assert!(validate_startup_addr("0.0.0.0:8787", "secret", false).is_ok());
+        assert!(validate_startup_addr("0.0.0.0:8787", "", true).is_ok());
+        assert!(validate_startup_addr("192.168.1.5:8787", "", false).is_err());
+        let err = validate_startup_addr("0.0.0.0:8787", "", false).unwrap_err();
+        assert!(err.contains("RELAY_TOKEN is empty"));
+        assert!(err.contains("RELAY_ALLOW_OPEN=1"));
+    }
 }
