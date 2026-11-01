@@ -22,7 +22,14 @@ and roadmap before proposing larger changes.
    - `npm run typecheck`, `npm run build`, and `npm run verify:build`
 3. Add tests for new logic. Pure, platform-agnostic logic lives in `src/services`
    and should be unit-/property-tested; cross-cutting flows get an e2e spec.
-4. Open the PR.
+4. Sign off every commit under the
+   [Developer Certificate of Origin (DCO)](https://developercertificate.org/):
+   ```
+   git commit -s -m "fix: description"
+   ```
+   This certifies that you authored or have the right to submit the contribution
+   under the project's license. Unsigned commits will be rejected by CI.
+5. Open the PR.
 
 ## Architecture Notes
 

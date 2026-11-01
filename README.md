@@ -33,7 +33,7 @@ Desktop stores tasks in SQLite; browser/PWA uses transactional IndexedDB with re
 | Cloud vendor lock-in | Everything in the cloud | **Local-first** + optional sync |
 | AI requires cloud API | Dependent on OpenAI/Claude | **Local Ollama** or your own key |
 | Losing data offline | Must stay connected | **Local editing**; offline shell and sync recovery need validation |
-| Server reading your data | Trust the corporation | **E2E encrypted**, server can't read it |
+| Server reading your data | Trust the corporation | **E2E encrypted** sync; relay sees room IDs, sizes, and timing but not plaintext. Security depends on passphrase strength |
 | Meetings trash your plan | Stale schedule, manual fix | **Auto-reflow** when schedule changes |
 | Can't work as a team | Lone wolf or group chats | **Shared projects** (prototype) |
 | "Smart" planning is fragile | Single point of failure | **Deterministic scheduler** you can audit |
@@ -57,7 +57,7 @@ Open the Plan view and use Auto-plan to schedule local work. Automatic reflow an
 - 🍅 **Pomodoro + Focus mode** — built-in timers and distraction-free working
 
 **Privacy & Sync**
-- 🔒 **End-to-end encrypted** — your server/relay *cannot* read your data, even if compromised
+- 🔒 **End-to-end encrypted** — sync data is encrypted with a passphrase-derived key before leaving the device. The relay stores ciphertext and cannot decrypt it, but it does see room IDs, payload sizes, and timing. E2E security depends on passphrase strength; a weak passphrase can be brute-forced offline against the room ID
 - 📱 **Local editing** — persisted tasks can be edited locally; offline PWA startup and reconnect fault behavior remain unverified
 - 🔄 **CRDT sync** — edit tasks on laptop and phone simultaneously; operation merging exists; incomplete logging and malformed collisions remain blockers
 - 🌐 **PWA companion** — installable browser shell; first-install offline/update lifecycle is unverified
@@ -130,9 +130,9 @@ chmod +x Cognate.AppImage
 ### Verify Download
 Checksum generation is not enforced by the current release workflow. If a release provides a checksum, compare it with your downloaded artifact. Example:
 ```bash
-sha256sum Cognate_0.1.0_x64_en-US.msi
+sha256sum Cognate_3.1.0-rc.7_x64_en-US.msi
 ```
-Use the exact artifact filename and independently verify the checksum source; signed artifact verification remains production roadmap work.
+Use the exact artifact filename from the release you downloaded and independently verify the checksum source; signed artifact verification remains production roadmap work.
 
 ### Frequently Asked Questions
 
@@ -202,7 +202,7 @@ npm run build         # PWA → dist/
 |---|---|
 | **Plan your day** | Open Plan → click Auto-plan. Drag a block to pin. |
 | **Quick-add a task** | Press `⌘K` → type naturally ("ship deck friday 90m #work") → Enter |
-| **Sync across devices** | Settings → Live sync → enter relay URL + passphrase on each device |
+| **Sync across devices** | Settings → Live sync → enter relay URL + passphrase on each device. The sync passphrase is the sole secret protecting your data — choose a strong one |
 | **Share a project** | Settings → Shared projects → share → copy invite → teammate joins |
 | **Use local AI** | Settings → AI → Go fully private (Ollama) → configure a local endpoint |
 | **Keyboard shortcuts** | `⌘K` palette · `N` new · `/` search · `1/2/3` filters · `T` theme · `Esc` close · `Ctrl/⌘+Z` undo |
@@ -219,7 +219,19 @@ The [production roadmap](docs/PRODUCTION_ROADMAP.md) is the implementation prior
 
 ## Performance
 
-There is no reproducible benchmark harness in this checkout. Previously published exact timings and load figures are withdrawn. See [performance validation](docs/BENCHMARKS.md) for the measurements required before making claims.
+The following medians and p95 latencies were measured in Node (Vite SSR transform), not in a browser or native runtime. Cold and warm application startup is unmeasured. See [docs/BENCHMARKS.md](docs/BENCHMARKS.md) for methodology, hardware, and caveats.
+
+| Workload | Median | p95 |
+| --- | ---: | ---: |
+| Planner, 100 tasks | 0.1 ms | 0.1 ms |
+| Planner, 1,000 tasks | 0.3 ms | 0.4 ms |
+| Planner, 10,000 tasks | 3.2 ms | 4.7 ms |
+| Merge, 50,000 operations | 303.2 ms | 310.4 ms |
+| Materialize, 50,000 operations | 155.5 ms | 183.2 ms |
+| Project 10,000 tasks from 50,000 operations | 156.3 ms | 178.6 ms |
+| Serialize 50,000 operations | 36.8 ms | 40.9 ms |
+
+Relay: 8.3 ms median / 14.2 ms p95 per 30 KB durable upload (250 sequential local loopback requests). These are not production load or public-network results.
 
 ## Testing
 
