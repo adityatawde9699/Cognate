@@ -555,14 +555,33 @@ fn purge_expired_rooms(data: &mut Data, versions: &mut HashMap<String, u64>, now
     }
 }
 
+fn ip_budget_key(ip: &str) -> String {
+    if let Ok(addr) = ip.parse::<std::net::IpAddr>() {
+        match addr {
+            std::net::IpAddr::V4(v4) => v4.to_string(),
+            std::net::IpAddr::V6(v6) => {
+                let segs = v6.segments();
+                format!("{:x}:{:x}:{:x}:{:x}::/64", segs[0], segs[1], segs[2], segs[3])
+            }
+        }
+    } else {
+        ip.to_string()
+    }
+}
+
 /// Returns true if the request is allowed; counts it against the window.
 fn rate_ok(rate: &RateMap, ip: &str, now: u64, limit: u32, window: u64) -> bool {
+    let key = ip_budget_key(ip);
     let mut m = rate.lock().unwrap();
-    if m.len()>=10000 {
-        m.retain(|_,bucket|now.saturating_sub(bucket.window_start)<window);
-        if m.len()>=10000 && !m.contains_key(ip) {return false;}
+    if m.len() >= 10000 {
+        m.retain(|_, bucket| now.saturating_sub(bucket.window_start) < window);
+        if m.len() >= 10000 && !m.contains_key(&key) {
+            if let Some(oldest_key) = m.iter().min_by_key(|(_, b)| b.window_start).map(|(k, _)| k.clone()) {
+                m.remove(&oldest_key);
+            }
+        }
     }
-    let b = m.entry(ip.to_string()).or_insert(Bucket { window_start: now, count: 0 });
+    let b = m.entry(key).or_insert(Bucket { window_start: now, count: 0 });
     if now.saturating_sub(b.window_start) >= window {
         b.window_start = now;
         b.count = 0;
@@ -731,6 +750,7 @@ fn reserve_poll(active: &std::sync::atomic::AtomicUsize, limit: usize) -> bool {
 }
 
 fn check_write_limits(ip: &str, path: &str, body: &str, store: &Store, cfg: &Config) -> Option<(u16, String)> {
+    let key = ip_budget_key(ip);
     let parts: Vec<&str> = path.split('?').next().unwrap_or("").split('/').filter(|s| !s.is_empty()).collect();
     let room_key = if (parts.len() == 4 || parts.len() == 5) && parts[0] == "v2" && parts[1] == "rooms" {
         format!("@v2:{}", parts[2])
@@ -748,8 +768,24 @@ fn check_write_limits(ip: &str, path: &str, body: &str, store: &Store, cfg: &Con
                 || now.saturating_sub(b.new_rooms_window_start) < 3600
                 || !b.created_rooms.is_empty()
         });
+        if q_guard.len() >= 10000 && !q_guard.contains_key(&key) {
+            let oldest_key = q_guard
+                .iter()
+                .filter(|(_, b)| b.created_rooms.is_empty())
+                .min_by_key(|(_, b)| b.write_window_start.max(b.new_rooms_window_start))
+                .map(|(k, _)| k.clone())
+                .or_else(|| {
+                    q_guard
+                        .iter()
+                        .min_by_key(|(_, b)| b.write_window_start.max(b.new_rooms_window_start))
+                        .map(|(k, _)| k.clone())
+                });
+            if let Some(k) = oldest_key {
+                q_guard.remove(&k);
+            }
+        }
     }
-    let budget = q_guard.entry(ip.to_string()).or_default();
+    let budget = q_guard.entry(key).or_default();
 
     let is_token_op = (parts.len() == 4 || parts.len() == 5) && parts[0] == "v2" && parts[1] == "rooms" && ["delete", "undelete", "claim", "freeze"].contains(&parts[3]);
     if is_token_op {
@@ -789,6 +825,7 @@ fn check_write_limits(ip: &str, path: &str, body: &str, store: &Store, cfg: &Con
 }
 
 fn record_successful_write(ip: &str, path: &str, body: &str, cfg: &Config) {
+    let key = ip_budget_key(ip);
     let parts: Vec<&str> = path.split('?').next().unwrap_or("").split('/').filter(|s| !s.is_empty()).collect();
     let room_key = if (parts.len() == 4 || parts.len() == 5) && parts[0] == "v2" && parts[1] == "rooms" {
         format!("@v2:{}", parts[2])
@@ -797,9 +834,18 @@ fn record_successful_write(ip: &str, path: &str, body: &str, cfg: &Config) {
     } else {
         return;
     };
+    let now = now_secs();
     let mut q_guard = cfg.quotas.lock().unwrap();
-    let budget = q_guard.entry(ip.to_string()).or_default();
+    let budget = q_guard.entry(key).or_default();
+    if budget.write_window_start == 0 || now.saturating_sub(budget.write_window_start) >= 3600 {
+        budget.write_window_start = now;
+        budget.write_bytes = 0;
+    }
     budget.write_bytes = budget.write_bytes.saturating_add(body.len());
+    if budget.new_rooms_window_start == 0 || now.saturating_sub(budget.new_rooms_window_start) >= 3600 {
+        budget.new_rooms_window_start = now;
+        budget.new_rooms_count = 0;
+    }
     if !budget.created_rooms.contains(&room_key) {
         budget.new_rooms_count += 1;
         budget.created_rooms.insert(room_key);
@@ -905,8 +951,9 @@ fn serve(mut req: Request, store: &Store, versions: &Versions, rate: &RateMap, c
                 if res.0 == 200 {
                     record_successful_write(&ip, &path, &body, cfg);
                 } else if res.0 == 401 || res.0 == 403 {
+                    let key = ip_budget_key(&ip);
                     let mut q_guard = cfg.quotas.lock().unwrap();
-                    let budget = q_guard.entry(ip.to_string()).or_default();
+                    let budget = q_guard.entry(key).or_default();
                     budget.failed_tokens_count = budget.failed_tokens_count.saturating_add(1);
                 }
                 res
@@ -1809,5 +1856,53 @@ mod tests {
         assert_eq!(body_wrong_token, body_unknown_room, "wrong token and unknown room must return identical response");
 
         let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn ipv6_addresses_share_budget_per_64_subnet() {
+        let path = std::env::temp_dir().join(format!("cognate-ipv6-{}.json", std::process::id()));
+        let p = path.to_str().unwrap().to_string();
+        let _ = std::fs::remove_file(&p);
+
+        let cfg = Config::new(p.clone(), "".into(), 100, 60, 1, 0, 1024, 10, 10240);
+        let store = Arc::new(empty());
+
+        let ip1 = "2001:db8:abcd:0012:0000:0000:0000:0001";
+        let ip2 = "2001:db8:abcd:0012:ffff:ffff:ffff:ffff";
+        let ip_diff_subnet = "2001:db8:abcd:0013::1";
+
+        // Record a 600-byte write from ip1
+        record_successful_write(ip1, "/v2/rooms/test-room/batches/b1", &"x".repeat(600), &cfg);
+
+        // ip2 is in the same /64 subnet, so an additional 600-byte write should exceed the 1024-byte limit
+        let res_ip2 = check_write_limits(ip2, "/v2/rooms/test-room/batches/b2", &"x".repeat(600), &store, &cfg);
+        assert!(res_ip2.is_some(), "ip2 in same /64 subnet should be blocked by shared write budget");
+        assert_eq!(res_ip2.unwrap().0, 429);
+
+        // ip_diff_subnet is in a different /64 subnet, so 600-byte write should be allowed
+        let res_diff = check_write_limits(ip_diff_subnet, "/v2/rooms/test-room/batches/b3", &"x".repeat(600), &store, &cfg);
+        assert!(res_diff.is_none(), "ip in different /64 subnet should have separate budget");
+
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn tracking_map_eviction_bounds_memory_and_allows_new_ips() {
+        let rate: RateMap = Mutex::new(HashMap::new());
+        let now = 1_000_000;
+
+        // Populate with 10,000 distinct rotating IPs within the active window
+        for i in 0..10_000 {
+            let ip = format!("198.51.100.{}", i);
+            assert!(rate_ok(&rate, &ip, now, 10, 60));
+        }
+        assert_eq!(rate.lock().unwrap().len(), 10_000);
+
+        // A new legitimate IP arrives at the same time: MUST NOT be locked out
+        let new_ip = "203.0.113.1";
+        let allowed = rate_ok(&rate, new_ip, now, 10, 60);
+        assert!(allowed, "new legitimate IP must not be locked out when tracking map is full");
+        // Map size must remain bounded at 10,000
+        assert!(rate.lock().unwrap().len() <= 10_000, "tracking map size must remain bounded");
     }
 }

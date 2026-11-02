@@ -43,6 +43,13 @@ Client (203.0.113.195) -> Cloudflare -> nginx -> Relay (127.0.0.1:8787)
   - Leftmost `1.2.3.4` is ignored as untrusted input.
 - If fewer than `RELAY_TRUSTED_HOPS` hops are present or if candidate parsing fails, the relay safely falls back to the direct socket IP.
 
+> [!WARNING]
+> Behind a reverse proxy (e.g., Cloudflare, nginx, Caddy, or an AWS ALB) without configuring `RELAY_TRUSTED_HOPS`, the relay falls back to the connecting socket IP (the proxy itself). Consequently, **all users behind that proxy will share a single rate-limit and write-budget bucket**, meaning heavy activity or token failures by one user can throttle or lock out all users on that proxy. Always configure `RELAY_TRUSTED_HOPS` to match the exact number of upstream proxy hops in front of the relay.
+
+### Client IP & IPv6 Subnet Keying
+
+To prevent adversaries from bypassing IP-based write budgets or rate limits by cycling through addresses in an allocated `/64` IPv6 prefix, all IPv6 client addresses are normalized and keyed by their `/64` subnet (the first 64 bits). IPv4 addresses are keyed individually (`/32`). Tracking maps are bounded with least-recently-active eviction to prevent memory exhaustion under rotating IP attacks without locking out legitimate clients.
+
 Set the URL, passphrase, and optional access token in Settings → Live sync. See [server/README.md](../server/README.md) for endpoint details.
 
 ## Protocol v2
