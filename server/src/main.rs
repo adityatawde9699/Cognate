@@ -41,13 +41,24 @@ const MAX_ACTORS: usize = 128;
 const DEFAULT_ROOM_QUOTA: usize = 8 * 1_048_576;
 static ROOM_QUOTA: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(DEFAULT_ROOM_QUOTA);
 
+thread_local! {
+    static TEST_ROOM_QUOTA: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
+
 fn room_quota() -> usize {
-    ROOM_QUOTA.load(std::sync::atomic::Ordering::Relaxed)
+    TEST_ROOM_QUOTA.with(|c| c.get()).unwrap_or_else(|| {
+        ROOM_QUOTA.load(std::sync::atomic::Ordering::Relaxed)
+    })
 }
 
 #[cfg(test)]
 fn set_room_quota_for_tests(quota: usize) {
-    ROOM_QUOTA.store(quota, std::sync::atomic::Ordering::Relaxed);
+    TEST_ROOM_QUOTA.with(|c| c.set(Some(quota)));
+}
+
+#[cfg(test)]
+fn reset_room_quota_for_tests() {
+    TEST_ROOM_QUOTA.with(|c| c.set(None));
 }
 
 fn room_bytes(room_data: &HashMap<String, Value>) -> usize {
@@ -113,8 +124,12 @@ fn durable_put(store: &Store, versions: &Versions, path: &str, body: &str, data_
     }
     *guard = candidate;
     DURABLE_WRITES.fetch_add(1,std::sync::atomic::Ordering::Relaxed);
-    for (room,_) in candidate_versions.into_inner().unwrap() {
-        *versions.lock().unwrap().entry(room).or_insert(0)+=1;
+    for (room, v) in candidate_versions.into_inner().unwrap() {
+        if room.starts_with("@v2:") {
+            versions.lock().unwrap().insert(room, v);
+        } else {
+            *versions.lock().unwrap().entry(room).or_insert(0) += v;
+        }
     }
     response
 }
@@ -134,7 +149,7 @@ pub fn route_v(store: &Store, versions: &Versions, method: &str, path: &str, bod
     // V2 is an immutable, durable batch journal. Cursors live with ciphertext,
     // so restart never rewinds a client's incremental position.
     if parts.first()==Some(&"v2") {
-        return batch_route(store,method,path,body);
+        return batch_route(store,versions,method,path,body);
     }
     if parts.first()==Some(&"rooms") && (parts.len()<2 || !identifier(parts[1]) || (parts.len()==4 && !identifier(parts[3]))) {return (400,json!({"error":"invalid room or actor"}).to_string());}
     match (method, parts.as_slice()) {
@@ -188,14 +203,14 @@ pub fn route_v(store: &Store, versions: &Versions, method: &str, path: &str, bod
     }
 }
 
-fn batch_route(store: &Store, method: &str, path: &str, body: &str) -> (u16,String) {
+fn batch_route(store: &Store, versions: &Versions, method: &str, path: &str, body: &str) -> (u16,String) {
     let parts: Vec<_> = path.split('?').next().unwrap_or("").split('/').filter(|s|!s.is_empty()).collect();
-    if parts.len()<4 || parts[1]!="rooms" || !["batches","version","poll"].contains(&parts[3]) || !identifier(parts[2]) {
+    if parts.len()<4 || parts[1]!="rooms" || !["batches","version"].contains(&parts[3]) || !identifier(parts[2]) {
         return (400,json!({"error":"invalid batch path"}).to_string());
     }
     let room = format!("@v2:{}",parts[2]);
     let mut guard = store.lock().unwrap();
-    if method=="GET" && parts.len()==4 && ["version","poll"].contains(&parts[3]) {
+    if method=="GET" && parts.len()==4 && parts[3]=="version" {
         let version=guard.get(&room).map(|r|r.values().filter_map(|v|v["cursor"].as_u64()).max().unwrap_or(0)).unwrap_or(0);
         return (200,json!({"version":version}).to_string());
     }
@@ -213,7 +228,7 @@ fn batch_route(store: &Store, method: &str, path: &str, body: &str) -> (u16,Stri
             if (!guard.contains_key(&room) && guard.len()>=MAX_ROOMS) || guard.get(&room).is_some_and(|r|r.len()>=10000) {return (507,json!({"error":"batch journal quota exceeded"}).to_string());}
             let cursor=guard.get(&room).map(|r|r.values().filter_map(|v|v["cursor"].as_u64()).max().unwrap_or(0)).unwrap_or(0)+1;
             blob["batch_id"]=json!(parts[4]); blob["cursor"]=json!(cursor);
-            let mut candidate=guard.clone(); candidate.entry(room).or_default().insert(parts[4].into(),blob);
+            let mut candidate=guard.clone(); candidate.entry(room.clone()).or_default().insert(parts[4].into(),blob);
             if serde_json::to_vec(&candidate).map_or(true,|d|d.len()>MAX_STORE) {return (507,json!({"error":"store quota exceeded"}).to_string());}
             if let Some(r) = candidate.get(&format!("@v2:{}",parts[2])) {
                 if room_bytes(r) > room_quota() {
@@ -221,6 +236,7 @@ fn batch_route(store: &Store, method: &str, path: &str, body: &str) -> (u16,Stri
                 }
             }
             *guard=candidate;
+            versions.lock().unwrap().insert(room.clone(), cursor);
             (200,json!({"batch_id":parts[4],"cursor":cursor,"durable":true}).to_string())
         },
         ("GET",4) => {
@@ -413,13 +429,26 @@ fn serve(mut req: Request, store: &Store, versions: &Versions, rate: &RateMap, c
     if read.is_err() || body.len()>MAX_BODY {let _=req.respond(cors_json(413,json!({"error":"invalid or oversized request"}).to_string()));return;}
 
     // The long-poll route blocks; handle it here so route_v stays pure/non-blocking.
+    // Both v1 (/rooms/{room}/poll) and v2 (/v2/rooms/{room}/poll) block using reserve_poll.
     let parts: Vec<&str> = path.split('?').next().unwrap_or("").split('/').filter(|s| !s.is_empty()).collect();
-    let (status, payload) = if let ("GET", ["rooms", room, "poll"]) = (method.as_str(), parts.as_slice()) {
+    let is_v1_poll = matches!((method.as_str(), parts.as_slice()), ("GET", ["rooms", _, "poll"]));
+    let is_v2_poll = matches!((method.as_str(), parts.as_slice()), ("GET", ["v2", "rooms", _, "poll"]));
+    let (status, payload) = if is_v1_poll || is_v2_poll {
+        let room = if is_v1_poll { parts[1] } else { parts[2] };
+        let version_key = if is_v2_poll { format!("@v2:{}", room) } else { room.to_string() };
         if !identifier(room) { (400,json!({"error":"invalid room"}).to_string()) }
         else if !reserve_poll(&cfg.active_polls, cfg.max_polls) {
             (503,json!({"error":"poll capacity exhausted; retry"}).to_string())
         } else {
-            let v = wait_for_change(versions, room, parse_since(&path), POLL_TIMEOUT, POLL_INTERVAL);
+            if is_v2_poll {
+                let mut v_guard = versions.lock().unwrap();
+                if !v_guard.contains_key(&version_key) {
+                    let s_guard = store.lock().unwrap();
+                    let cur = s_guard.get(&version_key).map(|r| r.values().filter_map(|v| v["cursor"].as_u64()).max().unwrap_or(0)).unwrap_or(0);
+                    v_guard.insert(version_key.clone(), cur);
+                }
+            }
+            let v = wait_for_change(versions, &version_key, parse_since(&path), POLL_TIMEOUT, POLL_INTERVAL);
             cfg.active_polls.fetch_sub(1,std::sync::atomic::Ordering::AcqRel);
             (200u16, json!({ "version": v }).to_string())
         }
@@ -763,6 +792,78 @@ mod tests {
         assert_eq!(code, 200);
 
         // Reset room quota back to default
-        set_room_quota_for_tests(DEFAULT_ROOM_QUOTA);
+        reset_room_quota_for_tests();
+    }
+
+    #[test]
+    fn real_http_v2_poll_blocks_and_respects_capacity() {
+        fn get(addr: std::net::SocketAddr, path: &str) -> String {
+            use std::io::{Read, Write};
+            let mut client = std::net::TcpStream::connect(addr).unwrap();
+            client.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+            write!(client, "GET {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n").unwrap();
+            let mut result = String::new();
+            client.read_to_string(&mut result).unwrap();
+            result
+        }
+        let server = Arc::new(Server::http("127.0.0.1:0").unwrap());
+        let addr = server.server_addr().to_ip().unwrap();
+        let store = Arc::new(empty());
+        let versions = Arc::new(Mutex::new(HashMap::new()));
+        let rate = Arc::new(Mutex::new(HashMap::new()));
+        let cfg = Arc::new(Config {
+            data_path: "unused".into(),
+            token: String::new(),
+            rate_limit: 100,
+            rate_window: 60,
+            active_polls: std::sync::atomic::AtomicUsize::new(0),
+            max_polls: 1,
+        });
+        let stopped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut workers = Vec::new();
+        for _ in 0..2 {
+            let (server, store, versions, rate, cfg, stopped) = (
+                server.clone(),
+                store.clone(),
+                versions.clone(),
+                rate.clone(),
+                cfg.clone(),
+                stopped.clone(),
+            );
+            workers.push(thread::spawn(move || {
+                while !stopped.load(std::sync::atomic::Ordering::SeqCst) {
+                    if let Some(req) = server.recv_timeout(Duration::from_millis(100)).unwrap() {
+                        serve(req, &store, &versions, &rate, &cfg);
+                    }
+                }
+            }));
+        }
+
+        // 1. /version is non-blocking and returns current cursor (0)
+        let ver = get(addr, "/v2/rooms/r/version");
+        assert!(ver.starts_with("HTTP/1.1 200"));
+        assert!(ver.contains("\"version\":0"));
+
+        // 2. /v2/rooms/r/poll?since=0 occupies a poll slot and blocks
+        let poll = thread::spawn(move || get(addr, "/v2/rooms/r/poll?since=0"));
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while cfg.active_polls.load(std::sync::atomic::Ordering::SeqCst) == 0 && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(cfg.active_polls.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+        // 3. While poll slot is occupied, second poll gets 503 capacity exhausted
+        assert!(get(addr, "/v2/rooms/r/poll?since=0").starts_with("HTTP/1.1 503"));
+
+        // 4. Updating room cursor unblocks the waiting poll
+        versions.lock().unwrap().insert("@v2:r".into(), 1);
+        let poll_res = poll.join().unwrap();
+        assert!(poll_res.starts_with("HTTP/1.1 200"));
+        assert!(poll_res.contains("\"version\":1"));
+
+        stopped.store(true, std::sync::atomic::Ordering::SeqCst);
+        for worker in workers {
+            worker.join().unwrap();
+        }
     }
 }
