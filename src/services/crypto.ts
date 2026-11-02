@@ -11,6 +11,8 @@
    the browser, and Node — so this is identical everywhere and unit-tested.
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 
+import { isCommonPassword } from './commonPasswords';
+
 const PBKDF2_ITERS = 150_000;
 const KEY_SALT = 'cognate-sync-key-v1';
 
@@ -208,3 +210,214 @@ export async function deriveSyncKey(passphrase:string):Promise<CryptoKey> {
   const base=await subtle().importKey('raw',enc.encode(passphrase),'PBKDF2',false,['deriveKey']);
   return subtle().deriveKey({name:'PBKDF2',salt:enc.encode('cognate-sync-key-v2'),iterations:600000,hash:'SHA-256'},base,{name:'AES-GCM',length:256},false,['encrypt','decrypt']);
 }
+
+/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Sync Protocol v3 (Act 3.2: single PBKDF2 + HKDF-SHA256, Setup Code, & Soft-Delete)
+   ──────────────────────────────────────────────────────
+   - 128-bit random Setup Code S encoded via Crockford Base32 + Modulo-32 checksum.
+   - Single PBKDF2 stretches normalized passphrase + salt ("cognate-v3:" || 0x10 || S)
+     into Master Secret M (256-bit PRK).
+   - HKDF-Expand derives K_v3 (data key), R_v3 (room id), and C_v3 (genesis verifier).
+   - Random delete token T_del registered as SHA-256(T_del) allows authorized soft-delete.
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+
+const CROCKFORD_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+const CROCKFORD_MAP = new Map<string, number>();
+for (let i = 0; i < CROCKFORD_ALPHABET.length; i++) {
+  CROCKFORD_MAP.set(CROCKFORD_ALPHABET[i], i);
+}
+
+/** Mint 16 cryptographically random bytes for a v3 Setup Code. */
+export function generateSetupCode(): Uint8Array {
+  return randomBytes(16);
+}
+
+/**
+ * Encode 16 raw bytes into Crockford Base32 with a position-weighted modulo-32 check symbol.
+ * Output format: 4-4-4-4-4-4-3 (27 characters + 6 hyphens).
+ */
+export function encodeSetupCode(bytes: Uint8Array): string {
+  if (bytes.length !== 16) throw new Error('Expected 16 raw bytes for Setup Code.');
+  const digits: number[] = [];
+  let buffer = 0;
+  let bitsLeft = 0;
+  for (let i = 0; i < 16; i++) {
+    buffer = (buffer << 8) | bytes[i];
+    bitsLeft += 8;
+    while (bitsLeft >= 5) {
+      bitsLeft -= 5;
+      digits.push((buffer >> bitsLeft) & 0x1f);
+    }
+  }
+  if (bitsLeft > 0) {
+    digits.push((buffer << (5 - bitsLeft)) & 0x1f);
+  }
+  let sum = 0;
+  for (let i = 0; i < 26; i++) {
+    sum += (i + 1) * digits[i];
+  }
+  const check = sum % 32;
+  const raw = digits.map((d) => CROCKFORD_ALPHABET[d]).join('') + CROCKFORD_ALPHABET[check];
+  return `${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8, 12)}-${raw.slice(12, 16)}-${raw.slice(16, 20)}-${raw.slice(20, 24)}-${raw.slice(24, 27)}`;
+}
+
+/**
+ * Decode a Crockford Base32 Setup Code into 16 raw bytes.
+ * Validates length (27 chars), alphabet, checksum, and zero pad bits.
+ * Supports lowercase, strips hyphens/whitespace, and maps O->0, I/L->1.
+ * Rejects U/u.
+ */
+export function decodeSetupCode(code: string): Uint8Array {
+  if (typeof code !== 'string') throw new Error('Invalid Setup Code: string expected');
+  const cleaned = code.replace(/[-\s]/g, '').toUpperCase();
+  if (cleaned.includes('U')) throw new Error('Invalid character: U is not allowed in Setup Code');
+  if (cleaned.length !== 27) throw new Error('Invalid Setup Code length: expected 27 characters');
+
+  const digits: number[] = [];
+  for (let i = 0; i < 27; i++) {
+    let ch = cleaned[i];
+    if (ch === 'O') ch = '0';
+    else if (ch === 'I' || ch === 'L') ch = '1';
+    const val = CROCKFORD_MAP.get(ch);
+    if (val === undefined) throw new Error(`Invalid Setup Code character: ${ch}`);
+    digits.push(val);
+  }
+
+  let sum = 0;
+  for (let i = 0; i < 26; i++) {
+    sum += (i + 1) * digits[i];
+  }
+  if ((sum % 32) !== digits[26]) {
+    throw new Error('Invalid Setup Code checksum');
+  }
+
+  if ((digits[25] & 0x03) !== 0) {
+    throw new Error('Invalid Setup Code padding');
+  }
+
+  const bytes = new Uint8Array(16);
+  let buffer = 0;
+  let bitsLeft = 0;
+  let byteIndex = 0;
+
+  for (let i = 0; i < 26; i++) {
+    const d = digits[i];
+    if (i === 25) {
+      buffer = (buffer << 3) | (d >> 2);
+      bitsLeft += 3;
+    } else {
+      buffer = (buffer << 5) | d;
+      bitsLeft += 5;
+    }
+    while (bitsLeft >= 8 && byteIndex < 16) {
+      bitsLeft -= 8;
+      bytes[byteIndex++] = (buffer >> bitsLeft) & 0xff;
+    }
+  }
+
+  return bytes;
+}
+
+/**
+ * Validates a v3 passphrase according to Section 4.1:
+ * - NFKD normalized and trimmed
+ * - >= 12 Unicode scalar values
+ * - >= 4 unique code points
+ * - Not a commonly used password
+ */
+export function validatePassphrase(passphrase: string): { valid: boolean; error?: string } {
+  if (typeof passphrase !== 'string') {
+    return { valid: false, error: 'Passphrase must be a string' };
+  }
+  const normalized = passphrase.normalize('NFKD').trim();
+  const scalarCount = [...normalized].length;
+  if (scalarCount < 12) {
+    return { valid: false, error: 'Passphrase must contain at least 12 characters' };
+  }
+  const uniqueCodePoints = new Set([...normalized]).size;
+  if (uniqueCodePoints < 4) {
+    return { valid: false, error: 'Passphrase must contain at least 4 unique characters' };
+  }
+  if (isCommonPassword(normalized)) {
+    return { valid: false, error: 'Passphrase is a commonly used password' };
+  }
+  return { valid: true };
+}
+
+export interface SyncCredentialsV3 {
+  masterSecret: Uint8Array;
+  key: CryptoKey;
+  keyBytes: Uint8Array;
+  room: string;
+  verifier: string;
+}
+
+/**
+ * Derive v3 sync credentials (K_v3, R_v3, C_v3) from passphrase and Setup Code.
+ * Single PBKDF2 (600,000 iters) + HKDF-SHA256 expansions (Section 3).
+ */
+export async function deriveSyncV3(passphrase: string, setupCode: Uint8Array): Promise<SyncCredentialsV3> {
+  const check = validatePassphrase(passphrase);
+  if (!check.valid) throw new Error(check.error);
+  if (setupCode.length !== 16) throw new Error('Setup code must be 16 bytes');
+
+  const normalized = passphrase.normalize('NFKD').trim();
+  // Salt: "cognate-v3:" (11 bytes) || 0x10 (1 byte) || setupCode (16 bytes) = 28 bytes
+  const salt = new Uint8Array(28);
+  salt.set(enc.encode('cognate-v3:'), 0);
+  salt[11] = 0x10;
+  salt.set(setupCode, 12);
+
+  const base = await subtle().importKey('raw', enc.encode(normalized), 'PBKDF2', false, ['deriveBits']);
+  const mBits = await subtle().deriveBits(
+    { name: 'PBKDF2', salt: buf(salt), iterations: 600000, hash: 'SHA-256' },
+    base,
+    256
+  );
+  const masterSecret = new Uint8Array(mBits);
+
+  const hkdfKey = await subtle().importKey('raw', buf(masterSecret), 'HKDF', false, ['deriveBits', 'deriveKey']);
+  const zeroSalt = new Uint8Array(0);
+
+  const keyBits = await subtle().deriveBits(
+    { name: 'HKDF', hash: 'SHA-256', salt: buf(zeroSalt), info: enc.encode('cognate-sync-key-v3') },
+    hkdfKey,
+    256
+  );
+  const keyBytes = new Uint8Array(keyBits);
+  const key = await subtle().importKey('raw', buf(keyBytes), { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+
+  const roomBits = await subtle().deriveBits(
+    { name: 'HKDF', hash: 'SHA-256', salt: buf(zeroSalt), info: enc.encode('cognate-sync-room-v3') },
+    hkdfKey,
+    256
+  );
+  const room = toHex(roomBits).slice(0, 32);
+
+  const verifierBits = await subtle().deriveBits(
+    { name: 'HKDF', hash: 'SHA-256', salt: buf(zeroSalt), info: enc.encode('cognate-sync-verifier-v3') },
+    hkdfKey,
+    128
+  );
+  const verifier = toHex(verifierBits);
+
+  return {
+    masterSecret,
+    key,
+    keyBytes,
+    room,
+    verifier,
+  };
+}
+
+/** Mint 16 random bytes as a 32-character hex delete token T_del. */
+export function generateDeleteToken(): string {
+  return toHex(buf(randomBytes(16)));
+}
+
+/** Compute SHA-256 hash of delete token as a 64-character hex string for X-Delete-Token-Hash. */
+export async function hashDeleteToken(token: string): Promise<string> {
+  const digest = await subtle().digest('SHA-256', enc.encode(token));
+  return toHex(digest);
+}
+
