@@ -53,7 +53,7 @@ export async function setSecret(key: string, value: string): Promise<void> {
  */
 export async function migrateSecrets(): Promise<void> {
 
-  const keys = ['ai_api_key', 'int_slack', 'int_discord', 'sync_passphrase', 'crdt_signing_key', 'cal_oauth_tokens','sync_relay_token','cal_oauth_pending','calendar_ics_feed'];
+  const keys = ['ai_api_key', 'int_slack', 'int_discord', 'sync_passphrase', 'sync_setup_code', 'sync_delete_token', 'crdt_signing_key', 'cal_oauth_tokens','sync_relay_token','cal_oauth_pending','calendar_ics_feed'];
   const shares=JSON.parse((await getSetting('shares_v1','[]')) || '[]');
   for(const share of shares) keys.push(`share_secret_${share.id}`);
   for (const key of keys) {
