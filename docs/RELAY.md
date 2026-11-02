@@ -21,6 +21,7 @@ cargo clippy -- -D warnings
 | `RELAY_WORKERS` | `16` | Request worker count |
 | `RELAY_MAX_POLLS` | `workers / 2` (8) | Maximum concurrent long-poll slots |
 | `RELAY_ROOM_QUOTA` | `8388608` (8 MB) | Per-room byte quota to prevent single-room exhaustion |
+| `RELAY_TRUST_PROXY` | unset (false) | When set to `1` or `true`, rate limits by first `X-Forwarded-For` hop instead of socket IP |
 
 Set the URL, passphrase, and optional access token in Settings → Live sync. See [server/README.md](../server/README.md) for endpoint details.
 

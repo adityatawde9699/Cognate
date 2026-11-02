@@ -385,6 +385,20 @@ fn cors_json(status: u16, body: String) -> Response<std::io::Cursor<Vec<u8>>> {
         .with_header(header("Access-Control-Allow-Origin", "*"))
 }
 
+fn resolve_client_ip(socket_ip: &str, headers: &[Header], trust_proxy: bool) -> String {
+    if trust_proxy {
+        headers
+            .iter()
+            .find(|h| h.field.equiv("X-Forwarded-For"))
+            .and_then(|h| h.value.as_str().split(',').next())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| socket_ip.to_string())
+    } else {
+        socket_ip.to_string()
+    }
+}
+
 /// Immutable relay configuration shared across worker threads.
 struct Config {
     data_path: String,
@@ -393,6 +407,7 @@ struct Config {
     rate_window: u64,
     active_polls: std::sync::atomic::AtomicUsize,
     max_polls: usize,
+    trust_proxy: bool,
 }
 
 /// Handle one request end-to-end (CORS, rate limit, auth, route). Runs on a
@@ -425,8 +440,10 @@ fn serve(mut req: Request, store: &Store, versions: &Versions, rate: &RateMap, c
         return;
     }
 
-    // Rate limit by client IP (fixed window).
-    let ip = req.remote_addr().map(|a| a.ip().to_string()).unwrap_or_else(|| "unknown".into());
+    // Rate limit by client IP. When RELAY_TRUST_PROXY is set, use the first
+    // X-Forwarded-For hop; otherwise use the socket IP.
+    let socket_ip = req.remote_addr().map(|a| a.ip().to_string()).unwrap_or_else(|| "unknown".into());
+    let ip = resolve_client_ip(&socket_ip, req.headers(), cfg.trust_proxy);
     if !rate_ok(rate, &ip, now_secs(), cfg.rate_limit, cfg.rate_window) {
         let _ = req.respond(cors_json(429, json!({"error": "rate limited"}).to_string()));
         return;
@@ -534,12 +551,14 @@ fn main() {
     let workers = env_u32("RELAY_WORKERS", 16).clamp(2,64); // a pool so long-polls don't block others
     let max_polls = resolve_max_polls(workers, std::env::var("RELAY_MAX_POLLS").ok().as_deref());
 
+    let trust_proxy = std::env::var("RELAY_TRUST_PROXY").is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"));
+
     let server = Arc::new(Server::http(&addr).expect("failed to bind relay address"));
     let store: Arc<Store> = Arc::new(Mutex::new(load_store(&data_path).expect("Refusing to start with unreadable/corrupt relay data")));
     let versions: Arc<Versions> = Arc::new(Mutex::new(HashMap::new()));
     let rate: Arc<RateMap> = Arc::new(Mutex::new(HashMap::new()));
     let open = token.is_empty();
-    let cfg = Arc::new(Config { data_path, token, rate_limit, rate_window, active_polls: std::sync::atomic::AtomicUsize::new(0), max_polls });
+    let cfg = Arc::new(Config { data_path, token, rate_limit, rate_window, active_polls: std::sync::atomic::AtomicUsize::new(0), max_polls, trust_proxy });
     println!(
         "Cognate relay (E2E, ciphertext-only) on http://{addr} (data: {}, auth: {}, limit: {rate_limit}/{rate_window}s, workers: {workers}, max_polls: {max_polls})",
         cfg.data_path,
@@ -743,7 +762,7 @@ mod tests {
         let store=Arc::new(empty());let versions=Arc::new(Mutex::new(HashMap::new()));
         let copy=store.clone();let vc=versions.clone();
         let worker=thread::spawn(move || {
-            let cfg=Config {data_path:"/nonexistent-cognate-directory/relay.json".into(),token:"test-token".into(),rate_limit:100,rate_window:60,active_polls:std::sync::atomic::AtomicUsize::new(0),max_polls:1};
+            let cfg=Config {data_path:"/nonexistent-cognate-directory/relay.json".into(),token:"test-token".into(),rate_limit:100,rate_window:60,active_polls:std::sync::atomic::AtomicUsize::new(0),max_polls:1,trust_proxy:false};
             let request=server.recv_timeout(Duration::from_secs(3)).unwrap().unwrap();
             serve(request,&copy,&vc,&Mutex::new(HashMap::new()),&cfg);
         });
@@ -764,7 +783,7 @@ mod tests {
         }
         let server=Arc::new(Server::http("127.0.0.1:0").unwrap());let addr=server.server_addr().to_ip().unwrap();
         let store=Arc::new(empty());let versions=Arc::new(Mutex::new(HashMap::new()));let rate=Arc::new(Mutex::new(HashMap::new()));
-        let cfg=Arc::new(Config {data_path:"unused".into(),token:String::new(),rate_limit:100,rate_window:60,active_polls:std::sync::atomic::AtomicUsize::new(0),max_polls:1});
+        let cfg=Arc::new(Config {data_path:"unused".into(),token:String::new(),rate_limit:100,rate_window:60,active_polls:std::sync::atomic::AtomicUsize::new(0),max_polls:1,trust_proxy:false});
         let stopped=Arc::new(std::sync::atomic::AtomicBool::new(false));let mut workers=Vec::new();
         for _ in 0..2 {
             let (server,store,versions,rate,cfg,stopped)=(server.clone(),store.clone(),versions.clone(),rate.clone(),cfg.clone(),stopped.clone());
@@ -846,6 +865,7 @@ mod tests {
             rate_window: 60,
             active_polls: std::sync::atomic::AtomicUsize::new(0),
             max_polls: 1,
+            trust_proxy: false,
         });
         let stopped = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let mut workers = Vec::new();
@@ -923,5 +943,76 @@ mod tests {
         assert!(loaded.contains_key("@v2:bench"));
 
         let _ = std::fs::remove_file(p);
+    }
+
+    #[test]
+    fn client_ip_respects_relay_trust_proxy() {
+        let headers = vec![
+            Header::from_bytes(&b"X-Forwarded-For"[..], &b"203.0.113.195, 70.41.3.18"[..]).unwrap(),
+        ];
+        // Default (trust_proxy = false): stays socket IP
+        assert_eq!(resolve_client_ip("127.0.0.1", &headers, false), "127.0.0.1");
+
+        // trust_proxy = true: uses first X-Forwarded-For hop
+        assert_eq!(resolve_client_ip("127.0.0.1", &headers, true), "203.0.113.195");
+
+        // trust_proxy = true but no header: falls back to socket IP
+        assert_eq!(resolve_client_ip("127.0.0.1", &[], true), "127.0.0.1");
+
+        // whitespace trimming
+        let padded = vec![
+            Header::from_bytes(&b"X-Forwarded-For"[..], &b"  198.51.100.2 , 10.0.0.1 "[..]).unwrap(),
+        ];
+        assert_eq!(resolve_client_ip("127.0.0.1", &padded, true), "198.51.100.2");
+    }
+
+    #[test]
+    fn real_http_rate_limit_respects_trust_proxy() {
+        fn req(addr: std::net::SocketAddr, xff: Option<&str>) -> String {
+            use std::io::{Read, Write};
+            let mut client = std::net::TcpStream::connect(addr).unwrap();
+            client.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+            let header = xff.map(|h| format!("X-Forwarded-For: {h}\r\n")).unwrap_or_default();
+            write!(client, "GET /health HTTP/1.1\r\nHost: {addr}\r\n{header}Connection: close\r\n\r\n").unwrap();
+            let mut result = String::new();
+            client.read_to_string(&mut result).unwrap();
+            result
+        }
+        let server = Arc::new(Server::http("127.0.0.1:0").unwrap());
+        let addr = server.server_addr().to_ip().unwrap();
+        let store = Arc::new(empty());
+        let versions = Arc::new(Mutex::new(HashMap::new()));
+        let rate = Arc::new(Mutex::new(HashMap::new()));
+        // Rate limit: 2 requests per window. trust_proxy: true.
+        let cfg = Arc::new(Config {
+            data_path: "unused".into(),
+            token: String::new(),
+            rate_limit: 2,
+            rate_window: 60,
+            active_polls: std::sync::atomic::AtomicUsize::new(0),
+            max_polls: 1,
+            trust_proxy: true,
+        });
+        let stopped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (s, st, v, r, c, sp) = (server.clone(), store.clone(), versions.clone(), rate.clone(), cfg.clone(), stopped.clone());
+        let worker = thread::spawn(move || {
+            while !sp.load(std::sync::atomic::Ordering::SeqCst) {
+                if let Some(req) = s.recv_timeout(Duration::from_millis(100)).unwrap() {
+                    serve(req, &st, &v, &r, &c);
+                }
+            }
+        });
+
+        // 2 requests from 10.0.0.1 -> both succeed
+        assert!(req(addr, Some("10.0.0.1")).starts_with("HTTP/1.1 200"));
+        assert!(req(addr, Some("10.0.0.1")).starts_with("HTTP/1.1 200"));
+        // 3rd request from 10.0.0.1 -> rate limited (429)
+        assert!(req(addr, Some("10.0.0.1")).starts_with("HTTP/1.1 429"));
+
+        // Request from 10.0.0.2 over the same socket connection addr -> succeeds because trust_proxy separates by XFF
+        assert!(req(addr, Some("10.0.0.2")).starts_with("HTTP/1.1 200"));
+
+        stopped.store(true, std::sync::atomic::Ordering::SeqCst);
+        worker.join().unwrap();
     }
 }
