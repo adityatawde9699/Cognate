@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer } from 'node:net';
@@ -8,6 +8,7 @@ import { once } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import {
+  createWorkspaceGenesis,
   joinWorkspaceV3,
   migrateV2ToV3,
   retireLegacyV2Room,
@@ -15,6 +16,7 @@ import {
   claimLegacyV2Room,
   freezeLegacyV2Room,
   setMigrationFailpoint,
+  setMigrationBarrier,
 } from './migrationService';
 import {
   deriveKey,
@@ -204,11 +206,11 @@ describe('ITEM 4: Real-Relay Release Gate (no fakeBatchRelay)', () => {
         'after_freeze',
       ] as const;
 
-      const v2Pass = 'failpoint-test-passphrase-v2';
-      const v3Pass = 'failpoint-test-passphrase-v3-long';
-
       for (const fp of failpoints) {
+        const v2Pass = `failpoint-v2-${fp}`;
+        const v3Pass = `failpoint-v3-long-${fp}`;
         await disableSync();
+        await setSetting('sync_workspace_binding', '');
         // Setup initial v2 workspace state
         await setSetting('tasks_v1', JSON.stringify([{ id: 'task-fp', title: `Task for ${fp}` }]));
         await setSetting('projects_v1', '[]');
@@ -221,9 +223,38 @@ describe('ITEM 4: Real-Relay Release Gate (no fakeBatchRelay)', () => {
         // Inject failpoint
         setMigrationFailpoint(fp);
         await expect(migrateV2ToV3(v3Pass, setupCode)).rejects.toThrow(/FAILPOINT/);
+        setMigrationFailpoint(null);
+
+        // At before_publish: confirm v2 migration marker has NOT been posted yet.
+        // Posting the marker before v3 publish (Mutation M2) freezes stale clients before v3 exists.
+        if (fp === 'before_publish') {
+          const v2Room = await deriveRoomId(v2Pass);
+          const v2PageRaw = await httpGet(`${relay.url}/v2/rooms/${v2Room}/batches?after=0`);
+          const v2Page = JSON.parse(v2PageRaw);
+          const hasMarker = v2Page.batches?.some((b: any) => b.batch_id?.startsWith('migrated-'));
+          expect(hasMarker).toBe(false);
+        }
+
+        // At after_publish: confirm readback verification is enforced.
+        // If v3 room batch on the relay is corrupted, migrateV2ToV3 must reject on readback verification.
+        if (fp === 'after_publish') {
+          const v3RoomFile = join(relay.dataDir, 'data.json');
+          const data = JSON.parse(readFileSync(v3RoomFile, 'utf-8'));
+          const savedV3 = JSON.parse(JSON.stringify(data[`@v2:${creds.room}`]));
+          const batchKey = 'genesis';
+          data[`@v2:${creds.room}`][batchKey].ct = 'corrupted_ciphertext_payload';
+          writeFileSync(v3RoomFile, JSON.stringify(data));
+          await relay.restart();
+
+          await expect(migrateV2ToV3(v3Pass, setupCode)).rejects.toThrow();
+
+          // Restore batch and restart relay again to allow clean resume
+          data[`@v2:${creds.room}`] = savedV3;
+          writeFileSync(v3RoomFile, JSON.stringify(data));
+          await relay.restart();
+        }
 
         // Resume / restart migration without failpoint
-        setMigrationFailpoint(null);
         const res = await migrateV2ToV3(v3Pass, setupCode);
 
         expect(res.v3Room).toBe(creds.room);
@@ -236,6 +267,12 @@ describe('ITEM 4: Real-Relay Release Gate (no fakeBatchRelay)', () => {
         const readback = await open<SignedBatch>(creds.key, page.batches[0]);
         const readbackSnapshot = readback.snapshot as any;
         expect(readbackSnapshot?.tasks?.[0]?.title).toBe(`Task for ${fp}`);
+
+        // Confirm migration marker is posted to v2 room after resuming
+        const v2Room = await deriveRoomId(v2Pass);
+        const v2PageAfter = JSON.parse(await httpGet(`${relay.url}/v2/rooms/${v2Room}/batches?after=0`));
+        const hasMarkerAfter = v2PageAfter.batches?.some((b: any) => b.batch_id?.startsWith('migrated-'));
+        expect(hasMarkerAfter).toBe(true);
       }
     } finally {
       setMigrationFailpoint(null);
@@ -257,6 +294,22 @@ describe('ITEM 4: Real-Relay Release Gate (no fakeBatchRelay)', () => {
       await setSetting('sync_v2_write_frozen', 'false');
       await enableSync(relay.url, v2Pass);
 
+      // Real concurrency barrier: ensure both devices reach the publish step before either proceeds
+      let arrived = 0;
+      let releaseBarrier!: () => void;
+      const barrierPromise = new Promise<void>((resolve) => {
+        releaseBarrier = resolve;
+      });
+      const barrier = async () => {
+        arrived++;
+        if (arrived === 2) {
+          releaseBarrier();
+        } else {
+          await barrierPromise;
+        }
+      };
+      setMigrationBarrier(barrier);
+
       // Device 1 and Device 2 migrate concurrently with the same v3 credentials
       const [res1, res2] = await Promise.all([
         migrateV2ToV3(v3Pass, setupCode),
@@ -272,6 +325,7 @@ describe('ITEM 4: Real-Relay Release Gate (no fakeBatchRelay)', () => {
       const page = JSON.parse(pageRaw);
       expect(page.batches.length).toBe(1); // One genesis batch adopted by both
     } finally {
+      setMigrationBarrier(null);
       await relay.stop();
       rmSync(relay.dataDir, { recursive: true, force: true });
     }
@@ -298,6 +352,9 @@ describe('ITEM 4: Real-Relay Release Gate (no fakeBatchRelay)', () => {
       // Freeze Room A
       const freezeRes = await freezeLegacyV2Room(relay.url, roomA, tokA);
       expect(freezeRes.frozen).toBe(true);
+
+      // Verify unauthorized retire without valid delete token is rejected
+      await expect(retireLegacyV2Room(relay.url, roomA, attackerTok)).rejects.toThrow();
 
       // Soft-delete Room A
       const delRes = await retireLegacyV2Room(relay.url, roomA, tokA);
@@ -355,13 +412,21 @@ describe('ITEM 4: Real-Relay Release Gate (no fakeBatchRelay)', () => {
   it('5. A stale v2 client writes after the freeze and the write is rejected and surfaced to the user (not swallowed)', async () => {
     const relay = await spawnRelay();
     try {
-      const room = 'room-stale-v2-write';
-      const token = generateDeleteToken();
+      const v2Pass = 'v2-passphrase-to-freeze';
+      const room = await deriveRoomId(v2Pass);
       await httpPut(`${relay.url}/v2/rooms/${room}/batches/b1`, JSON.stringify({ v: 1, nonce: 'n', ct: 'initial' }));
-      await claimLegacyV2Room(relay.url, room, token);
-      await freezeLegacyV2Room(relay.url, room, token);
 
-      // Stale client attempting PUT receives 409 Conflict
+      // Migrate using migrateV2ToV3, which must perform server-side freeze on the legacy room
+      await disableSync();
+      await setSetting('tasks_v1', '[]');
+      await setSetting('projects_v1', '[]');
+      await setSetting('sync_v2_write_frozen', 'false');
+      await enableSync(relay.url, v2Pass);
+      const v3Pass = 'v3-secure-passphrase-must-be-long';
+      const setupCode = encodeSetupCode(generateSetupCode());
+      await migrateV2ToV3(v3Pass, setupCode);
+
+      // Stale client attempting PUT receives 409 Conflict from the relay
       const res = await fetch(`${relay.url}/v2/rooms/${room}/batches/b2`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -384,16 +449,25 @@ describe('ITEM 4: Real-Relay Release Gate (no fakeBatchRelay)', () => {
   it('6. Wrong passphrase and wrong setup code never create a room', async () => {
     const relay = await spawnRelay();
     try {
+      const validSetup = encodeSetupCode(generateSetupCode());
+      const validPass = 'valid-passphrase-must-be-long';
+      // Create valid workspace
+      await createWorkspaceGenesis(relay.url, validPass, validSetup);
+      const storeBefore = JSON.parse(readFileSync(relay.dataPath, 'utf8'));
+      const initialRoomCount = Object.keys(storeBefore).length;
+      expect(initialRoomCount).toBe(1);
+
+      // 1. Wrong setup code
       const wrongSetup = encodeSetupCode(new Uint8Array(16)); // all zeros
+      await expect(joinWorkspaceV3(relay.url, validPass, wrongSetup)).rejects.toThrow();
+
+      // 2. Wrong passphrase against existing setup code
       const wrongPass = 'invalid-passphrase-does-not-exist';
+      await expect(joinWorkspaceV3(relay.url, wrongPass, validSetup)).rejects.toThrow();
 
-      // Joining with non-existent setup code throws without creating room
-      await expect(joinWorkspaceV3(relay.url, wrongPass, wrongSetup)).rejects.toThrow();
-
-      // Check store on disk: no room was created
-      const exists = existsSync(relay.dataPath);
-      const storeData = exists ? JSON.parse(readFileSync(relay.dataPath, 'utf8')) : {};
-      expect(Object.keys(storeData).length).toBe(0);
+      // Check store on disk: exactly 1 room exists, no new room was created
+      const storeAfter = JSON.parse(readFileSync(relay.dataPath, 'utf8'));
+      expect(Object.keys(storeAfter).length).toBe(initialRoomCount);
     } finally {
       await relay.stop();
       rmSync(relay.dataDir, { recursive: true, force: true });

@@ -57,9 +57,14 @@ export type MigrationFailpoint =
   | null;
 
 let currentMigrationFailpoint: MigrationFailpoint = null;
+let currentMigrationBarrier: (() => Promise<void>) | null = null;
 
 export function setMigrationFailpoint(fp: MigrationFailpoint): void {
   currentMigrationFailpoint = fp;
+}
+
+export function setMigrationBarrier(barrier: (() => Promise<void>) | null): void {
+  currentMigrationBarrier = barrier;
 }
 
 /** Check if v2 room writes have been frozen locally due to migration. */
@@ -278,6 +283,9 @@ export async function migrateV2ToV3(
   const sealedGenesis = await seal(creds.key, signedGenesis);
 
   const delHash = await hashDeleteToken(deleteToken);
+  if (currentMigrationBarrier) {
+    await currentMigrationBarrier();
+  }
   try {
     await httpPut(
       `${cleanUrl}/v2/rooms/${creds.room}/batches/genesis?delete_token_hash=${delHash}`,
