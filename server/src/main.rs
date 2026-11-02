@@ -477,6 +477,12 @@ fn is_loopback_addr(addr: &str) -> bool {
     false
 }
 
+fn resolve_max_polls(workers: u32, override_val: Option<&str>) -> usize {
+    override_val
+        .and_then(|v| v.parse().ok())
+        .unwrap_or((workers / 2) as usize)
+}
+
 fn validate_startup_addr(addr: &str, token: &str, allow_open: bool) -> Result<(), String> {
     if token.is_empty() && !is_loopback_addr(addr) && !allow_open {
         return Err(format!(
@@ -505,15 +511,16 @@ fn main() {
     let rate_limit = env_u32("RELAY_RATE_LIMIT", 240); // requests…
     let rate_window = env_u32("RELAY_RATE_WINDOW", 60) as u64; // …per this many seconds, per IP
     let workers = env_u32("RELAY_WORKERS", 16).clamp(2,64); // a pool so long-polls don't block others
+    let max_polls = resolve_max_polls(workers, std::env::var("RELAY_MAX_POLLS").ok().as_deref());
 
     let server = Arc::new(Server::http(&addr).expect("failed to bind relay address"));
     let store: Arc<Store> = Arc::new(Mutex::new(load_store(&data_path).expect("Refusing to start with unreadable/corrupt relay data")));
     let versions: Arc<Versions> = Arc::new(Mutex::new(HashMap::new()));
     let rate: Arc<RateMap> = Arc::new(Mutex::new(HashMap::new()));
     let open = token.is_empty();
-    let cfg = Arc::new(Config { data_path, token, rate_limit, rate_window,active_polls:std::sync::atomic::AtomicUsize::new(0),max_polls:(workers/2) as usize });
+    let cfg = Arc::new(Config { data_path, token, rate_limit, rate_window, active_polls: std::sync::atomic::AtomicUsize::new(0), max_polls });
     println!(
-        "Cognate relay (E2E, ciphertext-only) on http://{addr} (data: {}, auth: {}, limit: {rate_limit}/{rate_window}s, workers: {workers})",
+        "Cognate relay (E2E, ciphertext-only) on http://{addr} (data: {}, auth: {}, limit: {rate_limit}/{rate_window}s, workers: {workers}, max_polls: {max_polls})",
         cfg.data_path,
         if open { "open" } else { "token" }
     );
@@ -865,5 +872,13 @@ mod tests {
         for worker in workers {
             worker.join().unwrap();
         }
+    }
+
+    #[test]
+    fn poll_capacity_respects_env_var_default_and_override() {
+        assert_eq!(resolve_max_polls(16, None), 8);
+        assert_eq!(resolve_max_polls(16, Some("4")), 4);
+        assert_eq!(resolve_max_polls(16, Some("12")), 12);
+        assert_eq!(resolve_max_polls(16, Some("invalid")), 8);
     }
 }

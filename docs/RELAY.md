@@ -19,6 +19,7 @@ cargo clippy -- -D warnings
 | `RELAY_RATE_LIMIT` | `240` | Per-IP requests per fixed window |
 | `RELAY_RATE_WINDOW` | `60` | Window seconds |
 | `RELAY_WORKERS` | `16` | Request worker count |
+| `RELAY_MAX_POLLS` | `workers / 2` (8) | Maximum concurrent long-poll slots |
 | `RELAY_ROOM_QUOTA` | `8388608` (8 MB) | Per-room byte quota to prevent single-room exhaustion |
 
 Set the URL, passphrase, and optional access token in Settings → Live sync. See [server/README.md](../server/README.md) for endpoint details.
@@ -27,7 +28,7 @@ Set the URL, passphrase, and optional access token in Settings → Live sync. Se
 
 - `PUT /v2/rooms/{room}/batches/{batch_id}` accepts a sealed `{v:1,nonce,ct}` object. Success returns `{batch_id,cursor,durable:true}` only after file/parent sync. Retrying identical ciphertext returns the same acknowledgement; replacing a batch ID returns 409.
 - `GET /v2/rooms/{room}/batches?after={cursor}` returns a contiguous page and its last cursor. Pages are bounded by 200 records and approximately 1 MB. Cursors are stored alongside ciphertext and survive relay restart.
-- `/v2/rooms/{room}/version` and `/poll` return the persisted current cursor. V2 poll is currently an immediate query; clients back off while unchanged. Legacy long polls reserve half of 2–64 workers.
+- `/v2/rooms/{room}/version` returns the persisted current cursor non-blocking. `/poll` long-polls for updates until change or timeout, bounded by `RELAY_MAX_POLLS` (default `workers / 2`, 8 by default).
 - `/metrics` exposes aggregate requests, durable writes, storage failures, active polls and record/room counts behind the configured bearer gate; it contains no room IDs or task data.
 
 Clients verify ECDSA signatures over version, batch ID, actor/public key, context (workspace or share plus epoch) and operations. They pin actor keys, reject future clocks over five minutes ahead and retain failed pages without advancing cursors. Local raw operations are the durable outbox; a prepared sealed batch remains until its durable acknowledgement is saved. Acknowledgements/cursors are scoped to both relay endpoint and room. Automatic errors have persisted exponential backoff; rounds are bounded. Active workspace key/endpoint changes and reconnects of existing history under a different key are blocked pending an explicit signed-history migration. Three independent row/history store tests exercise outage, duplicate acknowledgement and reconnect.
