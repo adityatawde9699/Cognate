@@ -58,9 +58,18 @@ Workspace passphrase possession grants device enrollment and read access. Existi
 
 Store quota is 32 MB, request quota 1 MB, at most 1000 stored rooms, 10000 v2 batches per room, per-room quota configurable via `RELAY_ROOM_QUOTA` (default 8 MB), and 128 legacy actors per room. Journals do not compact automatically; quota exhaustion fails explicitly. Legacy data is retained, but the new client does not silently ingest unsigned v1 live blobs. Export/import reviewed local operation bundles before moving old clients to v2. Signed v2 invitations must be minted by the original owner; old recovery kits restore capabilities only.
 
-Tests include immutable cursors across restart, collisions, exact retry, quota admission, real HTTP persistence failure and saturated polls with health still available. Actual disk-full, slow uploads, process-kill durability and staging/public load remain required deployment evidence.
+### Poll Capacity & Worker Sizing (`RELAY_MAX_POLLS`)
 
-## Proposal: Monotonic v2 Journal Compaction & TTL (Design Only)
+- **Default Value**: `workers / 2` (e.g. 8 slots with the default 16 workers).
+- **503 Exhaustion Behavior**: When concurrent long-polls reach `RELAY_MAX_POLLS`, new poll requests immediately receive HTTP `503 Service Unavailable` (`{"error":"poll capacity exhausted; retry"}`). Clients must retry with exponential backoff. Non-blocking routes (`/v2/rooms/{room}/version`, `/v2/rooms/{room}/batches`, `/health`) do not acquire poll slots and remain immediately available.
+- **Operator Sizing Guide for $N$ Devices**:
+  - Configure `RELAY_MAX_POLLS` to approximately $N \times 1.5$ to provide sufficient capacity during transient bursts (e.g., app launches, network reconnects).
+  - Enforce a ceiling of `RELAY_WORKERS - 2` on `RELAY_MAX_POLLS` so at least two worker threads remain unblocked for write traffic, non-blocking reads, and infrastructure health probes.
+  - Sizing rule: `RELAY_WORKERS >= RELAY_MAX_POLLS + 2`. Example: for $N = 20$ devices, configure `RELAY_MAX_POLLS=30` and `RELAY_WORKERS=32`.
+
+## Proposals (Design Only)
+
+### Proposal 1: Monotonic v2 Journal Compaction & TTL (Design Only)
 
 ### Problem Statement
 Currently, Protocol v2 batches in `server/src/main.rs` are immutable append-only records with no deletion mechanism. While the per-room byte quota (`RELAY_ROOM_QUOTA`, default 8 MB) prevents a single room from consuming the entire 32 MB store quota, active workspaces will eventually exhaust their room quota or hit the 10,000 batch limit unless older history can be compacted safely. Crucially, cursor identifiers must remain strictly monotonic so that clients polling with `?after={cursor}` never experience rewinds or missed updates.
@@ -94,6 +103,20 @@ Currently, Protocol v2 batches in `server/src/main.rs` are immutable append-only
 4. **Rollback & Safety Plan**:
    - Pruning is performed using the existing atomic write pattern (`write_tmp -> fsync -> rename -> fsync_parent`).
    - If an edge-case client is partitioned for longer than `RELAY_BATCH_TTL`, receiving `410 Gone` instructs the client to download the signed checkpoint at `watermark_cursor`, reset its local oplog projection, and resume incremental sync from `watermark_cursor`.
+
+### Proposal 2: Non-blocking / Event-Driven Polling (Design Only, Do Not Implement)
+
+- **Problem Statement**:
+  Under `tiny_http`, every long-poll request (`POLL_TIMEOUT` up to 25 seconds) blocks an entire OS worker thread in `wait_for_change`. While bounding active polls with `RELAY_MAX_POLLS` prevents long-polls from starving the write and health paths, this design does not scale past modest device counts. Each OS worker thread incurs significant virtual memory overhead (typically 2–8 MB stack per thread), and supporting 100+ concurrent polling devices would require a prohibitively large thread pool that increases context switching and kernel overhead.
+
+- **Proposed Architecture**:
+  - Replace `tiny_http` with an asynchronous runtime (`tokio`) and an asynchronous HTTP framework (`axum` or `hyper`).
+  - Instead of blocking worker threads with `thread::sleep`, long-poll handlers await an asynchronous watch or broadcast channel (e.g., `tokio::sync::watch` per room or a global event bus keyed by room) wrapped in an async timeout (`tokio::time::timeout`).
+  - When `durable_put` completes a write to a room, it publishes the new monotonic cursor to the room's watch channel. All awaiting long-poll coroutines wake immediately and serialize their HTTP response.
+  - If no write occurs before the timeout expires, the coroutine returns `{ "version": current_version }` without ever blocking an OS thread.
+
+- **Resource Efficiency**:
+  Asynchronous coroutine tasks require only a few hundred bytes of heap memory each. An async event-driven relay can support thousands of idle concurrent long-polls per megabyte of RAM while running on a minimal thread pool (e.g. matching CPU core count), completely eliminating thread exhaustion and 503 poll rejection.
 
 ## Deployment requirements
 
