@@ -60,6 +60,29 @@ describe('recoveryService — encrypted key escrow', () => {
     });
   });
 
+  it('preserves sync_setup_code and sync_delete_token in encrypted kit and restores on import', async () => {
+    const { setSecret, getSecret } = await import('../utils/secrets');
+    let kit = '';
+    const setupCode = '0410-6105-0R3G-G28A-1C60-T3GF-20E';
+    const deleteToken = 'deadbeef12345678deadbeef12345678';
+
+    await as(A, async () => {
+      await setSecret('sync_setup_code', setupCode);
+      await setSecret('sync_delete_token', deleteToken);
+      kit = await exportRecoveryKit('my-recovery-pass-long');
+    });
+
+    await as(B, async () => {
+      expect(await getSecret('sync_setup_code')).toBe('');
+      expect(await getSecret('sync_delete_token')).toBe('');
+
+      await importRecoveryKit(kit, 'my-recovery-pass-long');
+
+      expect(await getSecret('sync_setup_code')).toBe(setupCode);
+      expect(await getSecret('sync_delete_token')).toBe(deleteToken);
+    });
+  });
+
   it('refuses to restore with the wrong passphrase', async () => {
     let kit = '';
     await as(A, async () => {

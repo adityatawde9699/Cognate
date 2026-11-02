@@ -155,7 +155,13 @@ Master Secret M (256 bits PRK)
 6. **No Retroactive Invalidation**: Existing v2 workspaces continue syncing with short passphrases until migration. Migration to v3 requires updating any sub-12-character passphrase to $\ge 12$ scalar values before proceeding.
 
 ### 4.2 Security Justification: Two-Factor Confidentiality
-The Setup Code is a **possession factor** (rendered on display as QR code or printed). If an attacker photographs a screen, inspects an unencrypted backup, or reads the clipboard, the passphrase serves as the essential **knowledge factor** (two-factor confidentiality). Requiring both prevents visual eavesdropping or partial credential exposure from compromising workspace read/write access.
+The Setup Code is a **possession factor** (rendered on display as an alphanumeric Crockford Base32 string or printed).
+
+> [!WARNING]
+> **No QR Pairing**: QR code generation and camera scanning are **not implemented** in the application. Device pairing is performed exclusively by manually entering or copying the 27-character Setup Code alongside the passphrase.
+> **Total Device Loss**: If a user loses every device without having recorded the Setup Code or exported an encrypted `.cognate-recovery` kit, workspace data cannot be recovered.
+
+Requiring both factors prevents visual eavesdropping or partial credential exposure from compromising workspace read/write access.
 
 ---
 
@@ -287,6 +293,9 @@ To prevent split-brain forks when migrating devices upgrade:
 - Batch `GET` requests continue to work, allowing stale devices to pull historical batches and observe the migration marker.
 - **Sequencing**: The migrating device invokes server-side freeze only after v3 readback verification succeeds.
 - **Old Relay Fallback**: Without relay support (`!caps.freeze_supported`), write-freeze is client-side only (`sync_v2_write_frozen`), meaning stale un-migrated devices could theoretically continue writing until upgraded.
+
+#### 6.4.5 Delete Token Loss & Operator Wipe
+If the client loses the delete token $T_{del}$, legacy history cannot be deleted or soft-deleted via client APIs. The relay rejects unauthenticated delete requests uniformly with `403 Forbidden` (`{"error": "unauthorized"}`). In this scenario, a manual operator database wipe on the relay server is the only remaining path to eliminate historical v2 data.
 
 ---
 

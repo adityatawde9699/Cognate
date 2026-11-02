@@ -11,15 +11,24 @@ import {getSecret,setSecret} from '../utils/secrets';
 import {encryptBrowserSecret} from '../utils/browserVault';
 import {captureHistoryAudit,normalizedTask,fingerprint,type HistoryAudit} from './historyAudit';
 import {validateOps} from './oplog';
-interface Capabilities {exported_at:string;relay:{url:string;passphrase:string}|null;shares:Array<ShareMeta & {secret:string}>}
+interface Capabilities {
+  exported_at: string;
+  relay: { url: string; passphrase: string; version?: number; setupCode?: string } | null;
+  shares: Array<ShareMeta & { secret: string }>;
+  sync_setup_code?: string;
+  sync_delete_token?: string;
+}
 interface RecoveryKit extends Capabilities {v:2;id:string;identity:{actor:string;pub:string;privateKey:string};snapshot:HistoryAudit['snapshot']}
 interface LegacyKit extends Capabilities {v:1}
 export async function exportRecoveryKit(passphrase:string):Promise<string> {
   const identity=await getIdentity();
   const shares:Array<ShareMeta & {secret:string}>=[];
   for(const meta of await listShares()) {const full=await getShare(meta.id);if(full)shares.push(full);}
+  const sync_setup_code = (await getSecret('sync_setup_code')) || undefined;
+  const sync_delete_token = (await getSecret('sync_delete_token')) || undefined;
   const kit:RecoveryKit={v:2,id:crypto.randomUUID(),exported_at:new Date().toISOString(),relay:await getConfig(),shares,
-    identity:{actor:identity.actor,pub:identity.pub,privateKey:await getSecret('crdt_signing_key')},snapshot:(await captureHistoryAudit()).snapshot};
+    identity:{actor:identity.actor,pub:identity.pub,privateKey:await getSecret('crdt_signing_key')},snapshot:(await captureHistoryAudit()).snapshot,
+    sync_setup_code,sync_delete_token};
   return JSON.stringify(await sealPassword(passphrase,kit));
 }
 function validateCapabilities(kit:Capabilities) {
@@ -56,7 +65,21 @@ export async function importRecoveryKit(json:string,passphrase:string):Promise<{
       resetIdentity();resetClock();
     }
   }
-  if(kit.relay?.url) await enableSync(kit.relay.url,kit.relay.passphrase);
+  if (kit.sync_setup_code) {
+    await setSecret('sync_setup_code', kit.sync_setup_code);
+  }
+  if (kit.sync_delete_token) {
+    await setSecret('sync_delete_token', kit.sync_delete_token);
+  }
+  if(kit.relay?.url) {
+    if (kit.relay.version === 3 && (kit.sync_setup_code || (kit.relay as any).setupCode)) {
+      const { enableSyncV3 } = await import('./relayService');
+      const code = kit.sync_setup_code || (kit.relay as any).setupCode;
+      await enableSyncV3(kit.relay.url, kit.relay.passphrase, code, kit.sync_delete_token);
+    } else {
+      await enableSync(kit.relay.url, kit.relay.passphrase);
+    }
+  }
   for(const share of kit.shares) {const {secret,...meta}=share;await importShareRecord(meta,secret);}
   await setSetting('recovery_last_restored_at',new Date().toISOString());
   return {shares:kit.shares.length,relay:!!kit.relay?.url,identity:kit.v===2};

@@ -316,6 +316,11 @@ export function LiveSyncSettings() {
           <small className="form-hint">
             To connect another device, select &ldquo;Join Existing Workspace&rdquo; on that device and enter this Setup Code alongside your sync passphrase.
           </small>
+          <div style={{ marginTop: '8px', padding: '8px', background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: '6px' }}>
+            <p style={{ margin: 0, fontSize: '12px', color: '#991b1b', lineHeight: 1.4 }}>
+              <strong><i className="fa-solid fa-triangle-exclamation"></i> Warning:</strong> QR code pairing is not implemented. You must manually copy or record this 27-character Setup Code and Passphrase. Losing every device without the Setup Code or an encrypted recovery kit permanently loses access to your workspace.
+            </p>
+          </div>
         </div>
       )}
 
@@ -381,6 +386,9 @@ export function LiveSyncSettings() {
               </button>
             </div>
           )}
+          <p style={{ fontSize: '11px', color: '#64748b', marginTop: '8px', marginBottom: 0 }}>
+            <i className="fa-solid fa-info-circle"></i> If the delete token is lost, history cannot be deleted via the client. A manual server operator database wipe is the only remaining path.
+          </p>
         </div>
       )}
 
