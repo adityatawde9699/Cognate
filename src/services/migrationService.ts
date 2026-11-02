@@ -516,3 +516,46 @@ export async function freezeLegacyV2Room(
   return JSON.parse(res);
 }
 
+/**
+ * Verify whether a legacy v2 room has a registered hash that matches this device's delete token (Section 6.4).
+ */
+export async function verifyRoomClaim(
+  url: string,
+  v2Room: string,
+  deleteToken: string
+): Promise<{ matches: boolean; registeredHash?: string; anotherPartyControls: boolean }> {
+  const cleanUrl = url.trim().replace(/\/$/, '');
+  const myHash = await hashDeleteToken(deleteToken);
+  try {
+    const statusRaw = await httpGet(`${cleanUrl}/v2/rooms/${v2Room}/claim`);
+    const status = JSON.parse(statusRaw);
+    if (!status.claimed) {
+      return { matches: false, anotherPartyControls: false };
+    }
+    const matches = status.delete_token_hash?.toLowerCase() === myHash.toLowerCase();
+    return {
+      matches,
+      registeredHash: status.delete_token_hash,
+      anotherPartyControls: !matches,
+    };
+  } catch {
+    try {
+      await httpPost(
+        `${cleanUrl}/v2/rooms/${v2Room}/claim`,
+        JSON.stringify({ delete_token_hash: myHash })
+      );
+      return { matches: true, registeredHash: myHash, anotherPartyControls: false };
+    } catch (err: any) {
+      if (err?.body) {
+        try {
+          const parsed = JSON.parse(err.body);
+          if (parsed.delete_token_hash && parsed.delete_token_hash.toLowerCase() !== myHash.toLowerCase()) {
+            return { matches: false, registeredHash: parsed.delete_token_hash, anotherPartyControls: true };
+          }
+        } catch {}
+      }
+      return { matches: false, anotherPartyControls: false };
+    }
+  }
+}
+

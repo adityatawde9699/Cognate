@@ -29,6 +29,7 @@ import {
   migrateV2ToV3,
   retireLegacyV2Room,
   cancelLegacyV2SoftDelete,
+  verifyRoomClaim,
 } from '../../services/migrationService';
 import { toast } from '../../utils/toast';
 
@@ -47,10 +48,30 @@ export function LiveSyncSettings() {
     return false;
   });
 
-  const [cfg, setCfg] = useState<RelayConfig | null>(null);
-  const [binding, setBinding] = useState<WorkspaceBinding | null>(null);
+  const [cfg, setCfg] = useState<RelayConfig | null>(() => {
+    if (typeof localStorage === 'undefined') return null;
+    const url = localStorage.getItem('sync_relay_url');
+    const passphrase = localStorage.getItem('sync_passphrase');
+    if (!url || !passphrase) return null;
+    const version: 2 | 3 = Number(localStorage.getItem('sync_version')) === 3 ? 3 : 2;
+    const setupCode = localStorage.getItem('sync_setup_code') || undefined;
+    const deleteToken = localStorage.getItem('sync_delete_token') || undefined;
+    return { url, passphrase, version, setupCode, deleteToken };
+  });
+  const [binding, setBinding] = useState<WorkspaceBinding | null>(() => {
+    if (typeof localStorage === 'undefined') return null;
+    try {
+      const raw = localStorage.getItem('sync_workspace_binding');
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  });
 
-  const [on, setOn] = useState(false);
+  const [on, setOn] = useState(() => {
+    if (typeof localStorage === 'undefined') return false;
+    return !!(localStorage.getItem('sync_relay_url') && localStorage.getItem('sync_passphrase'));
+  });
   const [msg, setMsg] = useState('');
   const [health, setHealth] = useState('');
   const [busy, setBusy] = useState(false);
@@ -59,7 +80,23 @@ export function LiveSyncSettings() {
   const [v3MigratePass, setV3MigratePass] = useState('');
   const [confirmOverride, setConfirmOverride] = useState(false);
   const [softDeletePending, setSoftDeletePending] = useState(false);
-  const [relayCaps, setRelayCaps] = useState<RelayCapabilities | null>(null);
+  const [relayCaps, setRelayCaps] = useState<RelayCapabilities | null>(() => {
+    if (typeof localStorage === 'undefined') return null;
+    try {
+      const raw = localStorage.getItem('test_relay_capabilities');
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [roomClaimedByMe, setRoomClaimedByMe] = useState(() => {
+    if (typeof localStorage === 'undefined') return false;
+    return localStorage.getItem('test_room_claimed_by_me') === 'true';
+  });
+  const [anotherPartyControls, setAnotherPartyControls] = useState(() => {
+    if (typeof localStorage === 'undefined') return false;
+    return localStorage.getItem('test_another_party_controls') === 'true';
+  });
 
   const updateHealth = async () => {
     const currentCfg = await getConfig();
@@ -95,7 +132,20 @@ export function LiveSyncSettings() {
     setSetupCode(currentCfg?.setupCode || '');
     if (currentCfg?.url) {
       void fetchCapabilities(currentCfg.url)
-        .then(setRelayCaps)
+        .then((caps) => {
+          setRelayCaps(caps);
+          if (caps?.delete_supported && currentBinding?.v2_fallback?.room && currentCfg.deleteToken) {
+            void verifyRoomClaim(currentCfg.url, currentBinding.v2_fallback.room, currentCfg.deleteToken)
+              .then((claim) => {
+                setRoomClaimedByMe(claim.matches);
+                setAnotherPartyControls(claim.anotherPartyControls);
+              })
+              .catch(() => {
+                setRoomClaimedByMe(false);
+                setAnotherPartyControls(false);
+              });
+          }
+        })
         .catch(() => setRelayCaps(null));
     } else {
       setRelayCaps(null);
@@ -367,17 +417,13 @@ export function LiveSyncSettings() {
         </div>
       )}
 
-      {on && syncV3Enabled && binding?.v2_fallback?.room && cfg?.deleteToken && relayCaps && (
+      {on && syncV3Enabled && binding?.v2_fallback?.room && cfg?.deleteToken && relayCaps?.delete_supported && roomClaimedByMe && !anotherPartyControls && (
         <div className="form-group" style={{ border: '1px dashed #94a3b8', padding: '12px', borderRadius: '8px', marginTop: '14px' }}>
           <strong>Legacy Relay Cleanup</strong>
           <p style={{ fontSize: '12px', margin: '4px 0 8px 0', color: '#64748b' }}>
             This workspace was migrated from v2. You can permanently erase historical v2 ciphertext from the relay.
           </p>
-          {!relayCaps.delete_supported ? (
-            <p className="form-hint" style={{ color: '#b45309', margin: '6px 0' }}>
-              <i className="fa-solid fa-circle-info"></i> This relay cannot delete history.
-            </p>
-          ) : softDeletePending ? (
+          {softDeletePending ? (
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
               <span style={{ fontSize: '13px', color: '#059669' }}>
                 <i className="fa-solid fa-clock"></i> Soft-deleted. Permanent purge in 7 days.
@@ -408,6 +454,12 @@ export function LiveSyncSettings() {
           <p style={{ fontSize: '11px', color: '#64748b', marginTop: '8px', marginBottom: 0 }}>
             <i className="fa-solid fa-info-circle"></i> If the delete token is lost, history cannot be deleted via the client. A manual server operator database wipe is the only remaining path.
           </p>
+        </div>
+      )}
+
+      {on && syncV3Enabled && anotherPartyControls && (
+        <div className="form-group" style={{ border: '1px solid #ef4444', padding: '12px', borderRadius: '8px', marginTop: '14px', background: '#fef2f2', color: '#991b1b' }}>
+          <strong><i className="fa-solid fa-triangle-exclamation"></i> Another party controls this room. Treat its history as exposed.</strong>
         </div>
       )}
 

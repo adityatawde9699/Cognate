@@ -35,8 +35,14 @@ export async function httpGet(url: string): Promise<string> {
     const { invoke } = await import('@tauri-apps/api/core');
     return invoke<string>('relay_fetch', { method: 'GET', url, body: null, token });
   }
-  const r = await fetch(url, {signal:AbortSignal.timeout(35000),redirect:'error', headers: token ? { Authorization: `Bearer ${token}` } : {} });
-  if (!r.ok) throw new Error(`Relay returned ${r.status}`);
+  const r = await fetch(url, { signal: AbortSignal.timeout(35000), redirect: 'error', headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  if (!r.ok) {
+    const text = await r.text().catch(() => '');
+    const err: any = new Error(`Relay returned ${r.status}${text ? `: ${text}` : ''}`);
+    err.status = r.status;
+    err.body = text;
+    throw err;
+  }
   return r.text();
 }
 
@@ -49,8 +55,14 @@ export async function httpPut(url: string, body: string): Promise<string> {
   }
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers.Authorization = `Bearer ${token}`;
-  const r = await fetch(url, { method: 'PUT', headers, body,signal:AbortSignal.timeout(35000),redirect:'error' });
-  if (!r.ok) throw new Error(`Relay returned ${r.status}`);
+  const r = await fetch(url, { method: 'PUT', headers, body, signal: AbortSignal.timeout(35000), redirect: 'error' });
+  if (!r.ok) {
+    const text = await r.text().catch(() => '');
+    const err: any = new Error(`Relay returned ${r.status}${text ? `: ${text}` : ''}`);
+    err.status = r.status;
+    err.body = text;
+    throw err;
+  }
   return r.text();
 }
 
@@ -64,7 +76,13 @@ export async function httpPost(url: string, body: string): Promise<string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers.Authorization = `Bearer ${token}`;
   const r = await fetch(url, { method: 'POST', headers, body, signal: AbortSignal.timeout(35000), redirect: 'error' });
-  if (!r.ok) throw new Error(`Relay returned ${r.status}`);
+  if (!r.ok) {
+    const text = await r.text().catch(() => '');
+    const err: any = new Error(`Relay returned ${r.status}${text ? `: ${text}` : ''}`);
+    err.status = r.status;
+    err.body = text;
+    throw err;
+  }
   return r.text();
 }
 

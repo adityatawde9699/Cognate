@@ -319,10 +319,18 @@ fn batch_route(store: &Store, versions: &Versions, method: &str, path: &str, bod
     }
     let room = format!("@v2:{}",parts[2]);
 
-    // Wire rule: delete, undelete, claim, and freeze are POST only, token in the JSON body, never in a URL or query string.
-    if ["delete", "undelete", "claim", "freeze"].contains(&parts[3]) {
+    // Wire rule: delete, undelete, and freeze are POST only, token in the JSON body, never in a URL or query string.
+    if ["delete", "undelete", "freeze"].contains(&parts[3]) {
         if method != "POST" {
             return (405, json!({"error": "method not allowed; use POST"}).to_string());
+        }
+        if path.contains('?') {
+            return (400, json!({"error": "tokens must be provided in JSON body, not query parameters"}).to_string());
+        }
+    }
+    if parts[3] == "claim" {
+        if method != "POST" && method != "GET" {
+            return (405, json!({"error": "method not allowed; use POST or GET"}).to_string());
         }
         if path.contains('?') {
             return (400, json!({"error": "tokens must be provided in JSON body, not query parameters"}).to_string());
@@ -349,6 +357,19 @@ fn batch_route(store: &Store, versions: &Versions, method: &str, path: &str, bod
     }
 
     if parts.len() == 4 && parts[3] == "claim" {
+        if method == "GET" {
+            let room_data = match guard.get(&room) {
+                Some(r) => r,
+                None => return (404, json!({"error": "room not found"}).to_string()),
+            };
+            let meta = room_data.get("@meta");
+            let hash = meta.and_then(|m| m.get("delete_token_hash")).and_then(|h| h.as_str());
+            let claimed_at = meta.and_then(|m| m.get("claimed_at")).and_then(|c| c.as_u64());
+            return match hash {
+                Some(h) => (200, json!({"claimed": true, "delete_token_hash": h, "claimed_at": claimed_at, "room": parts[2]}).to_string()),
+                None => (200, json!({"claimed": false, "room": parts[2]}).to_string()),
+            };
+        }
         let hash = match serde_json::from_str::<Value>(body) {
             Ok(v) => v.get("delete_token_hash").and_then(|t| t.as_str()).map(|s| s.to_string()),
             Err(_) => None,
@@ -362,11 +383,16 @@ fn batch_route(store: &Store, versions: &Versions, method: &str, path: &str, bod
             None => return (404, json!({"error": "room not found"}).to_string()),
         };
         let meta = room_data.entry("@meta".to_string()).or_insert_with(|| json!({"@type": "meta"}));
-        if meta.get("delete_token_hash").is_some() {
-            return (409, json!({"error": "room already claimed"}).to_string());
+        if let Some(existing) = meta.get("delete_token_hash").and_then(|h| h.as_str()) {
+            if constant_time_eq(existing.as_bytes(), hash.as_bytes()) {
+                return (200, json!({"claimed": true, "already_claimed": true, "delete_token_hash": existing, "room": parts[2]}).to_string());
+            }
+            return (409, json!({"error": "room already claimed", "delete_token_hash": existing}).to_string());
         }
+        let now = effective_now_secs();
         meta["delete_token_hash"] = json!(hash);
-        return (200, json!({"claimed": true, "room": parts[2]}).to_string());
+        meta["claimed_at"] = json!(now);
+        return (200, json!({"claimed": true, "delete_token_hash": hash, "room": parts[2]}).to_string());
     }
 
     if parts.len() == 4 && parts[3] == "freeze" {
@@ -1904,5 +1930,67 @@ mod tests {
         assert!(allowed, "new legitimate IP must not be locked out when tracking map is full");
         // Map size must remain bounded at 10,000
         assert!(rate.lock().unwrap().len() <= 10_000, "tracking map size must remain bounded");
+    }
+
+    #[test]
+    fn failed_token_rate_limit_blocks_subsequent_correct_token_until_window_expires() {
+        let server = Arc::new(Server::http("127.0.0.1:0").unwrap());
+        let addr = server.server_addr().to_ip().unwrap();
+        let path = std::env::temp_dir().join(format!("cognate-token-rate-{}.json", std::process::id()));
+        let p = path.to_str().unwrap().to_string();
+        let _ = std::fs::remove_file(&p);
+
+        let cfg = Arc::new(Config::new(p.clone(), "".into(), 100, 60, 1, 0, 16 * 1024 * 1024, 1000, 16 * 1024 * 1024));
+        let store = Arc::new(empty());
+        let versions = Arc::new(Mutex::new(HashMap::new()));
+        let rate = Arc::new(Mutex::new(HashMap::new()));
+
+        let preimage = "correct_delete_token";
+        let hash = sha256_hex(preimage.as_bytes());
+        let b1 = r#"{"v":1,"nonce":"nonce-1","ct":"ct-1"}"#;
+        durable_write(&store, &versions, "PUT", &format!("/v2/rooms/ratelimit_room/batches/b1?delete_token_hash={hash}"), b1, &p);
+
+        // Spawn worker
+        let s_srv = server.clone();
+        let s_store = store.clone();
+        let s_ver = versions.clone();
+        let s_rate = rate.clone();
+        let s_cfg = cfg.clone();
+        let handle = std::thread::spawn(move || {
+            for _ in 0..12 {
+                if let Ok(Some(req)) = s_srv.recv_timeout(Duration::from_secs(2)) {
+                    serve(req, &s_store, &s_ver, &s_rate, &s_cfg);
+                }
+            }
+        });
+
+        fn post_token(addr: std::net::SocketAddr, token: &str) -> u16 {
+            use std::io::{Read, Write};
+            let mut client = std::net::TcpStream::connect(addr).unwrap();
+            client.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+            let body = format!(r#"{{"delete_token":"{token}"}}"#);
+            let req = format!(
+                "POST /v2/rooms/ratelimit_room/delete HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            client.write_all(req.as_bytes()).unwrap();
+            let mut resp = String::new();
+            let _ = client.read_to_string(&mut resp);
+            resp.lines().next().unwrap_or("").split_whitespace().nth(1).and_then(|s| s.parse().ok()).unwrap_or(0)
+        }
+
+        // Send 10 failed token attempts: each returns 403
+        for _ in 0..10 {
+            let status = post_token(addr, "wrong_token");
+            assert_eq!(status, 403);
+        }
+
+        // 11th attempt with CORRECT token: on new code, rate limiter intercepts and returns 429
+        let status11 = post_token(addr, preimage);
+        assert_eq!(status11, 429, "11th token attempt must be rate-limited with 429 even with correct token");
+
+        handle.join().unwrap();
+        let _ = std::fs::remove_file(&p);
     }
 }

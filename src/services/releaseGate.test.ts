@@ -18,6 +18,7 @@ import {
 } from './migrationService';
 import {
   deriveKey,
+  deriveRoomId,
   deriveSyncV3,
   decodeSetupCode,
   encodeSetupCode,
@@ -279,16 +280,20 @@ describe('ITEM 4: Real-Relay Release Gate (no fakeBatchRelay)', () => {
   it('4. A real v2 room goes claim -> freeze -> soft-delete -> restart relay mid-window -> undelete; and a separate room goes through purge. Verify 410 gating and quota reclaim.', async () => {
     const relay = await spawnRelay();
     try {
-      // Room A: claim -> freeze -> soft-delete -> restart -> undelete
-      const roomA = 'room-alpha-test-gate-lifecycle';
+      // Room A: auto-claim on connect -> freeze -> soft-delete -> restart -> undelete
+      const passA = 'room-alpha-test-gate-lifecycle-pass';
+      const roomA = await deriveRoomId(passA);
       const tokA = generateDeleteToken();
 
       // Seed room A with a batch
       await httpPut(`${relay.url}/v2/rooms/${roomA}/batches/batch-1`, JSON.stringify({ v: 1, nonce: 'nonce1', ct: 'payload1' }));
 
-      // Claim Room A
-      const claimRes = await claimLegacyV2Room(relay.url, roomA, tokA);
-      expect(claimRes.claimed).toBe(true);
+      // Client connects: enableSync automatically claims every v2 room on connect when relay advertises capability
+      await enableSync(relay.url, passA, { deleteToken: tokA });
+
+      // Verify auto-claim against real relay: attacker claim must be rejected with 409 Conflict
+      const attackerTok = generateDeleteToken();
+      await expect(claimLegacyV2Room(relay.url, roomA, attackerTok)).rejects.toThrow();
 
       // Freeze Room A
       const freezeRes = await freezeLegacyV2Room(relay.url, roomA, tokA);

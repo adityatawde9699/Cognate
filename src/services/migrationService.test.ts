@@ -180,6 +180,34 @@ describe('Sync Protocol v3 Genesis, Join & Migration State Machine', () => {
       expect(binding?.v2_fallback?.room).toBe(v2Room);
     });
 
+    it('migrating device freezes v2 room ONLY after v3 readback succeeds; failed readback leaves v2 writable', async () => {
+      const v2Room = await deriveRoomId(PASS_V2);
+      const originalHandle = relay.handle.bind(relay);
+      relay.handle = (method: string, url: string, body?: string) => {
+        if (method === 'GET' && url.includes('/batches') && !url.includes(v2Room)) {
+          // Simulate empty/corrupt readback on v3 room
+          return {
+            ok: true,
+            status: 200,
+            text: async () => JSON.stringify({ batches: [], last_cursor: 0 }),
+          };
+        }
+        return originalHandle(method, url, body);
+      };
+
+      try {
+        await expect(migrateV2ToV3(PASS_V3, SETUP_CODE)).rejects.toThrow(/readback verification failed/i);
+        // Critical safety invariant: v2 write-freeze MUST NOT be active
+        expect(await isV2WriteFrozen()).toBe(false);
+
+        // Verify v2 remains writable: local changes sync to v2 without throwing write-freeze error
+        await logTaskUpsert(task('v2-t2', { title: 'v2 Remains Writable After Failed Readback' }));
+        await expect(syncNow()).resolves.toBeDefined();
+      } finally {
+        relay.handle = originalHandle;
+      }
+    });
+
     it('remote device pulling from v2 receives migration marker and enters write-freeze', async () => {
       // Device B also on v2
       (globalThis as any).localStorage = B;

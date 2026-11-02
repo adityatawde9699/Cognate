@@ -36,22 +36,33 @@ export class FakeBatchRelay {
     const meta = this.roomMeta.get(room)!;
 
     // Wire rules for token endpoints
-    if (['delete', 'undelete', 'claim', 'freeze'].includes(parts[3])) {
+    if (['delete', 'undelete', 'freeze'].includes(parts[3])) {
       if (method !== 'POST') return response(405, { error: 'method not allowed; use POST' });
       if (parsed.search) return response(400, { error: 'query parameters not allowed' });
     }
 
     if (parts[3] === 'claim') {
+      if (method !== 'POST' && method !== 'GET') return response(405, { error: 'method not allowed; use POST or GET' });
+      if (parsed.search) return response(400, { error: 'query parameters not allowed' });
+      if (method === 'GET') {
+        if (meta.delete_token_hash) {
+          return response(200, { claimed: true, delete_token_hash: meta.delete_token_hash, room });
+        }
+        return response(200, { claimed: false, room });
+      }
       const parsedBody = body ? JSON.parse(body) : {};
       const hash = parsedBody.delete_token_hash;
       if (!hash || typeof hash !== 'string' || hash.length !== 64) {
         return response(400, { error: 'invalid delete_token_hash' });
       }
       if (meta.delete_token_hash) {
-        return response(409, { error: 'room already claimed' });
+        if (meta.delete_token_hash.toLowerCase() === hash.toLowerCase()) {
+          return response(200, { claimed: true, already_claimed: true, delete_token_hash: meta.delete_token_hash, room });
+        }
+        return response(409, { error: 'room already claimed', delete_token_hash: meta.delete_token_hash });
       }
       meta.delete_token_hash = hash.toLowerCase();
-      return response(200, { claimed: true, room });
+      return response(200, { claimed: true, delete_token_hash: hash.toLowerCase(), room });
     }
 
     if (parts[3] === 'freeze') {

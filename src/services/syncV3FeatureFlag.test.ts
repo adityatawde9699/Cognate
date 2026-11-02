@@ -90,5 +90,46 @@ describe('Item 7: Feature Flag syncV3Enabled', () => {
       expect(html).toContain('Join Existing (v3)');
       expect(html).toContain('Connect Legacy (v2)');
     });
+
+    it('Item 1h: legacy cleanup stays hidden unless relay advertises capability AND room has matching token hash', async () => {
+      const { LiveSyncSettings } = await import('../components/Settings/LiveSyncSettings');
+      const React = (await import('react')).default;
+      const ReactDOMServer = (await import('react-dom/server')).default;
+
+      await setSyncV3Enabled(true);
+      mem.setItem('sync_relay_url', 'https://relay.example');
+      mem.setItem('sync_passphrase', 'correct horse battery staple');
+      mem.setItem('sync_version', '3');
+      mem.setItem('sync_delete_token', 'my-delete-token');
+      mem.setItem('sync_workspace_binding', JSON.stringify({
+        version: 3,
+        url: 'https://relay.example',
+        room: 'v3-room',
+        v2_fallback: { room: 'v2-room' },
+      }));
+
+      // Case 1: Relay does NOT advertise capability (delete_supported = false)
+      mem.setItem('test_relay_capabilities', JSON.stringify({ delete_supported: false }));
+      mem.setItem('test_room_claimed_by_me', 'true');
+      let html = ReactDOMServer.renderToString(React.createElement(LiveSyncSettings));
+      expect(html).not.toContain('Legacy Relay Cleanup');
+
+      // Case 2: Relay advertises capability, but room has NO registered matching hash
+      mem.setItem('test_relay_capabilities', JSON.stringify({ delete_supported: true }));
+      mem.setItem('test_room_claimed_by_me', 'false');
+      html = ReactDOMServer.renderToString(React.createElement(LiveSyncSettings));
+      expect(html).not.toContain('Legacy Relay Cleanup');
+
+      // Case 3: Both conditions met (relay advertises delete AND room has matching token hash)
+      mem.setItem('test_room_claimed_by_me', 'true');
+      html = ReactDOMServer.renderToString(React.createElement(LiveSyncSettings));
+      expect(html).toContain('Legacy Relay Cleanup');
+
+      // Case 4: Another party controls the room -> delete UI hidden, hostile control warning shown
+      mem.setItem('test_another_party_controls', 'true');
+      html = ReactDOMServer.renderToString(React.createElement(LiveSyncSettings));
+      expect(html).not.toContain('Legacy Relay Cleanup');
+      expect(html).toContain('Another party controls this room. Treat its history as exposed.');
+    });
   });
 });
