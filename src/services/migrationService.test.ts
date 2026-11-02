@@ -13,6 +13,7 @@ import {
   retireLegacyV2Room,
   cancelLegacyV2SoftDelete,
   checkAllActorsSyncedV3,
+  verifyRoomClaim,
 } from './migrationService';
 import {
   enableSync,
@@ -328,6 +329,56 @@ describe('Sync Protocol v3 Genesis, Join & Migration State Machine', () => {
       // Subsequent PUT to frozen v2 room must fail with 409
       const putRes = relay.handle('PUT', `${RELAY}/v2/rooms/${v2Room}/batches/b_stale`, JSON.stringify({ v: 1, nonce: 'n2', ct: 'c2' }));
       expect(putRes.status).toBe(409);
+    });
+
+    it('detects when another party controls the room and flags anotherPartyControls', async () => {
+      (globalThis as any).localStorage = A;
+      _resetForTests(); resetIdentity();
+      const v2Room = await deriveRoomId(PASS_V2);
+      const attackerToken = 'attacker_delete_token';
+      const attackerHash = (await import('node:crypto')).createHash('sha256').update(attackerToken).digest('hex');
+      relay.roomMeta.set(v2Room, { delete_token_hash: attackerHash });
+
+      const myToken = 'my_legitimate_token';
+      const claimCheck = await verifyRoomClaim(RELAY, v2Room, myToken);
+      expect(claimCheck.matches).toBe(false);
+      expect(claimCheck.anotherPartyControls).toBe(true);
+      expect(claimCheck.registeredHash).toBe(attackerHash);
+    });
+
+    it('soft-deleted room returning 410 leaves local data untouched and restores only with token', async () => {
+      (globalThis as any).localStorage = A;
+      _resetForTests(); resetIdentity();
+      await enableSync(RELAY, PASS_V2);
+      await logTaskUpsert(task('t-safe', { title: 'Local Data Must Remain Untouched' }));
+      await syncNow();
+
+      // Soft-delete the room on the relay
+      const v2Room = await deriveRoomId(PASS_V2);
+      const token = 'my_delete_token';
+      const tokenHash = (await import('node:crypto')).createHash('sha256').update(token).digest('hex');
+      relay.roomMeta.set(v2Room, { delete_token_hash: tokenHash, soft_deleted_at: Date.now() });
+
+      // Attempting sync throws 410
+      await expect(syncNow()).rejects.toThrow(/410/);
+
+      // Verify local tasks and oplog are 100% untouched
+      const ops = await (await import('../db')).loadOps();
+      expect(ops.some((op: any) => op.id === 't-safe' || JSON.stringify(op).includes('Local Data Must Remain Untouched'))).toBe(true);
+      const rawTasks = await (await import('../db')).getSetting('tasks_v1', '[]');
+      expect(rawTasks).toBeDefined();
+
+      // Undelete with wrong token fails
+      await expect(cancelLegacyV2SoftDelete(RELAY, v2Room, 'wrong_token')).rejects.toThrow();
+
+      // Undelete with valid token succeeds and sync resumes
+      const undelRes = await cancelLegacyV2SoftDelete(RELAY, v2Room, token);
+      expect(undelRes.undeleted).toBe(true);
+      expect(undelRes.soft_deleted).toBe(false);
+
+      // Sync now succeeds again without throwing 410
+      const syncRes = await syncNow();
+      expect(syncRes).toBeDefined();
     });
   });
 });

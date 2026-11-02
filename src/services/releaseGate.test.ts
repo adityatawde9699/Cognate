@@ -73,7 +73,7 @@ interface RunningRelay {
   restart: (timeOffset?: number) => Promise<void>;
 }
 
-async function spawnRelay(options: { timeOffset?: number; initialStore?: string } = {}): Promise<RunningRelay> {
+async function spawnRelay(options: { timeOffset?: number; initialStore?: string; minClaimAge?: number } = {}): Promise<RunningRelay> {
   const dataDir = mkdtempSync(join(tmpdir(), 'cognate-gate-'));
   const dataPath = join(dataDir, 'data.json');
   if (options.initialStore) {
@@ -91,6 +91,7 @@ async function spawnRelay(options: { timeOffset?: number; initialStore?: string 
       RELAY_DATA: dataPath,
       RELAY_TOKEN: '',
       RELAY_RATE_LIMIT: '100000',
+      RELAY_MIN_CLAIM_AGE_SECS: options.minClaimAge !== undefined ? String(options.minClaimAge) : '0',
     };
     if (offset > 0) {
       env.RELAY_TIME_OFFSET = String(offset);

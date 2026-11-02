@@ -74,6 +74,34 @@ fn reset_room_quota_for_tests() {
     TEST_ROOM_QUOTA.with(|c| c.set(None));
 }
 
+#[cfg(test)]
+thread_local! {
+    static TEST_MIN_CLAIM_AGE: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+fn set_test_min_claim_age(age: Option<u64>) {
+    TEST_MIN_CLAIM_AGE.with(|c| c.set(age));
+}
+
+fn min_claim_age_secs() -> u64 {
+    #[cfg(test)]
+    {
+        if let Some(age) = TEST_MIN_CLAIM_AGE.with(|c| c.get()) {
+            return age;
+        }
+    }
+    #[cfg(test)]
+    let default_val = 0;
+    #[cfg(not(test))]
+    let default_val = 86400;
+
+    std::env::var("RELAY_MIN_CLAIM_AGE_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(default_val)
+}
+
 fn room_bytes(room_data: &HashMap<String, Value>) -> usize {
     room_data.values().map(|v| serde_json::to_vec(v).map_or(0, |b| b.len())).sum()
 }
@@ -399,7 +427,20 @@ fn batch_route(store: &Store, versions: &Versions, method: &str, path: &str, bod
         if let Err(resp) = authorize_token(&guard, &room, body) {
             return resp;
         }
+        let min_age = min_claim_age_secs();
+        let claimed_at = guard.get(&room)
+            .and_then(|r| r.get("@meta"))
+            .and_then(|m| m.get("claimed_at"))
+            .and_then(|c| c.as_u64())
+            .unwrap_or(0);
         let now = effective_now_secs();
+        if now.saturating_sub(claimed_at) < min_age {
+            return (403, json!({
+                "error": "minimum claim age not met; try again later",
+                "claimed_at": claimed_at,
+                "min_claim_age_seconds": min_age
+            }).to_string());
+        }
         let room_data = guard.get_mut(&room).unwrap();
         let meta = room_data.entry("@meta".to_string()).or_insert_with(|| json!({"@type": "meta"}));
         meta["frozen_at"] = json!(now);
@@ -410,7 +451,20 @@ fn batch_route(store: &Store, versions: &Versions, method: &str, path: &str, bod
         if let Err(resp) = authorize_token(&guard, &room, body) {
             return resp;
         }
+        let min_age = min_claim_age_secs();
+        let claimed_at = guard.get(&room)
+            .and_then(|r| r.get("@meta"))
+            .and_then(|m| m.get("claimed_at"))
+            .and_then(|c| c.as_u64())
+            .unwrap_or(0);
         let now = effective_now_secs();
+        if now.saturating_sub(claimed_at) < min_age {
+            return (403, json!({
+                "error": "minimum claim age not met; try again later",
+                "claimed_at": claimed_at,
+                "min_claim_age_seconds": min_age
+            }).to_string());
+        }
         let room_data = guard.get_mut(&room).unwrap();
         let meta = room_data.entry("@meta".to_string()).or_insert_with(|| json!({"@type": "meta"}));
         meta["soft_deleted_at"] = json!(now);
@@ -454,6 +508,7 @@ fn batch_route(store: &Store, versions: &Versions, method: &str, path: &str, bod
                     }
                 } else {
                     meta["delete_token_hash"] = json!(lower_hash);
+                    meta["claimed_at"] = json!(effective_now_secs());
                 }
             }
 
@@ -1991,6 +2046,52 @@ mod tests {
         assert_eq!(status11, 429, "11th token attempt must be rate-limited with 429 even with correct token");
 
         handle.join().unwrap();
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn minimum_claim_age_blocks_freeze_and_delete_until_age_threshold_met() {
+        set_test_time_offset(0);
+        set_test_min_claim_age(Some(86400));
+        let store = Arc::new(empty());
+        let versions: Versions = Mutex::new(HashMap::new());
+        let path = std::env::temp_dir().join(format!("cognate-min-claim-{}.json", std::process::id()));
+        let p = path.to_str().unwrap().to_string();
+        let _ = std::fs::remove_file(&p);
+
+        // 1. Create legacy v2 room with batch
+        let b1 = r#"{"v":1,"nonce":"nonce-1","ct":"ct-1"}"#;
+        let res = durable_write(&store, &versions, "PUT", "/v2/rooms/age_room/batches/b1", b1, &p);
+        assert_eq!(res.0, 200);
+
+        // 2. Claim room at t=0
+        let token = "deadbeefcafebabedeadbeefcafebabe0123456789abcdef0123456789abcdef";
+        let hash = sha256_hex(token.as_bytes());
+        let claim_body = format!(r#"{{"delete_token_hash":"{hash}"}}"#);
+        let claim_res = durable_write(&store, &versions, "POST", "/v2/rooms/age_room/claim", &claim_body, &p);
+        assert_eq!(claim_res.0, 200);
+
+        // 3. Immediately at t=0 (and t=10): freeze and delete must be rejected with 403 because min claim age (24h = 86400s) has not elapsed
+        set_test_time_offset(10);
+        let token_body = format!(r#"{{"delete_token":"{token}"}}"#);
+        let freeze_res = durable_write(&store, &versions, "POST", "/v2/rooms/age_room/freeze", &token_body, &p);
+        assert_eq!(freeze_res.0, 403, "Freeze must be rejected before minimum claim age has elapsed");
+        assert!(freeze_res.1.contains("minimum claim age"), "Error must mention minimum claim age");
+
+        let del_res = durable_write(&store, &versions, "POST", "/v2/rooms/age_room/delete", &token_body, &p);
+        assert_eq!(del_res.0, 403, "Delete must be rejected before minimum claim age has elapsed");
+        assert!(del_res.1.contains("minimum claim age"), "Error must mention minimum claim age");
+
+        // 4. Advance clock by 86401 seconds (> 24 hours): freeze and delete must now succeed
+        set_test_time_offset(86401);
+        let freeze_res2 = durable_write(&store, &versions, "POST", "/v2/rooms/age_room/freeze", &token_body, &p);
+        assert_eq!(freeze_res2.0, 200, "Freeze must succeed after minimum claim age has elapsed");
+
+        let del_res2 = durable_write(&store, &versions, "POST", "/v2/rooms/age_room/delete", &token_body, &p);
+        assert_eq!(del_res2.0, 200, "Delete must succeed after minimum claim age has elapsed");
+
+        set_test_time_offset(0);
+        set_test_min_claim_age(None);
         let _ = std::fs::remove_file(&p);
     }
 }

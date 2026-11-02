@@ -297,6 +297,19 @@ To prevent split-brain forks when migrating devices upgrade:
 #### 6.4.5 Delete Token Loss & Operator Wipe
 If the client loses the delete token $T_{del}$, legacy history cannot be deleted or soft-deleted via client APIs. The relay rejects unauthenticated delete requests uniformly with `403 Forbidden` (`{"error": "unauthorized"}`). In this scenario, a manual operator database wipe on the relay server is the only remaining path to eliminate historical v2 data.
 
+#### 6.4.6 Residual Risk: Claim Squatting and Hostile Deletion
+- **First-Claim-Wins Dynamics**: Because legacy v2 rooms carry no public key binding or owner credentials on the relay, the first entity to issue `POST /v2/rooms/{room}/claim` successfully binds the delete token hash.
+- **Relay Dump Exposure**: An attacker who obtains a dump of relay database keys (or enumerates room IDs) does not need to crack the v2 PBKDF2 passphrase to issue a hostile claim. They can claim all unclaimed room IDs directly from the dump.
+- **Hostile Actions**: Once claimed by an attacker:
+  1. The legitimate workspace owner cannot register their own delete token.
+  2. After the minimum claim age delay, the attacker could issue freeze or soft-delete commands against the legacy room.
+- **Defenses & Limits**:
+  1. *Minimum Claim Age*: Relays enforce a minimum claim age (default 24 hours, `RELAY_MIN_CLAIM_AGE_SECS`) before accepting any `freeze` or `delete` request on a claimed room. This prevents immediate hostile deletion upon claiming.
+  2. *Automatic Claim on Connect*: Cognate clients automatically claim every v2 room they sync with upon connecting to a capable relay, minimizing the exposure window.
+  3. *Client Gating & Exposure Warning*: If a room's registered hash does not match this device's token, the client surfaces an explicit security warning: `"Another party controls this room. Treat its history as exposed."` and suppresses all delete UI.
+  4. *Local Data Preservation*: When clients receive HTTP 410 Gone from a soft-deleted room, local workspace state (`tasks_v1`, `projects_v1`, and oplog) remains 100% untouched on device storage. Undelete is offered only if the device holds the valid delete token preimage.
+  5. *v3 Isolation*: Hostile legacy room claims have zero impact on v3 workspaces. v3 derives room IDs via $R_{v3} = \text{HKDF-Expand}(M, \dots)$ and registers the delete token hash atomically at genesis batch creation, preventing room squatting.
+
 ---
 
 ## 7. Decisions Implemented from Owner Review
