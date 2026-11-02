@@ -469,6 +469,10 @@ fn serve(mut req: Request, store: &Store, versions: &Versions, rate: &RateMap, c
     }
 
     if method==Method::Get && path=="/metrics" {
+        if cfg.token.is_empty() {
+            let _ = req.respond(cors_json(403, json!({"error": "metrics disabled when RELAY_TOKEN is empty"}).to_string()));
+            return;
+        }
         let data=store.lock().unwrap();
         let payload=json!({"requests_total":REQUESTS.load(std::sync::atomic::Ordering::Relaxed),"durable_writes_total":DURABLE_WRITES.load(std::sync::atomic::Ordering::Relaxed),"storage_failures_total":STORAGE_FAILURES.load(std::sync::atomic::Ordering::Relaxed),"active_polls":cfg.active_polls.load(std::sync::atomic::Ordering::Relaxed),"rooms":data.len(),"records":data.values().map(|room|room.len()).sum::<usize>()}).to_string();
         drop(data);let _=req.respond(cors_json(200,payload));return;
@@ -1041,5 +1045,84 @@ mod tests {
         assert!(bearer_ok(&h, "my-secret-token"));
         assert!(!bearer_ok(&h, "my-secret-tokeo"));
         assert!(!bearer_ok(&h, "ny-secret-token"));
+    }
+
+    #[test]
+    fn metrics_endpoint_disabled_when_token_empty_and_requires_bearer_when_configured() {
+        fn get(addr: std::net::SocketAddr, token: Option<&str>) -> (u16, String) {
+            use std::io::{Read, Write};
+            let mut client = std::net::TcpStream::connect(addr).unwrap();
+            client.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+            let auth = token.map(|t| format!("Authorization: Bearer {t}\r\n")).unwrap_or_default();
+            write!(client, "GET /metrics HTTP/1.1\r\nHost: {addr}\r\n{auth}Connection: close\r\n\r\n").unwrap();
+            let mut result = String::new();
+            client.read_to_string(&mut result).unwrap();
+            let status = result.split_whitespace().nth(1).and_then(|s| s.parse::<u16>().ok()).unwrap_or(0);
+            (status, result)
+        }
+
+        // Case 1: Open relay (RELAY_TOKEN is empty) -> /metrics must be disabled (403)
+        let server = Arc::new(Server::http("127.0.0.1:0").unwrap());
+        let addr = server.server_addr().to_ip().unwrap();
+        let store = Arc::new(empty());
+        let versions = Arc::new(Mutex::new(HashMap::new()));
+        let rate = Arc::new(Mutex::new(HashMap::new()));
+        let cfg = Arc::new(Config {
+            data_path: "unused".into(),
+            token: String::new(),
+            rate_limit: 100,
+            rate_window: 60,
+            active_polls: std::sync::atomic::AtomicUsize::new(0),
+            max_polls: 1,
+            trust_proxy: false,
+        });
+        let stopped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (s, st, v, r, c, sp) = (server.clone(), store.clone(), versions.clone(), rate.clone(), cfg.clone(), stopped.clone());
+        let worker = thread::spawn(move || {
+            while !sp.load(std::sync::atomic::Ordering::SeqCst) {
+                if let Some(req) = s.recv_timeout(Duration::from_millis(100)).unwrap() {
+                    serve(req, &st, &v, &r, &c);
+                }
+            }
+        });
+
+        let (status, body) = get(addr, None);
+        assert_eq!(status, 403, "expected 403 when token is empty, got {status}: {body}");
+
+        stopped.store(true, std::sync::atomic::Ordering::SeqCst);
+        worker.join().unwrap();
+
+        // Case 2: Configured token -> requires matching bearer token
+        let server2 = Arc::new(Server::http("127.0.0.1:0").unwrap());
+        let addr2 = server2.server_addr().to_ip().unwrap();
+        let cfg2 = Arc::new(Config {
+            data_path: "unused".into(),
+            token: "secret-token".into(),
+            rate_limit: 100,
+            rate_window: 60,
+            active_polls: std::sync::atomic::AtomicUsize::new(0),
+            max_polls: 1,
+            trust_proxy: false,
+        });
+        let stopped2 = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (s2, st2, v2, r2, c2, sp2) = (server2.clone(), store.clone(), versions.clone(), rate.clone(), cfg2.clone(), stopped2.clone());
+        let worker2 = thread::spawn(move || {
+            while !sp2.load(std::sync::atomic::Ordering::SeqCst) {
+                if let Some(req) = s2.recv_timeout(Duration::from_millis(100)).unwrap() {
+                    serve(req, &st2, &v2, &r2, &c2);
+                }
+            }
+        });
+
+        let (status, _) = get(addr2, None);
+        assert_eq!(status, 401, "expected 401 without token");
+        let (status, _) = get(addr2, Some("wrong-token"));
+        assert_eq!(status, 401, "expected 401 with wrong token");
+        let (status, body) = get(addr2, Some("secret-token"));
+        assert_eq!(status, 200, "expected 200 with matching token, got {status}: {body}");
+        assert!(body.contains("\"requests_total\""));
+
+        stopped2.store(true, std::sync::atomic::Ordering::SeqCst);
+        worker2.join().unwrap();
     }
 }
