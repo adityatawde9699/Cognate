@@ -27,7 +27,7 @@ import {
   signBytes,
 } from './crypto';
 import { httpGet, httpPut, httpPost, fetchCapabilities } from './relayTransport';
-import { enableSyncV3, getConfig } from './relayService';
+import { enableSyncV3, getConfig, isSyncV3Enabled } from './relayService';
 import { verifyBatch, type SignedBatch } from './batchSync';
 
 export interface GenesisResult {
@@ -79,6 +79,9 @@ export async function createWorkspaceGenesis(
   setupCodeInput?: string,
   deleteTokenInput?: string
 ): Promise<GenesisResult> {
+  if (!(await isSyncV3Enabled())) {
+    throw new Error('Sync Protocol v3 is disabled behind feature flag syncV3Enabled');
+  }
   const passCheck = validatePassphrase(passphrase);
   if (!passCheck.valid) throw new Error(passCheck.error);
 
@@ -147,6 +150,9 @@ export async function joinWorkspaceV3(
   passphrase: string,
   setupCode: string
 ): Promise<JoinResult> {
+  if (!(await isSyncV3Enabled())) {
+    throw new Error('Sync Protocol v3 is disabled behind feature flag syncV3Enabled');
+  }
   const passCheck = validatePassphrase(passphrase);
   if (!passCheck.valid) throw new Error(passCheck.error);
 
@@ -216,6 +222,9 @@ export async function migrateV2ToV3(
   setupCodeInput?: string,
   deleteTokenInput?: string
 ): Promise<MigrationResult> {
+  if (!(await isSyncV3Enabled())) {
+    throw new Error('Sync Protocol v3 is disabled behind feature flag syncV3Enabled');
+  }
   const current = await getConfig();
   if (!current) throw new Error('Cannot migrate: no active sync configuration.');
 

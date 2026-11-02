@@ -29,7 +29,7 @@ import {
   openPassword,
 } from './crypto';
 import { httpGet, httpPut, fetchCapabilities } from './relayTransport';
-import { enableSync, disableSync } from './relayService';
+import { enableSync, disableSync, setSyncV3Enabled } from './relayService';
 import { setSetting, getSetting, appendOps } from '../db';
 import { Clock, entityToOps, type Op } from './oplog';
 import type { SignedBatch } from './batchSync';
@@ -140,6 +140,7 @@ describe('ITEM 4: Real-Relay Release Gate (no fakeBatchRelay)', () => {
     setMigrationFailpoint(null);
     await setSetting('sync_workspace_binding', '');
     await setSetting('sync_v2_write_frozen', 'false');
+    await setSyncV3Enabled(true);
     await disableSync();
   });
 

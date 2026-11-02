@@ -32,6 +32,16 @@ const PASS_SECRET = 'sync_passphrase';
 const SETUP_CODE_SECRET = 'sync_setup_code';
 const DELETE_TOKEN_SECRET = 'sync_delete_token';
 const VERSION_KEY = 'sync_protocol_version';
+export const SYNC_V3_FEATURE_FLAG = 'sync_v3_enabled';
+
+export async function isSyncV3Enabled(): Promise<boolean> {
+  const val = await getSetting(SYNC_V3_FEATURE_FLAG, 'false');
+  return val === 'true';
+}
+
+export async function setSyncV3Enabled(enabled: boolean): Promise<void> {
+  await setSetting(SYNC_V3_FEATURE_FLAG, enabled ? 'true' : 'false');
+}
 
 export interface RelayConfig {
   url: string;

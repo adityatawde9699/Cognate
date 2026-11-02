@@ -54,6 +54,8 @@ describe('Sync Protocol v3 Genesis, Join & Migration State Machine', () => {
   beforeEach(() => {
     A = new MemStorage();
     B = new MemStorage();
+    A.setItem('cn_set_sync_v3_enabled', 'true');
+    B.setItem('cn_set_sync_v3_enabled', 'true');
     relay = new FakeRelay();
     (globalThis as any).fetch = vi.fn((url: string, init?: any) =>
       Promise.resolve(relay.handle(init?.method ?? 'GET', url, init?.body) as any)

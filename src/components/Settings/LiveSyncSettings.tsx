@@ -17,6 +17,8 @@ import {
   getConfig,
   getWorkspaceBinding,
   syncNow,
+  isSyncV3Enabled,
+  setSyncV3Enabled,
   type RelayConfig,
   type WorkspaceBinding,
 } from '../../services/relayService';
@@ -38,6 +40,12 @@ export function LiveSyncSettings() {
   const [token, setToken] = useState('');
   const [setupCode, setSetupCode] = useState('');
   const [mode, setMode] = useState<'create' | 'join' | 'legacy'>('create');
+  const [syncV3Enabled, setSyncV3EnabledState] = useState(() => {
+    if (typeof localStorage !== 'undefined') {
+      return localStorage.getItem('cn_set_sync_v3_enabled') === 'true';
+    }
+    return false;
+  });
 
   const [cfg, setCfg] = useState<RelayConfig | null>(null);
   const [binding, setBinding] = useState<WorkspaceBinding | null>(null);
@@ -96,6 +104,7 @@ export function LiveSyncSettings() {
 
   useEffect(() => {
     reload();
+    isSyncV3Enabled().then(setSyncV3EnabledState);
     getSecret(TOKEN_KEY)
       .then(setToken)
       .catch((error) => setMsg(error.message));
@@ -107,6 +116,14 @@ export function LiveSyncSettings() {
     window.addEventListener('diagnostics-changed', refresh);
     return () => window.removeEventListener('diagnostics-changed', refresh);
   }, []);
+
+  const handleToggleV3 = async (enabled: boolean) => {
+    setSyncV3EnabledState(enabled);
+    await setSyncV3Enabled(enabled);
+    if (!enabled && mode !== 'legacy') {
+      setMode('legacy');
+    }
+  };
 
   const handleCreate = async () => {
     if (!url.trim() || !pass.trim()) {
@@ -276,6 +293,8 @@ export function LiveSyncSettings() {
     }
   };
 
+  const effectiveMode = syncV3Enabled ? mode : 'legacy';
+
   return (
     <div className="settings-section">
       <h3>
@@ -324,7 +343,7 @@ export function LiveSyncSettings() {
         </div>
       )}
 
-      {on && cfg?.version === 2 && (
+      {on && syncV3Enabled && cfg?.version === 2 && (
         <div className="form-group" style={{ border: '1px solid #f59e0b', padding: '14px', borderRadius: '8px', background: '#fffbeb' }}>
           <strong style={{ color: '#b45309' }}>
             <i className="fa-solid fa-triangle-exclamation"></i> Sync Protocol v2 Active
@@ -348,13 +367,13 @@ export function LiveSyncSettings() {
         </div>
       )}
 
-      {on && binding?.v2_fallback?.room && (
+      {on && syncV3Enabled && binding?.v2_fallback?.room && cfg?.deleteToken && relayCaps && (
         <div className="form-group" style={{ border: '1px dashed #94a3b8', padding: '12px', borderRadius: '8px', marginTop: '14px' }}>
           <strong>Legacy Relay Cleanup</strong>
           <p style={{ fontSize: '12px', margin: '4px 0 8px 0', color: '#64748b' }}>
             This workspace was migrated from v2. You can permanently erase historical v2 ciphertext from the relay.
           </p>
-          {relayCaps && !relayCaps.delete_supported ? (
+          {!relayCaps.delete_supported ? (
             <p className="form-hint" style={{ color: '#b45309', margin: '6px 0' }}>
               <i className="fa-solid fa-circle-info"></i> This relay cannot delete history.
             </p>
@@ -392,7 +411,7 @@ export function LiveSyncSettings() {
         </div>
       )}
 
-      {!on && (
+      {!on && syncV3Enabled && (
         <div style={{ display: 'flex', gap: '8px', marginBottom: '14px' }}>
           <button
             className={`btn-soft ${mode === 'create' ? 'is-active' : ''}`}
@@ -431,7 +450,7 @@ export function LiveSyncSettings() {
             />
           </div>
 
-          {mode === 'join' && (
+          {effectiveMode === 'join' && (
             <div className="form-group">
               <label>Setup Code</label>
               <input
@@ -454,12 +473,12 @@ export function LiveSyncSettings() {
               type="password"
               value={pass}
               onChange={(e) => setPass(e.target.value)}
-              placeholder={mode === 'legacy' ? 'shared secret' : 'mandatory strong secret (>= 12 characters)'}
+              placeholder={effectiveMode === 'legacy' ? 'shared secret' : 'mandatory strong secret (>= 12 characters)'}
               autoComplete="off"
             />
             <small className="form-hint">
-              {mode === 'legacy'
-                ? 'Legacy v2 passphrase. Consider using v3 for stronger security.'
+              {effectiveMode === 'legacy'
+                ? 'Legacy v2 passphrase. All tasks are end-to-end encrypted.'
                 : 'Mandatory knowledge factor: must be at least 12 characters with at least 4 unique characters.'}
             </small>
           </div>
@@ -478,19 +497,19 @@ export function LiveSyncSettings() {
           </div>
 
           <div className="sync-grid">
-            {mode === 'create' && (
+            {effectiveMode === 'create' && (
               <button className="btn-soft" onClick={handleCreate} disabled={busy}>
                 <i className={`fa-solid ${busy ? 'fa-spinner fa-spin' : 'fa-plus'}`}></i> Create &amp; Connect Workspace
               </button>
             )}
-            {mode === 'join' && (
+            {effectiveMode === 'join' && (
               <button className="btn-soft" onClick={handleJoin} disabled={busy}>
                 <i className={`fa-solid ${busy ? 'fa-spinner fa-spin' : 'fa-link'}`}></i> Join Workspace
               </button>
             )}
-            {mode === 'legacy' && (
+            {effectiveMode === 'legacy' && (
               <button className="btn-soft" onClick={handleLegacyConnect} disabled={busy}>
-                <i className={`fa-solid ${busy ? 'fa-spinner fa-spin' : 'fa-link'}`}></i> Connect Legacy v2
+                <i className={`fa-solid ${busy ? 'fa-spinner fa-spin' : 'fa-link'}`}></i> {syncV3Enabled ? 'Connect Legacy v2' : 'Connect to Relay'}
               </button>
             )}
           </div>
@@ -518,6 +537,26 @@ export function LiveSyncSettings() {
       <small className="form-hint" style={{ display: 'block', marginTop: '8px' }}>
         The relay stores only ciphertext — it can&apos;t read your tasks. Edits merge conflict-free (CRDT), so devices converge even after working offline.
       </small>
+
+      <details className="sync-advanced-section" style={{ marginTop: '16px', borderTop: '1px solid rgba(0,0,0,0.1)', paddingTop: '12px' }}>
+        <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: '13px', color: '#64748b' }}>
+          Advanced
+        </summary>
+        <div style={{ marginTop: '10px' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              data-testid="sync-v3-toggle"
+              checked={syncV3Enabled}
+              onChange={(e) => handleToggleV3(e.target.checked)}
+            />
+            <span>Enable Sync Protocol v3 (Experimental)</span>
+          </label>
+          <small className="form-hint" style={{ display: 'block', marginTop: '4px' }}>
+            Enables hardened per-room salt derivation, Crockford Base32 Setup Codes, and relay migration tools. Settable only in this Advanced section.
+          </small>
+        </div>
+      </details>
     </div>
   );
 }
