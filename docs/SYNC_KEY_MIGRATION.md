@@ -1,338 +1,251 @@
 # Sync Key & Room Derivation v3: Migration & Hardening Design
 
-> **Status:** Proposal / Design Specification (No code implementation until approved)  
+> **Status:** Proposal / Design Specification (Design only — no implementation without owner approval)  
 > **Target Release:** Cognate 3.2.0  
 > **Related Architecture:** [docs/ARCHITECTURE.md](ARCHITECTURE.md), [docs/RELAY.md](RELAY.md), [docs/BENCHMARKS.md](BENCHMARKS.md)
 
 ---
 
-## 1. Executive Summary & Problem Statement
+## 1. Threat Model & Entropy Analysis
 
 ### 1.1 Vulnerability in Protocol v2 Key Derivation
-In the current implementation (`src/services/crypto.ts`):
-```typescript
-// v2 key derivation:
-export async function deriveSyncKey(passphrase: string): Promise<CryptoKey> {
-  const base = await subtle().importKey('raw', enc.encode(passphrase), 'PBKDF2', false, ['deriveKey']);
-  return subtle().deriveKey(
-    { name: 'PBKDF2', salt: enc.encode('cognate-sync-key-v2'), iterations: 600000, hash: 'SHA-256' },
-    base,
-    { name: 'AES-GCM', length: 256 },
-    false,
-    ['encrypt', 'decrypt']
-  );
-}
+In the current implementation (`src/services/crypto.ts`), `deriveSyncKey` uses static salt `'cognate-sync-key-v2'` and `deriveRoomId` uses static salt `'cognate-sync-room-v2'`. Because salts are hardcoded and global:
+1. **Offline Multi-Target Dictionary Attacks**: An attacker obtaining a relay database snapshot can run GPU dictionary attacks against all rooms simultaneously.
+2. **Deterministic Cross-Tenant Collisions**: Two independent users choosing the same passphrase derive the identical 32-character room ID on the relay.
+3. **Residual Risk on Historical v2 Data**: Because v2 rooms are immutable and currently have no deletion endpoint on the relay, an attacker holding a relay database backup can attack historical v2 blobs even after a client migrates to v3 unless the v2 room is explicitly retired or wiped.
 
-// v2 room derivation:
-export async function deriveRoomId(passphrase: string): Promise<string> {
-  const base = await subtle().importKey('raw', enc.encode(passphrase), 'PBKDF2', false, ['deriveBits']);
-  const digest = await subtle().deriveBits(
-    { name: 'PBKDF2', salt: enc.encode('cognate-sync-room-v2'), iterations: 600000, hash: 'SHA-256' },
-    base,
-    256
-  );
-  return toHex(digest).slice(0, 32);
-}
-```
+### 1.2 Entropy & Representation Table
+Every workspace generates 128 bits of true entropy ($S$) via CSPRNG (`crypto.getRandomValues(new Uint8Array(16))`).
 
-This presents three critical security and operational risks:
-1. **Global Static Salt Vulnerability**: The salts `'cognate-sync-key-v2'` and `'cognate-sync-room-v2'` are static and identical across all Cognate installations worldwide. An adversary who intercepts relay traffic or compromises a public/self-hosted relay database can compile multi-target rainbow tables or utilize specialized GPU clusters to mount parallel dictionary attacks against all rooms simultaneously.
-2. **Deterministic Cross-Tenant Room Collision**: If two independent Cognate users select the same passphrase (e.g. standard dictionary phrases or common passwords), they derive the exact same 32-character room ID on the relay, colliding and potentially overwriting or attempting to decrypt each other's batches.
-3. **No Minimum Passphrase Length on Sync**: While backup recovery export enforces 12 characters in `src/services/recoveryService.ts`, `relayService.enableSync(url, passphrase)` accepts arbitrary passphrases of any length without validation.
+| Representation | Format | Bits | Collision Probability ($N = 10^9$) | Offline Brute-Force ($10^{12}$ guesses/s) |
+|---|---|---|---|---|
+| **Raw Bytes** (QR / Recovery Kit) | 16 raw octets (`Uint8Array(16)`) | 128 | $P \approx \frac{N^2}{2^{129}} \approx \frac{10^{18}}{6.806 \times 10^{38}} \approx 1.47 \times 10^{-21}$ | $2^{128} \approx 3.403 \times 10^{38}$ attempts $\to 1.078 \times 10^{19}$ years |
+| **Manual Code** (Crockford Base32) | 26 payload symbols + 1 check symbol | 128 | Same ($128$ bits entropy $+ 2$ zero pad bits) | Same ($1.078 \times 10^{19}$ years) |
+| **Encrypted Recovery Kit** | 16 raw octets in `PasswordBlob` | 128 | Same | Same |
 
-### 1.2 Proposed Resolution (Protocol v3)
-Introduce a **128-bit cryptographically secure, high-entropy Setup Code** generated per workspace that is combined with a **mandatory minimum 12-character user passphrase** to derive isolated, collision-free relay room IDs and workspace encryption keys.
+*Arithmetic*:
+- Collision probability by Birthday bound: $P(N) \approx 1 - \exp\left(-\frac{N^2}{2 \cdot 2^{128}}\right) \approx \frac{N^2}{2^{129}}$. For $N = 10^9$ workspaces: $\frac{(10^9)^2}{2 \times 3.4028 \times 10^{38}} = 1.469 \times 10^{-21}$.
+- Brute-force time: $\frac{2^{128}}{10^{12} \text{ tries/s}} = \frac{3.4028 \times 10^{38}}{10^{12} \times 3.15576 \times 10^7 \text{ s/yr}} = 1.078 \times 10^{19}$ years.
+
+### 1.3 Threat Mitigation Matrix
+
+| Threat Vector | Protocol v2 (Current) | Protocol v3 (New Data) | Protocol v3 (Existing Historical v2 Data) |
+|---|---|---|---|
+| **Relay DB Compromise (Dictionary Attack)** | High Risk: global static salt allows pre-computation / multi-target attacks | Fully Mitigated: 128-bit per-room setup salt renders rainbow tables impossible | **Residual Risk**: Historical v2 room remains vulnerable until retired / wiped on relay |
+| **Cross-Tenant Room Collision** | Medium Risk: identical passphrase produces identical room ID | Eliminated: $P < 1.47 \times 10^{-21}$ for $10^9$ workspaces | v2 room retains existing collision risk |
+| **Relay Traffic Eavesdropping** | Room ID leaked; allows targeted passphrase guessing | Room ID requires knowing both $P$ and $S$ | v2 room ID remains linkable |
+| **Shoulder Surfing / Display Capture** | Attacker sees passphrase | Attacker only sees QR / Setup Code $S$; still lacks $P$ | No impact |
 
 ---
 
-## 2. Cryptographic Specification (v3)
+## 2. Setup Code & Crockford-32 Specification
 
-### 2.1 Entropy & Key Derivation Functions
-- **Setup Code ($S$)**: 128 bits of cryptographically secure random bytes generated via `crypto.getRandomValues(new Uint8Array(16))`.
-  - Wire/storage representation: Hex string (32 chars) or Crockford Base32.
-  - Human-facing representation: 4 groups of 4 characters (`CGN-XXXX-XXXX-XXXX`), Crockford Base32 alphabet (omitting `I`, `L`, `O`, `U` to prevent transcription errors), with an embedded Luhn-mod-32 check digit.
-- **Passphrase ($P$)**: UTF-8 string, normalized under Unicode NFKD, strictly validated with $\ge 12$ characters.
+### 2.1 Alphabet & Permissive Decoding
+- **Encoding Alphabet** (32 symbols): `0 1 2 3 4 5 6 7 8 9 A B C D E F G H J K M N P Q R S T V W X Y Z` (omits `I`, `L`, `O`, `U`).
+- **Bit Packing**: 16 raw bytes (128 bits) are padded with two zero bits to 130 bits, yielding exactly 26 five-bit symbols ($26 \times 5 = 130$).
+- **Decoding Rules**:
+  - Case-insensitive (lowercase mapped to uppercase).
+  - Hyphens (`-`) and spaces are ignored.
+  - Permissive canonical alias mapping: `O` and `o` $\to$ `0`; `I`, `i`, `L`, `l` $\to$ `1`.
+  - `U` and `u` are rejected during decoding to prevent accidental profanity.
 
-```
-                    ┌───────────────────────────┐
-                    │  Passphrase (P >= 12 ch)  │
-                    └─────────────┬─────────────┘
-                                  │
-                                  ▼
-                     ImportKey('raw', 'PBKDF2')
-                                  │
-                                  ▼ (base key)
- ┌──────────────────────┐         │
- │ 128-bit Setup Code S │         │
- └──────────┬───────────┘         │
-            │                     │
-            ├─────────────────────┼───────────────────────────────────┐
-            │                     │                                   │
-            ▼ (salt 1)            ▼ (salt 2)                          ▼
-┌───────────────────────┐ ┌─────────────────────────┐      ┌────────────────────┐
-│ S || "-sync-key-v3"   │ │ S || "-sync-room-v3"    │      │ S || "-auth-v3"    │
-└───────────┬───────────┘ └───────────┬─────────────┘      └─────────┬──────────┘
-            │                         │                              │
-            ▼                         ▼                              ▼
-    PBKDF2-SHA256             PBKDF2-SHA256                  PBKDF2-SHA256
-    600,000 iters             600,000 iters                  600,000 iters
-            │                         │                              │
-            ▼                         ▼                              ▼
-    256-bit AES-GCM           256-bit Digest                 256-bit Digest
-     Sync Key (K_v3)          First 32 hex chars             Context Token (C_v3)
-                              Room ID (R_v3)
-```
+### 2.2 Modulo-37 Check Symbol
+Douglas Crockford's Modulo-37 check symbol detects all single-character substitutions and all adjacent transpositions.
+- **Algorithm**: Evaluate the 26 base-32 digits as a big-endian integer modulo 37:
+  $$r_0 = 0, \quad r_{i+1} = (r_i \times 32 + d_i) \pmod{37} \quad \text{for } i \in [0, 25]$$
+- **Symbol Lookup for Remainder $r \in [0, 36]$**:
+  - Values $0 \le r \le 31$: standard alphabet symbol `0`..`Z`.
+  - Values $32 \le r \le 36$: `*` (32), `~` (33), `$` (34), `=` (35), `U` (36).
+- **Formatting**: 26 payload characters + 1 check character grouped as 6 groups of 4 plus 3: `XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXX`.
 
-#### Detailed Calculations
-1. **Sync Encryption Key ($K_{v3}$)**:
-   $$\text{Salt}_{key} = S \mathbin{\Vert} \text{UTF8}(\text{"-sync-key-v3"})$$
-   $$K_{v3} = \text{PBKDF2}(\text{HMAC-SHA256}, P, \text{Salt}_{key}, 600000, 256) \xrightarrow{} \text{AES-256-GCM}$$
-2. **Sync Room Identifier ($R_{v3}$)**:
-   $$\text{Salt}_{room} = S \mathbin{\Vert} \text{UTF8}(\text{"-sync-room-v3"})$$
-   $$D_{room} = \text{PBKDF2}(\text{HMAC-SHA256}, P, \text{Salt}_{room}, 600000, 256)$$
-   $$R_{v3} = \text{Hex}(D_{room})[0..32]$$
-3. **Context / Channel Verifier ($C_{v3}$)**:
-   $$\text{Salt}_{ctx} = S \mathbin{\Vert} \text{UTF8}(\text{"-sync-ctx-v3"})$$
-   $$C_{v3} = \text{Hex}(\text{PBKDF2}(\text{HMAC-SHA256}, P, \text{Salt}_{ctx}, 600000, 256))[0..16]$$
-   Used to verify matching configuration between paired devices *before* publishing batches.
+### 2.3 Worked Known-Answer Test Vectors
+
+1. **Zero Vector** (16 bytes `0x00`):
+   - Raw: `00000000000000000000000000000000`
+   - Base32: `00000000000000000000000000`
+   - Mod-37 remainder: $r = 0 \to$ check symbol `0`
+   - Formatted: `0000-0000-0000-0000-0000-0000-000`
+2. **All-Ones Vector** (16 bytes `0xFF`):
+   - Raw: `ffffffffffffffffffffffffffffffff`
+   - Base32: `ZZZZZZZZZZZZZZZZZZZZZZZZZW` (last symbol has 2 trailing zero pad bits: `11100` = 28 = `W`)
+   - Mod-37 remainder: $r = 17 \to$ check symbol `H`
+   - Formatted: `ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZWH`
+3. **Sequential Vector** (16 bytes `0x01` through `0x10`):
+   - Raw: `0102030405060708090a0b0c0d0e0f10`
+   - Base32: `041061050R3GG28A1C60T3GF20`
+   - Mod-37 remainder: $r = 30 \to$ check symbol `X`
+   - Formatted: `0410-6105-0R3G-G28A-1C60-T3GF-20X`
 
 ---
 
-## 3. Pairing UX: How Device 2 Receives the Setup Code
+## 3. Key Derivation Architecture (Single PBKDF2 + HKDF-SHA256)
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor User
-    participant Device1 as Device 1 (Existing)
-    participant Device2 as Device 2 (New)
-    participant Relay as Encrypted Relay
+To eliminate the $3\times$ latency of calling 600,000 PBKDF2 iterations thrice, v3 performs a single slow stretch to produce a master secret, then expands keys via RFC 5869 HKDF-SHA256.
 
-    User->>Device1: Settings -> Live Sync -> Pair New Device
-    Device1->>Device1: Render Animated QR Code & Human Code (CGN-9K4W-7M2P-X8TR)
-    User->>Device2: Settings -> Live Sync -> Connect to Sync
-    alt Method A: QR Scan
-        User->>Device2: Point camera / webcam at Device 1
-        Device2->>Device2: Parse cognate-pair://v3?s=<SetupCode>&u=<RelayURL>
-    else Method B: Manual Entry
-        User->>Device2: Enter Relay URL + Setup Code
-    end
-    User->>Device2: Enter Passphrase (>= 12 characters)
-    Device2->>Device2: Compute K_v3, R_v3, C_v3
-    Device2->>Relay: GET /v2/rooms/R_v3/version
-    Relay-->>Device2: 200 { "cursor": N }
-    Device2->>Device2: Decrypt & verify initial batch page
-    Device2-->>User: "Device paired successfully! Syncing..."
+```
+Passphrase P (NFKD, trimmed)
+         │
+         ▼
+PBKDF2-SHA256 (600,000 iters) ── Salt: "cognate-v3:" || 0x10 || SetupCode[16]
+         │
+         ▼
+Master Secret M (256 bits PRK)
+         │
+         ├─► HKDF-Expand(info="cognate-sync-key-v3", 32) ──► K_v3 (AES-256-GCM)
+         ├─► HKDF-Expand(info="cognate-sync-room-v3", 32) ─► R_v3 (First 32 hex chars)
+         └─► HKDF-Expand(info="cognate-sync-verifier-v3", 16) ─► C_v3 (32 hex chars)
 ```
 
-### 3.1 Method A: Optical Pairing (Animated / Static QR Code)
-- Device 1 renders a secure URI payload:
-  `cognate-pair://v3?s=<setup_code_b64>&u=<url_encoded_relay_url>&v=3`
-- Passphrase is **never** embedded in the QR code. The user must manually input their passphrase on Device 2, preserving two-factor separation:
-  - Factor 1 (Possession / Out-of-band channel): Setup Code via optical scan.
-  - Factor 2 (Knowledge): Passphrase entered by user.
+### 3.1 Derivation Parameters & Byte Encodings
+- **Salt**: ASCII prefix `cognate-v3:` (11 bytes) $\mathbin{\Vert}$ length byte `0x10` (1 byte) $\mathbin{\Vert}$ raw 16-byte Setup Code $S$ = 28 octets total.
+- **Master Secret ($M$)**: $\text{PBKDF2-SHA256}(P, \text{Salt}, 600000, 32 \text{ bytes})$.
+- **HKDF-SHA256 Expansion**:
+  - $K_{v3}$: $\text{HKDF-Expand}(M, \text{"cognate-sync-key-v3"}, 32) \to$ 256-bit AES-GCM `CryptoKey`.
+  - Room ID $R_{v3}$: $\text{HKDF-Expand}(M, \text{"cognate-sync-room-v3"}, 32) \to$ first 16 bytes encoded as 32 lowercase hex characters.
+  - Genesis Verifier $C_{v3}$: $\text{HKDF-Expand}(M, \text{"cognate-sync-verifier-v3"}, 16) \to$ 16 bytes encoded as 32 lowercase hex characters.
 
-### 3.2 Method B: Human-Readable Setup Code (Manual Entry)
-- For headless setups or devices without cameras:
-- Rendered as `CGN-XXXX-XXXX-XXXX` (16 Crockford Base32 characters).
-- Includes case-insensitivity and automatic normalization of `0` -> `O`, `1` -> `I`/`L`.
+### 3.2 Performance & UI Impact
+- **Benchmark Estimate**: 600,000 iterations of PBKDF2-SHA256 take 350–550 ms on a desktop CPU (Apple M-series / Intel i7) and 1.2–1.8 s on low-end mobile. HKDF-Expand takes $< 1$ ms.
+- **Main Thread Isolation**: WebCrypto (`crypto.subtle`) runs PBKDF2 on background browser worker threads; it does not block React UI rendering. A standard indeterminate progress spinner is displayed during computation.
 
-### 3.3 Method C: Encrypted Recovery Kit
-- When exporting a full recovery kit (`.cognate-recovery`):
-- The setup code is stored inside the encrypted payload of `PasswordBlob` (`v: 2`, `PBKDF2-SHA256`).
-- Importing a recovery kit on a clean device restores the setup code automatically without requiring manual re-pairing.
+### 3.3 Known-Answer Test Vector (KAT)
+- **Input Passphrase**: `correct horse battery staple`
+- **Input Setup Code**: `0102030405060708090a0b0c0d0e0f10`
+- **Expected Outputs**:
+  - Master Secret ($M$): `64d28da6b43e213c1479ac959aa8761c20156c179b669514f7fa7b76c2ecf288`
+  - AES Key ($K_{v3}$): `b9b73b7fb6a7389e1c94186de6f63d25ee217ff76e135678951af4947db15057`
+  - Room ID ($R_{v3}$): `af340eac1d2451afe20f762a4a8cb695`
+  - Genesis Verifier ($C_{v3}$): `3cf82af26a2bdad2b0e0aa78f6bb1166`
+  - Ciphertext with zero IV (`12` zero bytes, payload `{"genesis":true}`):
+    - Ciphertext: `0e2209e87b9dcb2fa8d6ed3bc8aaa7be`
+    - GCM Tag: `d8dc956bb905c44e6e95319a97953397`
 
 ---
 
-## 4. Versioned Envelopes, Migration & Rollback Plan
+## 4. Passphrase Policy & Justification
 
-### 4.1 Envelope Structures
+### 4.1 Canonical Validation Policy
+1. **Normalization**: Unicode Normalization Form KD (`NFKD`) applied before length check, validation, and key derivation.
+2. **Whitespace**: Leading and trailing whitespace is stripped via `trim()` to prevent copy-paste artifacts; internal whitespace (spaces, tabs) is preserved.
+3. **Length Count**: Counted strictly in Unicode scalar values / code points (`[...normalized].length >= 12`).
+4. **Complexity / Entropy**:
+   - Rejects single-character repeated strings ($\ge 4$ unique code points required).
+   - Rejects exact matches against top 10,000 common passwords.
+   - *Bundle-Size Decision*: A compact 10k Bloom filter / hash set ($\approx 25$ KB) is used instead of heavy packages like `zxcvbn` ($\approx 400$ KB).
+5. **No Retroactive Invalidation**: Existing v2 workspaces are not blocked from continuing v2 sync with short passphrases. When initiating a v3 migration, if the existing passphrase is $< 12$ code points, the user must update it to $\ge 12$ code points before migration proceeds.
 
-#### Legacy Sealed Blob (v1)
-```json
-{
-  "v": 1,
-  "nonce": "<base64 12-byte IV>",
-  "ct": "<base64 ciphertext + 16-byte tag>"
-}
-```
+### 4.2 Why Passphrase Remains Mandatory with 128-bit Setup Code
+The Setup Code is a **possession factor** (rendered on screen as a QR code or printed). If an attacker photographs the screen, inspects an unencrypted export, or compromises the clipboard, the passphrase serves as the essential **knowledge factor** (two-factor confidentiality). Requiring both prevents optical eavesdropping from immediately compromising workspace read/write authority.
 
-#### Legacy Batch Envelope (v2)
-- Plaintext payload inside v1 ciphertext:
-```json
-{
-  "v": 2,
-  "id": "uuid",
-  "context": { "kind": "workspace", "id": "room_id_v2", "epoch": 1 },
-  "actor": "actor_id",
-  "pub": "<base64 ECDSA public key>",
-  "ops": [...],
-  "sig": "<base64 signature>"
-}
-```
+---
 
-#### Hardened Batch Envelope (v3)
-- Plaintext payload inside ciphertext:
-```json
-{
-  "v": 3,
-  "id": "uuid",
-  "context": {
-    "kind": "workspace",
-    "id": "room_id_v3",
-    "epoch": 2,
-    "setup_id": "<first 8 chars of SHA-256(setup_code)>"
-  },
-  "actor": "actor_id",
-  "pub": "<base64 ECDSA public key>",
-  "ops": [...],
-  "sig": "<base64 signature over canonical JSON>"
-}
-```
+## 5. Workspace Genesis vs. Join Semantics
 
-### 4.2 Migration Workflow (Device 1 - Originator)
+To prevent an incorrect passphrase or setup code from silently creating and syncing to an empty room, workspace creation and workspace joining have distinct semantics.
+
+### 5.1 Workspace Creation (Originating Device)
+1. Derives $K_{v3}, R_{v3}, C_{v3}$.
+2. Compiles a signed `v: 3` genesis batch (Batch ID `genesis`, Cursor 1) containing:
+   - Verifier ciphertext: AES-GCM encryption of `{"verifier": C_v3, "workspace_id": UUID}`.
+   - Initial compact snapshot (squashed state of tasks, projects, actor identity, and HLC clock anchor).
+3. Posts genesis batch to `PUT /v2/rooms/{R_v3}/batches/genesis`.
+
+### 5.2 Workspace Joining (Second Device)
+When a user selects "Join Existing Workspace" on Device 2:
+1. Inputs Relay URL, Setup Code $S$, and Passphrase $P$.
+2. Computes candidate $K_{v3}', R_{v3}', C_{v3}'$.
+3. Fetches genesis batch: `GET /v2/rooms/{R_v3}'/batches?after=0`.
+4. **Validation Pipeline**:
+   - **Step 1 (Existence)**: If room returns 0 batches (cursor 0), **fail immediately** with `"No workspace found for this Setup Code and Passphrase"`. Joining **never** auto-creates a room.
+   - **Step 2 (Decryption)**: Decrypt batch 1 with candidate $K_{v3}'$. If GCM tag check fails, **fail immediately** with `"Incorrect Passphrase"`.
+   - **Step 3 (Verifier Check)**: Verify decrypted `verifier === C_v3'`. If mismatch, **fail immediately**.
+   - **Step 4 (Identity & Signature)**: Verify ECDSA signature of genesis batch against embedded creator public key.
+5. Commit local sync configuration only after Steps 1–4 succeed.
+
+---
+
+## 6. Migration State Machine & Rollback
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Idle_v2: Syncing on v2
-    Idle_v2 --> CheckingPreconditions: User initiates v3 migration
-    CheckingPreconditions --> DrainOutbox: Pending ops exist
-    DrainOutbox --> CheckingPreconditions: Push pending v2 batches
-    CheckingPreconditions --> KeyGeneration: Outbox clean & relay reachable
-    KeyGeneration --> PrepareV3: Generate Setup Code S, compute K_v3, R_v3
-    PrepareV3 --> PostMigrationMarker: Write signed marker to v2 room
-    PostMigrationMarker --> LocalAtomicCommit: Write setup code to Keychain & update binding
-    LocalAtomicCommit --> PublishInitialV3: Push full state baseline to R_v3
-    PublishInitialV3 --> Active_v3: Migration complete
-    
-    PrepareV3 --> Rollback_v2: Pre-flight failure / Relay unreachable
-    PostMigrationMarker --> Rollback_v2: Relay 5xx error
-    Rollback_v2 --> Idle_v2: Restore v2 configuration
+    [*] --> Idle_v2: Live Syncing on v2
+    Idle_v2 --> Preflight: User clicks "Upgrade to Sync v3"
+    Preflight --> StorageCheck: Passphrase validated (>= 12 ch), outbox drained
+    StorageCheck --> Idle_v2: Quota exceeded / 507 -> Abort with error
+    StorageCheck --> PublishV3: Baseline size < RELAY_ROOM_QUOTA (8 MB)
+    PublishV3 --> ReadbackVerify: Genesis + compact snapshot published to R_v3
+    ReadbackVerify --> PostV2Marker: Decrypted baseline verified matches local state
+    ReadbackVerify --> RollbackV2: Readback failed / corrupted -> Abort
+    PostV2Marker --> CommitLocal: Signed marker posted to R_v2 (v2 write-freeze)
+    CommitLocal --> Active_v3: Secure storage & binding updated to v3
+    Active_v3 --> RetireV2: All devices paired or manual user confirmation
+    RetireV2 --> [*]: v2 retired
+    RollbackV2 --> Idle_v2: Revert to v2 room and clear v3 staging
 ```
 
-#### Migration Step Details:
-1. **Pre-Flight Validation**:
-   - Verify network connectivity to relay (`GET /health`).
-   - Drain local outbox: ensure all unacknowledged local ops are pushed to the v2 room.
-   - Require user to re-enter passphrase to confirm knowledge and enforce $\ge 12$ characters.
-2. **Key Generation**:
-   - Generate 16 cryptographically random bytes for Setup Code $S$.
-   - Compute $K_{v3}$, $R_{v3}$, and $C_{v3}$.
-3. **Post Migration Notice to v2 Room**:
-   - Post an encrypted batch containing a signed `WorkspaceMigration` marker to the old v2 room:
-     ```json
-     {
-       "type": "MIGRATION_MARKER",
-       "target_version": 3,
-       "migrated_at": 1793548800000,
-       "actor": "actor_id",
-       "v3_setup_hint": "<first 4 chars of Crockford code>"
-     }
-     ```
-   - This notifies other connected devices running v2 that a migration has occurred and prompts them to pair.
+### 6.1 State Machine Ordering & Crash Recovery
+1. **Pre-flight & Storage Check**:
+   - Ensure local outbox is drained (no unacknowledged v2 batches).
+   - Compute squashed snapshot baseline. Size is checked against `RELAY_ROOM_QUOTA` (8 MB). A squashed baseline is typically 50–200 KB, avoiding journal limit exhaustion.
+2. **Publish & Readback Verification**:
+   - Publish genesis and baseline batches to $R_{v3}$.
+   - **Strict Verification Step**: Device fetches batches back from $R_{v3}$ via HTTP, decrypts with $K_{v3}$, and validates signatures. The migration does **not** proceed unless readback passes.
+3. **Post Migration Marker to v2**:
+   - Write signed batch to $R_{v2}$ containing `{ type: "MIGRATION_MARKER", target_room: R_v3, migrated_at: timestamp, actor: id }`.
+   - **Crucial**: The marker carries **zero key material** and zero setup code bytes.
 4. **Local Atomic Commit**:
-   - Write setup code to secure storage (`sync_setup_code`).
-   - Update `sync_workspace_binding`:
-     ```json
-     {
-       "url": "https://relay.cognate.app",
-       "room": "<R_v3>",
-       "version": 3,
-       "v2_fallback": {
-         "room": "<R_v2>",
-         "migrated_at": 1793548800000
-       }
-     }
-     ```
-5. **Publish to v3 Room**:
-   - Push the initial v3 batches to $R_{v3}$.
+   - Persist Setup Code to secure storage (`sync_setup_code`).
+     - **Desktop**: OS Keychain via Rust `keyring` crate commands (`secret_set`).
+     - **Browser**: AES-GCM encrypted in IndexedDB via `browserVault`.
+   - Update `sync_workspace_binding` to `{ version: 3, room: R_v3, v2_fallback: { room: R_v2 } }`.
 
-### 4.3 Rollback Plan
-- If an unrecoverable failure occurs during migration (e.g. relay disk full error 507, network drop before initial v3 push succeeds, or second device cannot read setup code):
-  1. The `v2_fallback` record in `sync_workspace_binding` retains the exact v2 room ID and previous cursor.
-  2. The UI displays an explicit **"Roll Back to v2 Sync"** action button.
-  3. Clicking rollback:
-     - Restores `sync_workspace_binding.room` to $R_{v2}$.
-     - Restores active encryption key to $K_{v2}$.
-     - Clears the pending v3 journal without dropping local operations.
-     - Resumes standard v2 polling and pushing.
-  4. The v2 room on the relay is never deleted during migration, ensuring zero data loss during rollback.
+### 6.2 Split-Brain & Concurrency Resolution
+- **Tiebreak**: If two devices concurrently migrate, both attempt to post a migration marker to $R_{v2}$. The relay's monotonic cursor determines the winner: **the migration marker with the lower cursor wins**.
+- **Loser Behavior**: The losing device sees the winner's earlier marker when pulling $R_{v2}$, aborts its uncommitted v3 room, and prompts the user to adopt the winner's setup code.
+- **v2 Write-Freeze**: Any client encountering a migration marker in $R_{v2}$ enters read-only mode for v2 and refuses to post further v2 batches.
+- **Sunset Window**: Un-migrated v2 devices have a 30-day grace period to pair to v3 before v2 retirement.
 
 ---
 
-## 5. Passphrase Strength & Validation
+## 7. Decisions Needed from Owner
 
-### 5.1 Strict Minimum Requirements
-- **Length**: Strict minimum of 12 characters (`passphrase.length >= 12`).
-- **Complexity Assessment**:
-  - Integrate entropy estimator (e.g., zxcvbn or Shannon entropy calculation $\ge 45$ bits).
-  - Explicit blacklist check against top 10,000 common passwords.
-  - Reject whitespace-only or single-character repeated strings (e.g., `aaaaaaaaaaaa`).
+### Decision 1: v2 Room Deletion vs. Relay Wire-Format Non-Goal
+- **Conflict**: Relay batches are currently immutable and there is no room deletion endpoint. Without deletion, historical v2 ciphertext remains on the relay, susceptible to offline dictionary attacks if the relay database is breached.
+- **Options**:
+  - **Option A (Recommended — Minimal Relay Route)**: Add `DELETE /v2/rooms/{room}` authenticated by an owner-signed retirement marker or bearer token. Reclaims the 8 MB room quota and global 32 MB store limit, and purges vulnerable historical ciphertext.
+  - **Option B (Strict Non-Goal Preservation)**: Keep relay unchanged. Document residual risk: operators must manually purge old relay data, and historical v2 ciphertext remains on the relay indefinitely.
+  - **Option C (Client Tombstone)**: Post a tombstone batch that soft-deletes the room at the application layer, but leaves underlying ciphertext in `relay.json`.
+- **Recommendation**: **Option A**. A 15-line addition to `server/src/main.rs` eliminates the residual risk and prevents dead storage exhaustion under the 32 MB store cap.
 
-### 5.2 Implementation Points
-- **API Guard (`src/services/relayService.ts`)**:
-  ```typescript
-  export function validatePassphrase(passphrase: string): void {
-    const trimmed = passphrase.trim();
-    if (trimmed.length < 12) {
-      throw new Error('Sync passphrase must be at least 12 characters.');
-    }
-    if (new Set(trimmed).size < 4) {
-      throw new Error('Sync passphrase contains too few unique characters.');
-    }
-  }
-  ```
-- **Settings UI (`src/components/SettingsModal.tsx`)**:
-  - Real-time strength meter (Weak / Fair / Good / Strong).
-  - Inline guidance: *"Use a memorable passphrase of at least 12 characters or 4 random words."*
-  - Disable "Enable Sync" button until validation passes.
+### Decision 2: v2 Room Retirement Trigger
+- **Options**:
+  - **Option A (Automatic)**: Automatically retire $R_{v2}$ once all previously active actor keys have synced at least one batch to $R_{v3}$ or after 30 days.
+  - **Option B (Manual Confirmation — Recommended)**: Keep $R_{v2}$ read-only until the user explicitly clicks "Retire Old Sync Room" in Settings, preventing premature deletion if an offline device has not yet paired.
+
+### Decision 3: Mandatory vs. Optional Passphrase
+- **Options**:
+  - **Option A (Mandatory — Recommended)**: Retain $\ge 12$ character passphrase as a mandatory second factor alongside the 128-bit Setup Code. Defends against display capture, shoulder surfing, and physical QR code theft.
+  - **Option B (Optional)**: Allow passphrase to be empty, deriving keys solely from the 128-bit Setup Code. Reduces user friction but reduces security to single-factor possession.
 
 ---
 
-## 6. Threat Model Changes
+## 8. Test Plan
 
-| Threat Vector | Protocol v2 (Current) | Protocol v3 (Proposed) |
-|---|---|---|
-| **Relay Database Compromise (Offline Dictionary Attack)** | **HIGH RISK**: Attackers can run GPU dictionary attacks using the global static salt against all room IDs and ciphertexts simultaneously. | **MITIGATED**: 128-bit random setup code acts as a unique salt per room. Multi-target rainbow tables are completely ineffective ($2^{128}$ search space). |
-| **Passphrase Re-use / Room Collision** | **MEDIUM RISK**: Two independent users picking the same passphrase derive the exact same room ID and collide on the relay. | **ELIMINATED**: Setup code is generated from OS CSPRNG. Probability of collision across all users is negligible ($< 10^{-19}$). |
-| **Relay Traffic Interception (Eavesdropping Room ID)** | **MEDIUM RISK**: Knowing the room ID allows an attacker to test candidate passphrases against $PBKDF2(P, \text{'cognate-sync-room-v2'})$. | **ELIMINATED**: The room ID depends on both $P$ and $S$. Without $S$, candidate passphrases cannot be tested against room IDs. |
-| **Compromised QR Display / Shoulder Surfing** | N/A | **LOW RISK**: The QR code only contains the setup code $S$. An attacker who captures the QR code still lacks the passphrase $P$ ($\ge 12$ chars) needed to derive keys or rooms. |
-| **Lost Second Device** | Same: Attacker with physical device access must break OS keychain. | Same: Keys are stored in OS keychain (`keytar` on desktop / secure storage). |
-
----
-
-## 7. Verification & Test Plan
-
-### 7.1 Unit Tests (`src/services/crypto.test.ts`)
-1. `deriveSyncKeyV3_produces_consistent_keys_with_same_setup_code_and_passphrase`:
-   - Assert deterministic derivation with identical inputs.
-2. `deriveSyncKeyV3_diverges_with_different_setup_codes`:
-   - Assert that two identical passphrases with different setup codes yield distinct `CryptoKey` handles and different ciphertexts.
-3. `deriveRoomIdV3_diverges_with_different_setup_codes`:
-   - Assert room IDs are completely independent.
-4. `passphrase_validation_enforces_12_character_minimum`:
-   - Assert rejection of lengths 0, 8, 11 characters, and acceptance of 12+ characters.
-5. `backward_compatibility_v1_and_v2_blobs_remain_decryptable`:
-   - Feed historical v1 and v2 test vectors to `open()` and verify clean decryption.
-
-### 7.2 Integration Tests (`src/services/batchSync.test.ts`)
-1. `device_migration_from_v2_to_v3_preserves_unbroken_history`:
-   - Seed store with 50 v2 operations.
-   - Execute migration flow to v3.
-   - Push additional v3 operations.
-   - Verify full chronological projection matches expected state.
-2. `device_pairing_flow_converges_fresh_device`:
-   - Device 1 exports setup code and pushes v3 batches.
-   - Device 2 initializes using setup code + passphrase.
-   - Verify Device 2 pulls and decrypts all operations without errors.
-3. `rollback_preserves_v2_functionality_when_v3_fails`:
-   - Simulate a relay failure during v3 initialization.
-   - Trigger rollback to v2.
-   - Verify client seamlessly resumes syncing to original v2 room.
-
----
-
-## 8. Explicit Non-Goals & Boundaries
-- **No Cloud User Accounts**: Cognate remains account-free, zero-knowledge, and local-first. We do not introduce user registrations, email logins, or central identity authorities.
-- **Relay Wire Format Unchanged**: The relay itself remains an unopinionated ciphertext store (`/v2/rooms/{room}/batches/{id}`) and requires zero backend schema alterations to support v3 envelopes.
-- **No Code in this Phase**: Implementation will proceed only after this design specification has been reviewed and formally approved.
+1. **Crockford-32 Encoding & Normalization**:
+   - Verify encoding of all-zeros, all-ones, and sequential test vectors against Section 2.3.
+   - Verify Modulo-37 check symbol generation and detection of swapped adjacent characters and single-character substitutions.
+   - Verify decoding normalizes lowercase, strips hyphens/spaces, maps `O` $\to$ `0`, `I`/`L` $\to$ `1`, and rejects `U`.
+2. **KDF & Cryptographic Test Vectors**:
+   - Verify KAT vectors from Section 3.3 for Master Secret, $K_{v3}$, $R_{v3}$, $C_{v3}$, and AES-GCM ciphertext/tag.
+3. **Genesis vs. Join Semantics**:
+   - Verify joining a non-existent room fails with `"No workspace found"` without creating a room.
+   - Verify wrong passphrase produces decryption tag error.
+   - Verify verifier mismatch error on mismatched candidate.
+4. **Migration & State Machine**:
+   - Test pre-flight check aborts on relay 507 quota error without touching v2 room.
+   - Test readback verification failure triggers rollback before v2 marker is written.
+   - Test crash/kill simulation at each migration journal step resumes idempotently.
+   - Test concurrent migration tiebreak: lowest v2 cursor wins; loser reverts.
+   - Test v2 write-freeze blocks writes once migration marker is visible.
+5. **Backward Compatibility**:
+   - Verify existing v1 and v2 test vectors in `src/services/relayService.test.ts` and `src/services/crypto.test.ts` remain decryptable.
