@@ -291,6 +291,18 @@ fn header(name: &str, value: &str) -> Header {
 // a decryption key (the relay still can't read blobs); it just stops anonymous
 // strangers from filling your relay. Empty token = open (dev/self-host default).
 
+/// Compare two byte slices in constant time to prevent timing attacks against tokens.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff: u8 = 0;
+    for (&x, &y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    std::hint::black_box(diff) == 0
+}
+
 fn bearer_ok(headers: &[Header], expected: &str) -> bool {
     if expected.is_empty() {
         return true; // no token configured → open
@@ -298,7 +310,7 @@ fn bearer_ok(headers: &[Header], expected: &str) -> bool {
     let want = format!("Bearer {expected}");
     headers
         .iter()
-        .any(|h| h.field.equiv("Authorization") && h.value.as_str().trim() == want)
+        .any(|h| h.field.equiv("Authorization") && constant_time_eq(h.value.as_str().trim().as_bytes(), want.as_bytes()))
 }
 
 // ── Rate limiting ────────────────────────────────────────
@@ -1014,5 +1026,20 @@ mod tests {
 
         stopped.store(true, std::sync::atomic::Ordering::SeqCst);
         worker.join().unwrap();
+    }
+
+    #[test]
+    fn bearer_token_comparison_constant_time() {
+        assert!(constant_time_eq(b"", b""));
+        assert!(constant_time_eq(b"token123", b"token123"));
+        assert!(!constant_time_eq(b"token123", b"token124"));
+        assert!(!constant_time_eq(b"token123", b"xoken123"));
+        assert!(!constant_time_eq(b"token123", b"token12"));
+        assert!(!constant_time_eq(b"token12", b"token123"));
+
+        let h = vec![Header::from_bytes(&b"Authorization"[..], &b"Bearer my-secret-token"[..]).unwrap()];
+        assert!(bearer_ok(&h, "my-secret-token"));
+        assert!(!bearer_ok(&h, "my-secret-tokeo"));
+        assert!(!bearer_ok(&h, "ny-secret-token"));
     }
 }
