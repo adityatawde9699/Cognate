@@ -130,7 +130,7 @@ Master Secret M (256 bits PRK)
 
 ### 3.3 Known-Answer Test Vector (KAT)
 - **Input Passphrase**: `correct horse battery staple`
-- **Input Setup Code**: `0102030405060708090a0b0c0d0e0f10` (`0410-6105-0R3G-G28A-1C60-T3GF-20N`)
+- **Input Setup Code**: `0102030405060708090a0b0c0d0e0f10` (`0410-6105-0R3G-G28A-1C60-T3GF-20E`)
 - **Derived Outputs**:
   - Master Secret ($M$): `64d28da6b43e213c1479ac959aa8761c20156c179b669514f7fa7b76c2ecf288`
   - AES Key ($K_{v3}$): `b9b73b7fb6a7389e1c94186de6f63d25ee217ff76e135678951af4947db15057`

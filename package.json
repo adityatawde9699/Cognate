@@ -10,6 +10,7 @@
     "verify:build": "node scripts/verify-build.mjs",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:kat": "python3 scripts/verify_kat.py && node scripts/verify_kat.mjs",
     "test:e2e": "playwright test",
     "tauri": "tauri",
     "test:pwa": "npm run build && playwright test --config playwright.production.config.ts",

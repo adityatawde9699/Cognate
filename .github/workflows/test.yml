@@ -38,6 +38,9 @@ jobs:
       - name: Run JS tests
         run: npm test
 
+      - name: Verify independent Known-Answer Tests (KAT)
+        run: npm run test:kat
+
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
 
