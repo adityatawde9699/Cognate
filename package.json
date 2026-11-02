@@ -10,6 +10,7 @@
     "verify:build": "node scripts/verify-build.mjs",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:gate": "cargo build --manifest-path server/Cargo.toml && vitest run src/services/releaseGate.test.ts",
     "test:kat": "python3 scripts/verify_kat.py && node scripts/verify_kat.mjs",
     "test:e2e": "playwright test",
     "tauri": "tauri",

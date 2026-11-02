@@ -519,13 +519,17 @@ thread_local! {
 }
 
 fn effective_now_secs() -> u64 {
+    let env_offset = std::env::var("RELAY_TIME_OFFSET")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
     #[cfg(test)]
     {
-        now_secs() + TEST_TIME_OFFSET.with(|c| c.get())
+        now_secs() + env_offset + TEST_TIME_OFFSET.with(|c| c.get())
     }
     #[cfg(not(test))]
     {
-        now_secs()
+        now_secs() + env_offset
     }
 }
 

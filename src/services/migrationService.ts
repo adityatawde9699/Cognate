@@ -48,6 +48,20 @@ export interface MigrationResult {
   deleteToken: string;
 }
 
+export type MigrationFailpoint =
+  | 'before_publish'
+  | 'after_publish'
+  | 'after_readback'
+  | 'after_v2_marker'
+  | 'after_freeze'
+  | null;
+
+let currentMigrationFailpoint: MigrationFailpoint = null;
+
+export function setMigrationFailpoint(fp: MigrationFailpoint): void {
+  currentMigrationFailpoint = fp;
+}
+
 /** Check if v2 room writes have been frozen locally due to migration. */
 export async function isV2WriteFrozen(): Promise<boolean> {
   return (await getSetting('sync_v2_write_frozen', 'false')) === 'true';
@@ -228,6 +242,10 @@ export async function migrateV2ToV3(
   const creds = await deriveSyncV3(v3Passphrase, decodedSetup);
 
   // 2. Publish genesis to R_v3
+  if (currentMigrationFailpoint === 'before_publish') {
+    throw new Error('FAILPOINT: killed before publish');
+  }
+
   const workspaceId = crypto.randomUUID();
   const verifierBlob = await seal(creds.key, { verifier: creds.verifier, workspace_id: workspaceId });
   const identity = await getIdentity();
@@ -251,10 +269,23 @@ export async function migrateV2ToV3(
   const sealedGenesis = await seal(creds.key, signedGenesis);
 
   const delHash = await hashDeleteToken(deleteToken);
-  await httpPut(
-    `${cleanUrl}/v2/rooms/${creds.room}/batches/genesis?delete_token_hash=${delHash}`,
-    JSON.stringify(sealedGenesis)
-  );
+  try {
+    await httpPut(
+      `${cleanUrl}/v2/rooms/${creds.room}/batches/genesis?delete_token_hash=${delHash}`,
+      JSON.stringify(sealedGenesis)
+    );
+  } catch (err: any) {
+    if (err?.message?.includes('409')) {
+      // Concurrent migration: another device already published genesis to this v3 room.
+      // Deterministic loser adopts the winner's genesis batch via readback.
+    } else {
+      throw err;
+    }
+  }
+
+  if (currentMigrationFailpoint === 'after_publish') {
+    throw new Error('FAILPOINT: killed after publish');
+  }
 
   // 3. Readback Verification
   const readbackRaw = await httpGet(`${cleanUrl}/v2/rooms/${creds.room}/batches?after=0`);
@@ -271,6 +302,10 @@ export async function migrateV2ToV3(
     throw new Error('Migration readback verification failed: verifier mismatch.');
   }
   await verifyBatch(readbackBatch, { kind: 'workspace', id: creds.room, epoch: 1 });
+
+  if (currentMigrationFailpoint === 'after_readback') {
+    throw new Error('FAILPOINT: killed after readback');
+  }
 
   // 4. Post Migration Marker to R_v2 (Section 6.2)
   // Contains ONLY { migrated: true, timestamp, actor, sig } — NO v3 room or keys
@@ -300,7 +335,19 @@ export async function migrateV2ToV3(
     sig: batchSig,
   };
   const sealedMarker = await seal(v2Key, v2MarkerBatch);
-  await httpPut(`${cleanUrl}/v2/rooms/${v2Room}/batches/migrated-${identity.actor}`, JSON.stringify(sealedMarker));
+  try {
+    await httpPut(`${cleanUrl}/v2/rooms/${v2Room}/batches/migrated-${identity.actor}`, JSON.stringify(sealedMarker));
+  } catch (err: any) {
+    if (err?.message?.includes('409')) {
+      // Marker already exists
+    } else {
+      throw err;
+    }
+  }
+
+  if (currentMigrationFailpoint === 'after_v2_marker') {
+    throw new Error('FAILPOINT: killed after v2 marker');
+  }
 
   // 5. Freeze v2 writes locally and on relay (if supported)
   await setSetting('sync_v2_write_frozen', 'true');
@@ -322,6 +369,10 @@ export async function migrateV2ToV3(
     } catch {
       // Server freeze failed; client write-freeze remains active
     }
+  }
+
+  if (currentMigrationFailpoint === 'after_freeze') {
+    throw new Error('FAILPOINT: killed after freeze');
   }
   await enableSyncV3(cleanUrl, v3Passphrase, setupCode, deleteToken, { isMigration: true });
 
