@@ -67,7 +67,8 @@ export async function enableSyncV3(
   url: string,
   passphrase: string,
   setupCodeInput?: string,
-  deleteTokenInput?: string
+  deleteTokenInput?: string,
+  options?: { isMigration?: boolean }
 ): Promise<{ setupCode: string; deleteToken: string; room: string }> {
   validateRelayUrl(url.trim());
   if (new URL(url.trim()).search) throw new Error('Relay base URL cannot contain a query.');
@@ -83,7 +84,7 @@ export async function enableSyncV3(
   const nextUrl = url.trim().replace(/\/$/, '');
 
   const current = await getConfig();
-  if (current && (current.passphrase !== passphrase || current.url !== nextUrl || current.setupCode !== setupCode)) {
+  if (current && !options?.isMigration && (current.passphrase !== passphrase || current.url !== nextUrl || current.setupCode !== setupCode)) {
     throw new Error('Changing an active workspace key or relay requires an explicit migration. Export a verified recovery kit and operation bundle first; reconnect with the existing configuration.');
   }
 
@@ -180,13 +181,21 @@ export async function isSyncEnabled(): Promise<boolean> {
 
 /** Whole-log / batch sync pushes local uncommitted batches. */
 export async function pushLocal(cfg: RelayConfig, key: CryptoKey, room: string): Promise<number> {
+  if (cfg.version === 2 && (await getSetting('sync_v2_write_frozen', 'false')) === 'true') {
+    throw new Error('v2 workspace is in read-only write-freeze mode following migration to v3.');
+  }
   return pushBatches({ url: cfg.url, room, key, context: { kind: 'workspace', id: room, epoch: 1 } }, await loadOps());
 }
 
 export async function pullRemote(cfg: RelayConfig, key: CryptoKey, room: string) {
   const pulled = await pullBatches(
     { url: cfg.url, room, key, context: { kind: 'workspace', id: room, epoch: 1 } },
-    async (archive) => mergeIntoApp(archive.flatMap((batch) => batch.ops))
+    async (archive) => {
+      if (cfg.version === 2 && archive.some((batch) => (batch as any).migration_marker)) {
+        await setSetting('sync_v2_write_frozen', 'true');
+      }
+      return mergeIntoApp(archive.flatMap((batch) => batch.ops));
+    }
   );
   return { pulledBlobs: pulled.batches, mergedOps: pulled.result.applied, upserts: pulled.result.upserts, deletes: pulled.result.deletes };
 }

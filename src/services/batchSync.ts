@@ -9,7 +9,10 @@ import { httpGet, httpPut } from './relayTransport';
 
 export interface BatchContext { kind: 'workspace' | 'share'; id: string; epoch: number }
 export interface SignedBatch {
-  v: 2; id: string; context: BatchContext; actor: string; pub: string; ops: Op[]; sig: string;
+  v: 2 | 3; id: string; context: BatchContext; actor: string; pub: string; ops: Op[]; sig: string;
+  verifier?: SealedBlob;
+  snapshot?: unknown;
+  migration_marker?: unknown;
 }
 interface Pending { id: string; body: string; ops: string[] }
 interface Journal { acknowledged: string[]; cursor: number; pending?: Pending; archive: SignedBatch[]; bindings: Record<string,string>; lastSuccess?: string; lastError?: string; attempts: number; failures?:number;retryAt?:number }
@@ -44,7 +47,7 @@ export async function signBatch(context:BatchContext,ops:Op[]):Promise<SignedBat
   return {...batch,sig:await signBytes(identity.privateKey,bytes(batch))};
 }
 export async function verifyBatch(batch:SignedBatch,context:BatchContext):Promise<void> {
-  if (!batch || batch.v!==2 || !batch.id || canonical(batch.context)!==canonical(context) || !batch.actor || !batch.pub || !batch.sig) throw new Error('Invalid sync batch context.');
+  if (!batch || (batch.v!==2 && batch.v!==3) || !batch.id || canonical(batch.context)!==canonical(context) || !batch.actor || !batch.pub || !batch.sig) throw new Error('Invalid sync batch context.');
   validateOps(batch.ops);
   if(batch.ops.some(op=>op.hlc.wall>Date.now()+5*60*1000)) throw new Error('Remote device clock is more than five minutes ahead. Correct its clock before syncing.');
   if (batch.ops.length>200 || batch.ops.some(op=>op.hlc.actor!==batch.actor)) throw new Error('Invalid batch author or size.');

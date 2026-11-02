@@ -54,4 +54,18 @@ export async function httpPut(url: string, body: string): Promise<string> {
   return r.text();
 }
 
+export async function httpPost(url: string, body: string): Promise<string> {
+  validateRelayUrl(url);
+  const token = await relayToken(url);
+  if (IS_TAURI) {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<string>('relay_fetch', { method: 'POST', url, body, token });
+  }
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const r = await fetch(url, { method: 'POST', headers, body, signal: AbortSignal.timeout(35000), redirect: 'error' });
+  if (!r.ok) throw new Error(`Relay returned ${r.status}`);
+  return r.text();
+}
+
 export const blobsUrl = (base: string, room: string): string => `${base}/rooms/${room}/blobs`;
