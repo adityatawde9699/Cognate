@@ -9,6 +9,7 @@
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 
 import { getSetting, setSetting, loadOps } from '../db';
+import { getSecret, setSecret } from '../utils/secrets';
 import { canonicalJson } from './oplog';
 import { getIdentity } from './identity';
 import {
@@ -25,7 +26,7 @@ import {
   open,
   signBytes,
 } from './crypto';
-import { httpGet, httpPut, httpPost } from './relayTransport';
+import { httpGet, httpPut, httpPost, fetchCapabilities } from './relayTransport';
 import { enableSyncV3, getConfig } from './relayService';
 import { verifyBatch, type SignedBatch } from './batchSync';
 
@@ -210,14 +211,15 @@ export async function migrateV2ToV3(
   const cleanUrl = current.url.trim().replace(/\/$/, '');
   const v2Room = await deriveRoomId(current.passphrase);
   const v2Key = await deriveSyncKey(current.passphrase);
+  const caps = await fetchCapabilities(cleanUrl);
 
-  // 1. Preflight check: verify baseline size within 8 MB quota
+  // 1. Preflight check: verify baseline size within relay room quota
   const rawTasks = await getSetting('tasks_v1', '[]');
   const rawProjects = await getSetting('projects_v1', '[]');
   const ops = await loadOps();
   const baselineBytes = new TextEncoder().encode(rawTasks + rawProjects + JSON.stringify(ops)).length;
-  if (baselineBytes > 8 * 1024 * 1024) {
-    throw new Error('Workspace baseline exceeds 8 MB relay quota.');
+  if (baselineBytes > caps.room_quota) {
+    throw new Error(`Workspace baseline exceeds ${caps.room_quota} bytes relay quota.`);
   }
 
   const setupCode = setupCodeInput ? setupCodeInput.trim() : encodeSetupCode(generateSetupCode());
@@ -300,8 +302,27 @@ export async function migrateV2ToV3(
   const sealedMarker = await seal(v2Key, v2MarkerBatch);
   await httpPut(`${cleanUrl}/v2/rooms/${v2Room}/batches/migrated-${identity.actor}`, JSON.stringify(sealedMarker));
 
-  // 5. Freeze v2 writes and commit v3 locally
+  // 5. Freeze v2 writes locally and on relay (if supported)
   await setSetting('sync_v2_write_frozen', 'true');
+  let v2DeleteToken = (await getSecret('sync_delete_token')) || '';
+  if (!v2DeleteToken) {
+    v2DeleteToken = generateDeleteToken();
+    await setSecret('sync_delete_token', v2DeleteToken);
+  }
+  if (caps.claim_supported) {
+    try {
+      await claimLegacyV2Room(cleanUrl, v2Room, v2DeleteToken);
+    } catch {
+      // Room may already be claimed or claim failed
+    }
+  }
+  if (caps.freeze_supported && v2DeleteToken) {
+    try {
+      await freezeLegacyV2Room(cleanUrl, v2Room, v2DeleteToken);
+    } catch {
+      // Server freeze failed; client write-freeze remains active
+    }
+  }
   await enableSyncV3(cleanUrl, v3Passphrase, setupCode, deleteToken, { isMigration: true });
 
   // Update workspace binding to v3 with v2 fallback
@@ -401,3 +422,37 @@ export async function cancelLegacyV2SoftDelete(
   );
   return JSON.parse(res);
 }
+
+/**
+ * Claim an unclaimed legacy v2 room (Section 6.4).
+ */
+export async function claimLegacyV2Room(
+  url: string,
+  v2Room: string,
+  deleteToken: string
+): Promise<{ claimed: boolean }> {
+  const cleanUrl = url.trim().replace(/\/$/, '');
+  const hash = await hashDeleteToken(deleteToken);
+  const res = await httpPost(
+    `${cleanUrl}/v2/rooms/${v2Room}/claim`,
+    JSON.stringify({ delete_token_hash: hash })
+  );
+  return JSON.parse(res);
+}
+
+/**
+ * Freeze a legacy v2 room on the relay to prevent forks (Section 6.4).
+ */
+export async function freezeLegacyV2Room(
+  url: string,
+  v2Room: string,
+  deleteToken: string
+): Promise<{ frozen: boolean; frozen_at?: number }> {
+  const cleanUrl = url.trim().replace(/\/$/, '');
+  const res = await httpPost(
+    `${cleanUrl}/v2/rooms/${v2Room}/freeze`,
+    JSON.stringify({ delete_token: deleteToken })
+  );
+  return JSON.parse(res);
+}
+

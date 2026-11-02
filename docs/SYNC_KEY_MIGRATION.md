@@ -226,18 +226,59 @@ Device writes a signed batch to $R_{v2}$ containing **ONLY**:
 
 ### 6.4 Server-Side Soft-Delete & 7-Day Purge Architecture
 To eliminate vulnerable historical v2 ciphertext while protecting against accidental deletion:
-- **Delete Authorization Evaluation**:
-  - *Option A (Recommended — Preimage Token)*: On room creation, client registers $H_{del} = \text{SHA-256}(T_{del})$. Soft-delete requires presenting $T_{del}$. Zero server trust; relay cannot forge deletion; works without identity accounts.
-  - *Option B (Relay Bearer Token)*: Operator token authorizes deletion. Lacks tenant isolation; any authorized client could delete any room.
-  - *Option C (ECDSA Signature)*: Signed deletion request by room creator. Requires relay to verify asymmetric signatures, violating "dumb relay" architecture.
-- **Recommended Mechanism (Option A)**:
-  1. Client sends `POST /v2/rooms/{room}/delete` with `{"delete_token": T_del}`.
-  2. Relay computes `SHA-256(T_del)` and checks against stored hash in constant time.
-  3. Relay sets `soft_deleted_at = now()` and enters 7-day soft-delete grace period.
-  4. During 7 days: client can cancel soft-delete by sending `POST /v2/rooms/{room}/undelete` with $T_{del}$.
-  5. After 7 days: relay background worker permanently purges the room and files from disk, reclaiming quota.
-- **Wire-Format Non-Goal Trade-off**: This adds a minimal delete endpoint to `server/src/main.rs`. The security gain—permanently erasing vulnerable v2 ciphertext from the relay—fully justifies this modest change.
-- **Residual Risk on Prior Dumps**: If an adversary dumped the relay disk prior to deletion, soft-delete cannot retroactively protect historical copies. This residual risk is documented for operators.
+
+#### 6.4.1 Legacy Room Claim Design Comparison
+Existing v2 rooms created prior to delete-token support lack a registered delete-token hash. Three options were evaluated to enable legacy room deletion:
+1. **Option (a) Claim-on-First-Request (Recommended & Implemented)**:
+   - An unclaimed room accepts exactly one claim via `POST /v2/rooms/{room}/claim` with `{"delete_token_hash": "<64_hex_digits>"}` in the JSON body.
+   - Once claimed, subsequent claims return `409 Conflict`.
+   - Requests are rate-limited per IP and logged.
+   - *Pros*: Preserves the "dumb relay" architecture without requiring user accounts or administrative intervention.
+   - *Cons / Squatting Risk*: An adversary who cracks the weak v2 passphrase or discovers the room ID could race to register their own hash first.
+   - *Implemented Mitigation*: The client claims every v2 room it syncs with on connect (when the relay advertises `claim_supported`), not only at migration time.
+   - *Residual Risk*: If the v2 passphrase was already cracked prior to legitimate claim registration, treat that history as exposed; an attacker could race to claim or already possess copies of historical batches.
+2. **Option (b) Operator-Only Admin Delete**:
+   - Deletion is authorized exclusively by a separate `RELAY_ADMIN_TOKEN` held by the server operator.
+   - *Pros*: Eliminates squatting by unauthenticated attackers.
+   - *Cons*: Violates user privacy and self-service model; users cannot clean up their own legacy data without contacting the server administrator.
+3. **Option (c) Hybrid Proposal (Client Claim + Operator Fallback)**:
+   - Client claims on first sync/connect; if a token is lost or squatted, operator fallback via `RELAY_ADMIN_TOKEN` allows manual purge.
+
+#### 6.4.2 Wire Rules & Uniform Responses
+All token-bearing endpoints follow strict wire rules to eliminate URL token leaks and side-channel timing disclosures:
+- **POST Only**: `delete`, `undelete`, `claim`, and `freeze` are strictly `POST` endpoints. HTTP `PUT` and `DELETE` aliases are removed.
+- **Body Only**: Credentials (`delete_token` or `delete_token_hash`) must be passed in the JSON request body. Tokens in URL query parameters are rejected with `400 Bad Request`.
+- **Constant-Time Comparison**: Hashes are verified using constant-time equality checks (`subtle::ConstantTimeEq`). When a room is not found or has no registered token, comparison runs against a dummy hash to maintain identical execution timing.
+- **Uniform Unauthorized Response**: Unknown room, room with no registered token, and incorrect delete token return the exact same response: `403 Forbidden` with body `{"error": "unauthorized"}`.
+- **IP Rate Limiting**: Failed token attempts are tracked and rate-limited per client IP (10 failed attempts per 60-second window before returning `429 Too Many Requests`).
+
+#### 6.4.3 Relay Capability Advertisement
+The relay advertises its supported features and quotas via `GET /v2/capabilities` and `GET /health`:
+- **Payload**:
+  ```json
+  {
+    "ok": true,
+    "protocol": 2,
+    "relay_version": "0.2.0",
+    "delete_supported": true,
+    "claim_supported": true,
+    "freeze_supported": true,
+    "max_body": 1048576,
+    "room_quota": 8388608,
+    "max_store": 33554432
+  }
+  ```
+- **Dynamic Client Quotas**: Clients query `/v2/capabilities` on connect and enforce `room_quota` dynamically rather than hardcoding 8 MB.
+- **Old Relay Detection**: A missing capabilities endpoint (or 404) indicates a legacy relay.
+- **Old Relay UX**: If the relay does not advertise `delete_supported`, the client UI displays `"This relay cannot delete history"`, hides the delete button, and never fails silently.
+
+#### 6.4.4 Server-Side Write Freeze
+To prevent split-brain forks when migrating devices upgrade:
+- `POST /v2/rooms/{room}/freeze` authorizes with `{"delete_token": "<token>"}` in the JSON body.
+- When frozen, subsequent batch `PUT` requests return `409 Conflict` (`{"error": "room is frozen"}`).
+- Batch `GET` requests continue to work, allowing stale devices to pull historical batches and observe the migration marker.
+- **Sequencing**: The migrating device invokes server-side freeze only after v3 readback verification succeeds.
+- **Old Relay Fallback**: Without relay support (`!caps.freeze_supported`), write-freeze is client-side only (`sync_v2_write_frozen`), meaning stale un-migrated devices could theoretically continue writing until upgraded.
 
 ---
 

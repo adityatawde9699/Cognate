@@ -69,3 +69,58 @@ export async function httpPost(url: string, body: string): Promise<string> {
 }
 
 export const blobsUrl = (base: string, room: string): string => `${base}/rooms/${room}/blobs`;
+
+export interface RelayCapabilities {
+  relay_version?: string;
+  delete_supported: boolean;
+  claim_supported: boolean;
+  freeze_supported: boolean;
+  max_body: number;
+  room_quota: number;
+  max_store: number;
+}
+
+export const FALLBACK_CAPABILITIES: RelayCapabilities = {
+  delete_supported: false,
+  claim_supported: false,
+  freeze_supported: false,
+  max_body: 1048576,
+  room_quota: 8 * 1024 * 1024,
+  max_store: 32 * 1024 * 1024,
+};
+
+export async function fetchCapabilities(rawUrl: string): Promise<RelayCapabilities> {
+  const clean = rawUrl.trim().replace(/\/$/, '');
+  try {
+    const text = await httpGet(`${clean}/v2/capabilities`);
+    const parsed = JSON.parse(text);
+    return {
+      relay_version: parsed.relay_version,
+      delete_supported: !!parsed.delete_supported,
+      claim_supported: !!parsed.claim_supported,
+      freeze_supported: !!parsed.freeze_supported,
+      max_body: typeof parsed.max_body === 'number' ? parsed.max_body : 1048576,
+      room_quota: typeof parsed.room_quota === 'number' ? parsed.room_quota : 8 * 1024 * 1024,
+      max_store: typeof parsed.max_store === 'number' ? parsed.max_store : 32 * 1024 * 1024,
+    };
+  } catch {
+    try {
+      const text = await httpGet(`${clean}/health`);
+      const parsed = JSON.parse(text);
+      if (parsed && typeof parsed === 'object') {
+        return {
+          relay_version: parsed.relay_version,
+          delete_supported: !!parsed.delete_supported,
+          claim_supported: !!parsed.claim_supported,
+          freeze_supported: !!parsed.freeze_supported,
+          max_body: typeof parsed.max_body === 'number' ? parsed.max_body : 1048576,
+          room_quota: typeof parsed.room_quota === 'number' ? parsed.room_quota : 8 * 1024 * 1024,
+          max_store: typeof parsed.max_store === 'number' ? parsed.max_store : 32 * 1024 * 1024,
+        };
+      }
+    } catch {
+      // Treat unreachable or legacy relay as old relay without capability endpoints
+    }
+    return { ...FALLBACK_CAPABILITIES };
+  }
+}

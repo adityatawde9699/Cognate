@@ -20,6 +20,7 @@ import {
   type RelayConfig,
   type WorkspaceBinding,
 } from '../../services/relayService';
+import { fetchCapabilities, type RelayCapabilities } from '../../services/relayTransport';
 import {
   createWorkspaceGenesis,
   joinWorkspaceV3,
@@ -50,6 +51,7 @@ export function LiveSyncSettings() {
   const [v3MigratePass, setV3MigratePass] = useState('');
   const [confirmOverride, setConfirmOverride] = useState(false);
   const [softDeletePending, setSoftDeletePending] = useState(false);
+  const [relayCaps, setRelayCaps] = useState<RelayCapabilities | null>(null);
 
   const updateHealth = async () => {
     const currentCfg = await getConfig();
@@ -83,6 +85,13 @@ export function LiveSyncSettings() {
     setUrl(currentCfg?.url || '');
     setPass(currentCfg?.passphrase || '');
     setSetupCode(currentCfg?.setupCode || '');
+    if (currentCfg?.url) {
+      void fetchCapabilities(currentCfg.url)
+        .then(setRelayCaps)
+        .catch(() => setRelayCaps(null));
+    } else {
+      setRelayCaps(null);
+    }
   };
 
   useEffect(() => {
@@ -340,7 +349,11 @@ export function LiveSyncSettings() {
           <p style={{ fontSize: '12px', margin: '4px 0 8px 0', color: '#64748b' }}>
             This workspace was migrated from v2. You can permanently erase historical v2 ciphertext from the relay.
           </p>
-          {softDeletePending ? (
+          {relayCaps && !relayCaps.delete_supported ? (
+            <p className="form-hint" style={{ color: '#b45309', margin: '6px 0' }}>
+              <i className="fa-solid fa-circle-info"></i> This relay cannot delete history.
+            </p>
+          ) : softDeletePending ? (
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
               <span style={{ fontSize: '13px', color: '#059669' }}>
                 <i className="fa-solid fa-clock"></i> Soft-deleted. Permanent purge in 7 days.

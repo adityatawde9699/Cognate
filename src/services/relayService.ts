@@ -24,7 +24,7 @@ import {
   validatePassphrase,
 } from './crypto';
 import { mergeIntoApp } from './syncService';
-import { validateRelayUrl } from './relayTransport';
+import { validateRelayUrl, fetchCapabilities, httpPost } from './relayTransport';
 import { pushBatches, pullBatches, withSyncLock, checkRetryWindow } from './batchSync';
 
 const URL_KEY = 'sync_relay_url';
@@ -140,12 +140,28 @@ export async function enableSync(
       throw new Error('This workspace is bound to its previous sync configuration. Use an explicit migration before changing its key or relay.');
     }
   }
+  let deleteToken = options?.deleteToken || (await getSecret(DELETE_TOKEN_SECRET)) || '';
+  if (!deleteToken) {
+    deleteToken = generateDeleteToken();
+  }
   await setSetting(URL_KEY, nextUrl);
   await setSecret(PASS_SECRET, passphrase);
   await setSecret(SETUP_CODE_SECRET, '');
-  await setSecret(DELETE_TOKEN_SECRET, '');
+  await setSecret(DELETE_TOKEN_SECRET, deleteToken);
   await setSetting(VERSION_KEY, '2');
-  if (!binding) await setSetting('sync_workspace_binding', JSON.stringify({ url: nextUrl, room: await deriveRoomId(passphrase) }));
+  const v2Room = await deriveRoomId(passphrase);
+  if (!binding) await setSetting('sync_workspace_binding', JSON.stringify({ url: nextUrl, room: v2Room }));
+
+  // Mitigation: client claims every v2 room it syncs with on connect (when relay advertises capability)
+  try {
+    const caps = await fetchCapabilities(nextUrl);
+    if (caps.claim_supported) {
+      const hash = await hashDeleteToken(deleteToken);
+      await httpPost(`${nextUrl}/v2/rooms/${v2Room}/claim`, JSON.stringify({ delete_token_hash: hash }));
+    }
+  } catch {
+    // Already claimed or legacy relay without claim endpoint
+  }
 }
 
 export async function disableSync(): Promise<void> {

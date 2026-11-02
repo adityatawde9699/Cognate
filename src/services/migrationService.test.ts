@@ -264,5 +264,40 @@ describe('Sync Protocol v3 Genesis, Join & Migration State Machine', () => {
       expect(check.allSynced).toBe(true);
       expect(check.missingActors).toEqual([]);
     });
+
+    it('claimLegacyV2Room claims an unclaimed room and rejects duplicate claims', async () => {
+      (globalThis as any).localStorage = A;
+      _resetForTests(); resetIdentity();
+      const v2Room = await deriveRoomId(PASS_V2);
+      // Simulate existing legacy room without delete token
+      relay.rooms.set(v2Room, new Map([['b1', { v: 1, nonce: 'n1', ct: 'c1', cursor: 1 }]]));
+      relay.roomMeta.set(v2Room, {});
+
+      const token = 'legacy_delete_token_preimage';
+      const claimRes = await (await import('./migrationService')).claimLegacyV2Room(RELAY, v2Room, token);
+      expect(claimRes.claimed).toBe(true);
+
+      // Duplicate claim must be rejected (anti-squatting)
+      await expect((await import('./migrationService')).claimLegacyV2Room(RELAY, v2Room, 'attacker_token')).rejects.toThrow();
+    });
+
+    it('migrating device freezes v2 room on real/capable relay and writes are rejected', async () => {
+      (globalThis as any).localStorage = A;
+      _resetForTests(); resetIdentity();
+      await enableSync(RELAY, PASS_V2);
+      await logTaskUpsert(task('t1', { title: 'Task 1' }));
+      await syncNow();
+
+      const v2Room = await deriveRoomId(PASS_V2);
+      await migrateV2ToV3(PASS_V3, SETUP_CODE);
+
+      // Verify v2 room is frozen on relay
+      const meta = relay.roomMeta.get(v2Room);
+      expect(meta?.frozen_at).toBeDefined();
+
+      // Subsequent PUT to frozen v2 room must fail with 409
+      const putRes = relay.handle('PUT', `${RELAY}/v2/rooms/${v2Room}/batches/b_stale`, JSON.stringify({ v: 1, nonce: 'n2', ct: 'c2' }));
+      expect(putRes.status).toBe(409);
+    });
   });
 });

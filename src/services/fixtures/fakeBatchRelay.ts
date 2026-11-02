@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 /** Test relay with three independently switchable client stores. */
 export class FakeBatchRelay {
   rooms = new Map<string, Map<string, any>>();
-  roomMeta = new Map<string, { delete_token_hash?: string; soft_deleted_at?: number }>();
+  roomMeta = new Map<string, { delete_token_hash?: string; soft_deleted_at?: number; frozen_at?: number }>();
   failBefore = false;
   loseAcknowledgement = false;
   uploads: string[] = [];
@@ -16,30 +16,73 @@ export class FakeBatchRelay {
       text: async () => JSON.stringify(value),
     });
     if (parts[0] !== 'v2') return response(404, { error: 'not found' });
+    if (parts[1] === 'capabilities' && method === 'GET') {
+      return response(200, {
+        ok: true,
+        protocol: 2,
+        relay_version: '0.2.0',
+        delete_supported: true,
+        claim_supported: true,
+        freeze_supported: true,
+        max_body: 1048576,
+        room_quota: 8388608,
+        max_store: 33554432,
+      });
+    }
 
     if (!this.rooms.has(room)) this.rooms.set(room, new Map());
     if (!this.roomMeta.has(room)) this.roomMeta.set(room, {});
     const records = this.rooms.get(room)!;
     const meta = this.roomMeta.get(room)!;
 
-    // Check soft delete status
-    if (parts[3] === 'delete' && (method === 'POST' || method === 'PUT' || method === 'DELETE')) {
+    // Wire rules for token endpoints
+    if (['delete', 'undelete', 'claim', 'freeze'].includes(parts[3])) {
+      if (method !== 'POST') return response(405, { error: 'method not allowed; use POST' });
+      if (parsed.search) return response(400, { error: 'query parameters not allowed' });
+    }
+
+    if (parts[3] === 'claim') {
       const parsedBody = body ? JSON.parse(body) : {};
-      const token = parsedBody.delete_token || parsed.searchParams.get('delete_token') || '';
+      const hash = parsedBody.delete_token_hash;
+      if (!hash || typeof hash !== 'string' || hash.length !== 64) {
+        return response(400, { error: 'invalid delete_token_hash' });
+      }
+      if (meta.delete_token_hash) {
+        return response(409, { error: 'room already claimed' });
+      }
+      meta.delete_token_hash = hash.toLowerCase();
+      return response(200, { claimed: true, room });
+    }
+
+    if (parts[3] === 'freeze') {
+      const parsedBody = body ? JSON.parse(body) : {};
+      const token = parsedBody.delete_token || '';
       const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
       if (!meta.delete_token_hash || meta.delete_token_hash !== tokenHash) {
-        return response(403, { error: 'invalid delete token' });
+        return response(403, { error: 'unauthorized' });
+      }
+      meta.frozen_at = Date.now();
+      return response(200, { frozen: true, frozen_at: meta.frozen_at });
+    }
+
+    // Check soft delete status
+    if (parts[3] === 'delete') {
+      const parsedBody = body ? JSON.parse(body) : {};
+      const token = parsedBody.delete_token || '';
+      const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+      if (!meta.delete_token_hash || meta.delete_token_hash !== tokenHash) {
+        return response(403, { error: 'unauthorized' });
       }
       meta.soft_deleted_at = Date.now();
       return response(200, { soft_deleted: true, purge_after_seconds: 604800 });
     }
 
-    if (parts[3] === 'undelete' && (method === 'POST' || method === 'PUT')) {
+    if (parts[3] === 'undelete') {
       const parsedBody = body ? JSON.parse(body) : {};
-      const token = parsedBody.delete_token || parsed.searchParams.get('delete_token') || '';
+      const token = parsedBody.delete_token || '';
       const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
       if (!meta.delete_token_hash || meta.delete_token_hash !== tokenHash) {
-        return response(403, { error: 'invalid delete token' });
+        return response(403, { error: 'unauthorized' });
       }
       delete meta.soft_deleted_at;
       return response(200, { soft_deleted: false, undeleted: true });
@@ -50,6 +93,9 @@ export class FakeBatchRelay {
     }
 
     if (method === 'PUT') {
+      if (meta.frozen_at) {
+        return response(409, { error: 'room is frozen' });
+      }
       this.uploads.push(body!);
       if (this.failBefore) return response(503, {});
       const delHash = parsed.searchParams.get('delete_token_hash');

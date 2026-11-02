@@ -199,6 +199,20 @@ pub fn route(store: &Store, method: &str, path: &str, body: &str) -> (u16, Strin
     route_v(store, &versions, method, path, body)
 }
 
+pub fn capabilities_json() -> String {
+    json!({
+        "ok": true,
+        "protocol": 2,
+        "relay_version": "0.2.0",
+        "delete_supported": true,
+        "claim_supported": true,
+        "freeze_supported": true,
+        "max_body": MAX_BODY,
+        "room_quota": room_quota(),
+        "max_store": MAX_STORE,
+    }).to_string()
+}
+
 /// Pure request router — HTTP-framework-free so it is trivially testable.
 /// Returns (status_code, json_body).
 pub fn route_v(store: &Store, versions: &Versions, method: &str, path: &str, body: &str) -> (u16, String) {
@@ -207,10 +221,15 @@ pub fn route_v(store: &Store, versions: &Versions, method: &str, path: &str, bod
     // V2 is an immutable, durable batch journal. Cursors live with ciphertext,
     // so restart never rewinds a client's incremental position.
     if parts.first()==Some(&"v2") {
+        if parts == ["v2", "capabilities"] && method == "GET" {
+            return (200, capabilities_json());
+        }
         return batch_route(store,versions,method,path,body);
     }
     if parts.first()==Some(&"rooms") && (parts.len()<2 || !identifier(parts[1]) || (parts.len()==4 && !identifier(parts[3]))) {return (400,json!({"error":"invalid room or actor"}).to_string());}
     match (method, parts.as_slice()) {
+        ("GET", ["capabilities"]) => (200, capabilities_json()),
+        ("GET", ["health"]) => (200, capabilities_json()),
         // PUT /rooms/{room}/blobs/{actor}
         ("PUT", ["rooms", room, "blobs", actor]) => {
             if body.len()>MAX_BODY {return (413,json!({"error":"blob exceeds 1 MB"}).to_string());}
@@ -254,17 +273,62 @@ pub fn route_v(store: &Store, versions: &Versions, method: &str, path: &str, bod
             let v = versions.lock().unwrap().get(*room).copied().unwrap_or(0);
             (200, json!({ "version": v }).to_string())
         }
-        ("GET", ["health"]) => (200, json!({"ok": true,"protocol":2}).to_string()),
         _ => (404, json!({"error": "not found"}).to_string()),
     }
 }
 
+fn authorize_token(guard: &Data, room: &str, body: &str) -> Result<String, (u16, String)> {
+    let token = match serde_json::from_str::<Value>(body) {
+        Ok(v) => v.get("delete_token").and_then(|t| t.as_str()).map(|s| s.to_string()),
+        Err(_) => None,
+    };
+    let token = match token {
+        Some(t) if !t.is_empty() => t,
+        _ => return Err((400, json!({"error": "missing delete_token"}).to_string())),
+    };
+
+    let token_hash = sha256_hex(token.as_bytes());
+    let stored_hash = guard.get(room)
+        .and_then(|r| r.get("@meta"))
+        .and_then(|m| m.get("delete_token_hash"))
+        .and_then(|h| h.as_str());
+
+    let (is_match, auth_ok) = match stored_hash {
+        Some(h) => (constant_time_eq(token_hash.as_bytes(), h.as_bytes()), true),
+        None => {
+            let dummy = "0000000000000000000000000000000000000000000000000000000000000000";
+            let _ = constant_time_eq(token_hash.as_bytes(), dummy.as_bytes());
+            (false, false)
+        }
+    };
+
+    if !auth_ok || !is_match {
+        return Err((403, json!({"error": "unauthorized"}).to_string()));
+    }
+
+    Ok(token)
+}
+
 fn batch_route(store: &Store, versions: &Versions, method: &str, path: &str, body: &str) -> (u16,String) {
     let parts: Vec<_> = path.split('?').next().unwrap_or("").split('/').filter(|s|!s.is_empty()).collect();
-    if parts.len()<4 || parts[1]!="rooms" || !["batches","version","delete","undelete"].contains(&parts[3]) || !identifier(parts[2]) {
+    if parts.len() == 2 && parts[1] == "capabilities" && method == "GET" {
+        return (200, capabilities_json());
+    }
+    if parts.len()<4 || parts[1]!="rooms" || !["batches","version","delete","undelete","claim","freeze"].contains(&parts[3]) || !identifier(parts[2]) {
         return (400,json!({"error":"invalid batch path"}).to_string());
     }
     let room = format!("@v2:{}",parts[2]);
+
+    // Wire rule: delete, undelete, claim, and freeze are POST only, token in the JSON body, never in a URL or query string.
+    if ["delete", "undelete", "claim", "freeze"].contains(&parts[3]) {
+        if method != "POST" {
+            return (405, json!({"error": "method not allowed; use POST"}).to_string());
+        }
+        if path.contains('?') {
+            return (400, json!({"error": "tokens must be provided in JSON body, not query parameters"}).to_string());
+        }
+    }
+
     let mut guard = store.lock().unwrap();
 
     purge_expired_rooms(&mut guard, &mut versions.lock().unwrap(), effective_now_secs());
@@ -284,56 +348,54 @@ fn batch_route(store: &Store, versions: &Versions, method: &str, path: &str, bod
         return (200,json!({"version":version}).to_string());
     }
 
-    if parts.len() == 4 && parts[3] == "delete" && (method == "POST" || method == "PUT" || method == "DELETE") {
-        let token = match serde_json::from_str::<Value>(body) {
-            Ok(v) => v.get("delete_token").and_then(|t| t.as_str()).map(|s| s.to_string()),
+    if parts.len() == 4 && parts[3] == "claim" {
+        let hash = match serde_json::from_str::<Value>(body) {
+            Ok(v) => v.get("delete_token_hash").and_then(|t| t.as_str()).map(|s| s.to_string()),
             Err(_) => None,
         };
-        let token = match token {
-            Some(t) if !t.is_empty() => t,
-            _ => return (400, json!({"error": "missing delete_token"}).to_string()),
+        let hash = match hash {
+            Some(h) if h.len() == 64 && h.bytes().all(|b| b.is_ascii_hexdigit()) => h.to_ascii_lowercase(),
+            _ => return (400, json!({"error": "invalid delete_token_hash format; expected 64-character hex"}).to_string()),
         };
         let room_data = match guard.get_mut(&room) {
             Some(r) => r,
             None => return (404, json!({"error": "room not found"}).to_string()),
         };
-        let stored_hash = room_data.get("@meta").and_then(|m| m.get("delete_token_hash")).and_then(|h| h.as_str());
-        let stored_hash = match stored_hash {
-            Some(h) => h.to_string(),
-            None => return (403, json!({"error": "no delete token registered for room"}).to_string()),
-        };
-        let token_hash = sha256_hex(token.as_bytes());
-        if !constant_time_eq(token_hash.as_bytes(), stored_hash.as_bytes()) {
-            return (401, json!({"error": "invalid delete token"}).to_string());
+        let meta = room_data.entry("@meta".to_string()).or_insert_with(|| json!({"@type": "meta"}));
+        if meta.get("delete_token_hash").is_some() {
+            return (409, json!({"error": "room already claimed"}).to_string());
+        }
+        meta["delete_token_hash"] = json!(hash);
+        return (200, json!({"claimed": true, "room": parts[2]}).to_string());
+    }
+
+    if parts.len() == 4 && parts[3] == "freeze" {
+        if let Err(resp) = authorize_token(&guard, &room, body) {
+            return resp;
         }
         let now = effective_now_secs();
+        let room_data = guard.get_mut(&room).unwrap();
+        let meta = room_data.entry("@meta".to_string()).or_insert_with(|| json!({"@type": "meta"}));
+        meta["frozen_at"] = json!(now);
+        return (200, json!({"frozen": true, "frozen_at": now}).to_string());
+    }
+
+    if parts.len() == 4 && parts[3] == "delete" {
+        if let Err(resp) = authorize_token(&guard, &room, body) {
+            return resp;
+        }
+        let now = effective_now_secs();
+        let room_data = guard.get_mut(&room).unwrap();
         let meta = room_data.entry("@meta".to_string()).or_insert_with(|| json!({"@type": "meta"}));
         meta["soft_deleted_at"] = json!(now);
         return (200, json!({"soft_deleted": true, "purge_after_seconds": 604800}).to_string());
     }
 
-    if parts.len() == 4 && parts[3] == "undelete" && (method == "POST" || method == "PUT") {
-        let token = match serde_json::from_str::<Value>(body) {
-            Ok(v) => v.get("delete_token").and_then(|t| t.as_str()).map(|s| s.to_string()),
-            Err(_) => None,
-        };
-        let token = match token {
-            Some(t) if !t.is_empty() => t,
-            _ => return (400, json!({"error": "missing delete_token"}).to_string()),
-        };
-        let room_data = match guard.get_mut(&room) {
-            Some(r) => r,
-            None => return (404, json!({"error": "room not found"}).to_string()),
-        };
-        let stored_hash = room_data.get("@meta").and_then(|m| m.get("delete_token_hash")).and_then(|h| h.as_str());
-        let stored_hash = match stored_hash {
-            Some(h) => h.to_string(),
-            None => return (403, json!({"error": "no delete token registered for room"}).to_string()),
-        };
-        let token_hash = sha256_hex(token.as_bytes());
-        if !constant_time_eq(token_hash.as_bytes(), stored_hash.as_bytes()) {
-            return (401, json!({"error": "invalid delete token"}).to_string());
+    if parts.len() == 4 && parts[3] == "undelete" {
+        if let Err(resp) = authorize_token(&guard, &room, body) {
+            return resp;
         }
+        let room_data = guard.get_mut(&room).unwrap();
         if let Some(meta) = room_data.get_mut("@meta").and_then(|m| m.as_object_mut()) {
             meta.remove("soft_deleted_at");
         }
@@ -343,6 +405,9 @@ fn batch_route(store: &Store, versions: &Versions, method: &str, path: &str, bod
     match (method,parts.len()) {
         ("PUT",5) if identifier(parts[4]) => {
             if body.len()>MAX_BODY {return (413,json!({"error":"batch exceeds 1 MB"}).to_string());}
+            if guard.get(&room).and_then(|r| r.get("@meta")).and_then(|m| m.get("frozen_at")).is_some() {
+                return (409, json!({"error": "room is frozen"}).to_string());
+            }
             let mut blob: Value = match serde_json::from_str(body) {Ok(v)=>v,Err(_)=>return (400,json!({"error":"invalid JSON"}).to_string())};
             if blob.get("v")!=Some(&json!(1)) || !blob.get("nonce").is_some_and(|v|v.as_str().is_some_and(|s|!s.is_empty() && s.len()<=256)) || !blob.get("ct").is_some_and(|v|v.as_str().is_some_and(|s|!s.is_empty())) || blob.as_object().is_none_or(|m|m.len()!=3) {
                 return (400,json!({"error":"invalid sealed batch"}).to_string());
@@ -583,6 +648,8 @@ struct ClientBudget {
     new_rooms_window_start: u64,
     new_rooms_count: usize,
     created_rooms: std::collections::HashSet<String>,
+    failed_tokens_window_start: u64,
+    failed_tokens_count: u32,
 }
 
 /// Immutable relay configuration shared across worker threads.
@@ -680,6 +747,17 @@ fn check_write_limits(ip: &str, path: &str, body: &str, store: &Store, cfg: &Con
     }
     let budget = q_guard.entry(ip.to_string()).or_default();
 
+    let is_token_op = (parts.len() == 4 || parts.len() == 5) && parts[0] == "v2" && parts[1] == "rooms" && ["delete", "undelete", "claim", "freeze"].contains(&parts[3]);
+    if is_token_op {
+        if now.saturating_sub(budget.failed_tokens_window_start) >= 60 {
+            budget.failed_tokens_window_start = now;
+            budget.failed_tokens_count = 0;
+        }
+        if budget.failed_tokens_count >= 10 {
+            return Some((429, json!({"error": "too many failed token attempts; try again later"}).to_string()));
+        }
+    }
+
     if now.saturating_sub(budget.write_window_start) >= 3600 {
         budget.write_window_start = now;
         budget.write_bytes = 0;
@@ -748,9 +826,10 @@ fn serve(mut req: Request, store: &Store, versions: &Versions, rate: &RateMap, c
         return;
     }
 
-    // Auth gate (health stays open for probes).
-    let is_health = path.split('?').next().unwrap_or("").trim_end_matches('/')=="/health";
-    if !is_health && !bearer_ok(req.headers(), &cfg.token) {
+    // Auth gate (health and capabilities stay open for probes).
+    let clean_path = path.split('?').next().unwrap_or("").trim_end_matches('/');
+    let is_open_probe = clean_path == "/health" || clean_path == "/v2/capabilities" || clean_path == "/v2/health" || clean_path == "/capabilities";
+    if !is_open_probe && !bearer_ok(req.headers(), &cfg.token) {
         let _ = req.respond(cors_json(401, json!({"error": "unauthorized"}).to_string()));
         return;
     }
@@ -770,13 +849,13 @@ fn serve(mut req: Request, store: &Store, versions: &Versions, rate: &RateMap, c
     if read.is_err() || body.len()>MAX_BODY {let _=req.respond(cors_json(413,json!({"error":"invalid or oversized request"}).to_string()));return;}
 
     let mut path = path;
-    if let Some(h) = req.headers().iter().find(|h| h.field.equiv("X-Delete-Token-Hash")) {
-        let sep = if path.contains('?') { "&" } else { "?" };
-        path = format!("{path}{sep}delete_token_hash={}", h.value.as_str().trim());
-    }
-    if body.is_empty() {
-        if let Some(h) = req.headers().iter().find(|h| h.field.equiv("X-Delete-Token")) {
-            body = json!({"delete_token": h.value.as_str().trim()}).to_string();
+    let parts_probe: Vec<&str> = path.split('?').next().unwrap_or("").split('/').filter(|s| !s.is_empty()).collect();
+    let is_token_endpoint = parts_probe.len() >= 4 && parts_probe[0] == "v2" && parts_probe[1] == "rooms" && ["delete", "undelete", "claim", "freeze"].contains(&parts_probe[3]);
+
+    if !is_token_endpoint {
+        if let Some(h) = req.headers().iter().find(|h| h.field.equiv("X-Delete-Token-Hash")) {
+            let sep = if path.contains('?') { "&" } else { "?" };
+            path = format!("{path}{sep}delete_token_hash={}", h.value.as_str().trim());
         }
     }
 
@@ -821,6 +900,10 @@ fn serve(mut req: Request, store: &Store, versions: &Versions, rate: &RateMap, c
                 let res = durable_write(store, versions, method.as_str(), &path, &body, &cfg.data_path);
                 if res.0 == 200 {
                     record_successful_write(&ip, &path, &body, cfg);
+                } else if res.0 == 401 || res.0 == 403 {
+                    let mut q_guard = cfg.quotas.lock().unwrap();
+                    let budget = q_guard.entry(ip.to_string()).or_default();
+                    budget.failed_tokens_count = budget.failed_tokens_count.saturating_add(1);
                 }
                 res
             }
@@ -1579,9 +1662,9 @@ mod tests {
         assert_eq!(batches.len(), 1);
         assert_eq!(batches[0]["batch_id"], "b1");
 
-        // 4. Soft-delete with wrong token returns 401
+        // 4. Soft-delete with wrong token returns 403
         let (status, _) = durable_write(&store, &versions, "POST", "/v2/rooms/delroom/delete", r#"{"delete_token":"wrong"}"#, &p);
-        assert_eq!(status, 401, "expected 401 with wrong delete token");
+        assert_eq!(status, 403, "expected 403 with wrong delete token");
 
         // 5. Soft-delete with correct token returns 200
         let (status, body) = durable_write(&store, &versions, "POST", "/v2/rooms/delroom/delete", &format!(r#"{{"delete_token":"{preimage}"}}"#), &p);
@@ -1594,9 +1677,9 @@ mod tests {
         let (status, _) = durable_write(&store, &versions, "PUT", "/v2/rooms/delroom/batches/b2", b2, &p);
         assert_eq!(status, 410, "expected 410 Gone on soft-deleted room PUT");
 
-        // 7. Undelete with wrong token returns 401
+        // 7. Undelete with wrong token returns 403
         let (status, _) = durable_write(&store, &versions, "POST", "/v2/rooms/delroom/undelete", r#"{"delete_token":"wrong"}"#, &p);
-        assert_eq!(status, 401, "expected 401 on undelete with wrong token");
+        assert_eq!(status, 403, "expected 403 on undelete with wrong token");
 
         // 8. Undelete with correct token restores active status
         let (status, body) = durable_write(&store, &versions, "POST", "/v2/rooms/delroom/undelete", &format!(r#"{{"delete_token":"{preimage}"}}"#), &p);
@@ -1623,6 +1706,104 @@ mod tests {
         assert_eq!(status, 200);
 
         set_test_time_offset(0);
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn capabilities_endpoint_advertises_features_and_quotas() {
+        let store = empty();
+        let versions = Mutex::new(HashMap::new());
+        let (status, body) = route_v(&store, &versions, "GET", "/v2/capabilities", "");
+        assert_eq!(status, 200);
+        let caps: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(caps["delete_supported"], true);
+        assert_eq!(caps["claim_supported"], true);
+        assert_eq!(caps["freeze_supported"], true);
+        assert_eq!(caps["room_quota"], 8 * 1024 * 1024);
+        assert_eq!(caps["max_store"], 32 * 1024 * 1024);
+    }
+
+    #[test]
+    fn legacy_room_claim_and_server_side_freeze() {
+        let path = std::env::temp_dir().join(format!("cognate-claim-freeze-{}.json", std::process::id()));
+        let p = path.to_str().unwrap().to_string();
+        let _ = std::fs::remove_file(&p);
+
+        let store = Arc::new(empty());
+        let versions = Arc::new(Mutex::new(HashMap::new()));
+
+        // 1. Existing legacy room created without delete token hash
+        let b1 = r#"{"v":1,"nonce":"nonce-1","ct":"ct-1"}"#;
+        let (status, _) = durable_write(&store, &versions, "PUT", "/v2/rooms/legacy_room/batches/b1", b1, &p);
+        assert_eq!(status, 200);
+
+        // 2. Room has no registered delete token yet; claim it
+        let token = "my_legacy_delete_secret_preimage";
+        let token_hash = sha256_hex(token.as_bytes());
+        let claim_body = format!(r#"{{"delete_token_hash":"{token_hash}"}}"#);
+
+        let (status, body) = durable_write(&store, &versions, "POST", "/v2/rooms/legacy_room/claim", &claim_body, &p);
+        assert_eq!(status, 200, "claim should succeed for unclaimed room: {body}");
+
+        // 3. Duplicate claim fails with 409 Conflict (anti-squatting / once claimed, cannot overwrite)
+        let attacker_hash = sha256_hex(b"attacker_hash");
+        let (status, _) = durable_write(&store, &versions, "POST", "/v2/rooms/legacy_room/claim", &format!(r#"{{"delete_token_hash":"{attacker_hash}"}}"#), &p);
+        assert_eq!(status, 409, "second claim must be rejected with 409 Conflict");
+
+        // 4. Server-side freeze: authorized by token
+        let freeze_body = format!(r#"{{"delete_token":"{token}"}}"#);
+        let (status, body) = durable_write(&store, &versions, "POST", "/v2/rooms/legacy_room/freeze", &freeze_body, &p);
+        assert_eq!(status, 200, "freeze should succeed: {body}");
+        assert!(body.contains("\"frozen\":true"));
+
+        // 5. Writes to frozen room return 409 Conflict
+        let b2 = r#"{"v":1,"nonce":"nonce-2","ct":"ct-2"}"#;
+        let (status, body) = durable_write(&store, &versions, "PUT", "/v2/rooms/legacy_room/batches/b2", b2, &p);
+        assert_eq!(status, 409, "writes to frozen room must be rejected: {body}");
+
+        // 6. Reads from frozen room still work
+        let (status, body) = route_v(&store, &versions, "GET", "/v2/rooms/legacy_room/batches?after=0", "");
+        assert_eq!(status, 200);
+        let parsed: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(parsed["batches"].as_array().unwrap().len(), 1);
+
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn wire_rules_enforce_post_only_and_uniform_unauthorized_response() {
+        let path = std::env::temp_dir().join(format!("cognate-wirerules-{}.json", std::process::id()));
+        let p = path.to_str().unwrap().to_string();
+        let _ = std::fs::remove_file(&p);
+
+        let store = Arc::new(empty());
+        let versions = Arc::new(Mutex::new(HashMap::new()));
+
+        let preimage = "correct_delete_token_preimage";
+        let hash = sha256_hex(preimage.as_bytes());
+        let b1 = r#"{"v":1,"nonce":"nonce-1","ct":"ct-1"}"#;
+        let put_url = format!("/v2/rooms/wire_room/batches/b1?delete_token_hash={hash}");
+        let (status, _) = durable_write(&store, &versions, "PUT", &put_url, b1, &p);
+        assert_eq!(status, 200);
+
+        // Wire rule 1: PUT and DELETE aliases for delete are forbidden (POST only)
+        let (status_put, _) = durable_write(&store, &versions, "PUT", "/v2/rooms/wire_room/delete", &format!(r#"{{"delete_token":"{preimage}"}}"#), &p);
+        assert_ne!(status_put, 200, "PUT alias for delete must be removed");
+        let (status_del, _) = durable_write(&store, &versions, "DELETE", "/v2/rooms/wire_room/delete", &format!(r#"{{"delete_token":"{preimage}"}}"#), &p);
+        assert_ne!(status_del, 200, "DELETE alias for delete must be removed");
+
+        // Wire rule 2: Query param delete_token is ignored (body only)
+        let (status_query, _) = durable_write(&store, &versions, "POST", &format!("/v2/rooms/wire_room/delete?delete_token={preimage}"), "", &p);
+        assert_eq!(status_query, 400, "delete token in query param must be rejected");
+
+        // Wire rule 3: Unknown room and wrong token return the SAME response (403 unauthorized)
+        let (status_wrong_token, body_wrong_token) = durable_write(&store, &versions, "POST", "/v2/rooms/wire_room/delete", r#"{"delete_token":"wrong"}"#, &p);
+        let (status_unknown_room, body_unknown_room) = durable_write(&store, &versions, "POST", "/v2/rooms/unknown_room/delete", &format!(r#"{{"delete_token":"{preimage}"}}"#), &p);
+
+        assert_eq!(status_wrong_token, 403, "wrong token must return 403");
+        assert_eq!(status_unknown_room, 403, "unknown room must return 403");
+        assert_eq!(body_wrong_token, body_unknown_room, "wrong token and unknown room must return identical response");
+
         let _ = std::fs::remove_file(&p);
     }
 }
