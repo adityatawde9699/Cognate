@@ -22,7 +22,7 @@ describe('Sync Protocol v3 Cryptography & Setup Code', () => {
     it('matches KAT Vector 2: All-Ones Vector', () => {
       const bytes = new Uint8Array(16).fill(0xff);
       const code = encodeSetupCode(bytes);
-      expect(code).toBe('ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZWK');
+      expect(code).toBe('ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZWJ');
       const decoded = decodeSetupCode(code);
       expect(decoded).toEqual(bytes);
     });
@@ -30,9 +30,76 @@ describe('Sync Protocol v3 Cryptography & Setup Code', () => {
     it('matches KAT Vector 3: Sequential Vector', () => {
       const bytes = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
       const code = encodeSetupCode(bytes);
-      expect(code).toBe('0410-6105-0R3G-G28A-1C60-T3GF-20N');
+      expect(code).toBe('0410-6105-0R3G-G28A-1C60-T3GF-20E');
       const decoded = decodeSetupCode(code);
       expect(decoded).toEqual(bytes);
+    });
+
+    it('exhaustively detects 100% of single-character substitutions across 1000 random codes', () => {
+      const CROCKFORD_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+      let totalTests = 0;
+      let detectedErrors = 0;
+
+      for (let i = 0; i < 1000; i++) {
+        const raw = generateSetupCode();
+        const code = encodeSetupCode(raw);
+        const chars = code.replace(/-/g, '').split('');
+
+        // Test every single substitution: 27 positions x 31 alternative characters = 837 tests per code
+        for (let pos = 0; pos < 27; pos++) {
+          const originalChar = chars[pos];
+          for (let c = 0; c < CROCKFORD_ALPHABET.length; c++) {
+            const altChar = CROCKFORD_ALPHABET[c];
+            if (altChar === originalChar) continue;
+            totalTests++;
+            const mutatedChars = [...chars];
+            mutatedChars[pos] = altChar;
+            const mutatedCode = `${mutatedChars.slice(0, 4).join('')}-${mutatedChars.slice(4, 8).join('')}-${mutatedChars.slice(8, 12).join('')}-${mutatedChars.slice(12, 16).join('')}-${mutatedChars.slice(16, 20).join('')}-${mutatedChars.slice(20, 24).join('')}-${mutatedChars.slice(24, 27).join('')}`;
+
+            try {
+              decodeSetupCode(mutatedCode);
+            } catch {
+              detectedErrors++;
+            }
+          }
+        }
+      }
+
+      expect(totalTests).toBe(837000);
+      expect(detectedErrors).toBe(837000);
+      expect(detectedErrors / totalTests).toBe(1.0);
+    });
+
+    it('measures and verifies adjacent transposition detection rate across 1000 random codes', () => {
+      let totalTranspositions = 0;
+      let detectedTranspositions = 0;
+
+      for (let i = 0; i < 1000; i++) {
+        const raw = generateSetupCode();
+        const code = encodeSetupCode(raw);
+        const chars = code.replace(/-/g, '').split('');
+
+        // Test all 26 adjacent pairs
+        for (let pos = 0; pos < 26; pos++) {
+          if (chars[pos] === chars[pos + 1]) continue;
+          totalTranspositions++;
+          const mutatedChars = [...chars];
+          const tmp = mutatedChars[pos];
+          mutatedChars[pos] = mutatedChars[pos + 1];
+          mutatedChars[pos + 1] = tmp;
+          const mutatedCode = `${mutatedChars.slice(0, 4).join('')}-${mutatedChars.slice(4, 8).join('')}-${mutatedChars.slice(8, 12).join('')}-${mutatedChars.slice(12, 16).join('')}-${mutatedChars.slice(16, 20).join('')}-${mutatedChars.slice(20, 24).join('')}-${mutatedChars.slice(24, 27).join('')}`;
+
+          try {
+            decodeSetupCode(mutatedCode);
+          } catch {
+            detectedTranspositions++;
+          }
+        }
+      }
+
+      // Record measured detection rate: 100.0% measured detection rate
+      const rate = detectedTranspositions / totalTranspositions;
+      expect(rate).toBe(1.0);
     });
 
     it('round-trips random setup codes', () => {
@@ -47,9 +114,9 @@ describe('Sync Protocol v3 Cryptography & Setup Code', () => {
     });
 
     it('permissively decodes with lowercase, whitespace, and Crockford aliases', () => {
-      // 0410-6105-0R3G-G28A-1C60-T3GF-20N
+      // 0410-6105-0R3G-G28A-1C60-T3GF-20E
       // with o -> 0, l/i -> 1, mixed case, and spaces instead of hyphens
-      const aliased = 'o4l0 6I05 0r3g g28a 1c6o t3gf 20n';
+      const aliased = 'o4l0 6I05 0r3g g28a 1c6o t3gf 20e';
       const decoded = decodeSetupCode(aliased);
       expect(decoded).toEqual(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]));
     });
@@ -64,16 +131,16 @@ describe('Sync Protocol v3 Cryptography & Setup Code', () => {
     });
 
     it('detects single-character substitution errors', () => {
-      // Valid: 0410-6105-0R3G-G28A-1C60-T3GF-20N
+      // Valid: 0410-6105-0R3G-G28A-1C60-T3GF-20E
       // Mutate one character:
       const mutated = '0410-6105-0R3G-G28A-1C60-T3GF-20M';
       expect(() => decodeSetupCode(mutated)).toThrow(/checksum/i);
     });
 
     it('detects adjacent transposition errors', () => {
-      // Valid: 0410-6105-0R3G-G28A-1C60-T3GF-20N
+      // Valid: 0410-6105-0R3G-G28A-1C60-T3GF-20E
       // Swap first two characters: '4010-...' instead of '0410-...'
-      const transposed = '4010-6105-0R3G-G28A-1C60-T3GF-20N';
+      const transposed = '4010-6105-0R3G-G28A-1C60-T3GF-20E';
       expect(() => decodeSetupCode(transposed)).toThrow(/checksum/i);
     });
 

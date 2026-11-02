@@ -39,7 +39,7 @@ function task(id: string, over: Partial<Task> = {}): Task {
 const RELAY = 'https://relay.example';
 const PASS = 'correct horse battery staple';
 const SETUP_RAW = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
-const SETUP_CODE = encodeSetupCode(SETUP_RAW); // '0410-6105-0R3G-G28A-1C60-T3GF-20N'
+const SETUP_CODE = encodeSetupCode(SETUP_RAW); // '0410-6105-0R3G-G28A-1C60-T3GF-20E'
 
 describe('relayService v3 — secure storage and workspace binding', () => {
   let A: MemStorage, B: MemStorage, relay: FakeRelay;

@@ -233,7 +233,26 @@ export function generateSetupCode(): Uint8Array {
 }
 
 /**
- * Encode 16 raw bytes into Crockford Base32 with a position-weighted modulo-32 check symbol.
+ * Compute CRC-5 checksum over 130 bits (128 data bits + 2 zero pad bits).
+ * Polynomial: x^5 + x^2 + 1 (binary 100101, normal representation 0x05).
+ * Initial value: 0, final XOR: 0.
+ * Output: integer in [0, 31].
+ */
+export function crc5(digits26: number[]): number {
+  let crc = 0;
+  for (let i = 0; i < 26; i++) {
+    const d = digits26[i];
+    for (let bitIdx = 4; bitIdx >= 0; bitIdx--) {
+      const b = (d >> bitIdx) & 1;
+      const feedback = ((crc >> 4) ^ b) & 1;
+      crc = ((crc << 1) & 0x1f) ^ (feedback ? 0x05 : 0);
+    }
+  }
+  return crc;
+}
+
+/**
+ * Encode 16 raw bytes into Crockford Base32 with a CRC-5 check symbol.
  * Output format: 4-4-4-4-4-4-3 (27 characters + 6 hyphens).
  */
 export function encodeSetupCode(bytes: Uint8Array): string {
@@ -252,20 +271,16 @@ export function encodeSetupCode(bytes: Uint8Array): string {
   if (bitsLeft > 0) {
     digits.push((buffer << (5 - bitsLeft)) & 0x1f);
   }
-  let sum = 0;
-  for (let i = 0; i < 26; i++) {
-    sum += (i + 1) * digits[i];
-  }
-  const check = sum % 32;
+  const check = crc5(digits);
   const raw = digits.map((d) => CROCKFORD_ALPHABET[d]).join('') + CROCKFORD_ALPHABET[check];
   return `${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8, 12)}-${raw.slice(12, 16)}-${raw.slice(16, 20)}-${raw.slice(20, 24)}-${raw.slice(24, 27)}`;
 }
 
 /**
  * Decode a Crockford Base32 Setup Code into 16 raw bytes.
- * Validates length (27 chars), alphabet, checksum, and zero pad bits.
+ * Validates length (27 chars), alphabet, CRC-5 check symbol, and zero pad bits.
  * Supports lowercase, strips hyphens/whitespace, and maps O->0, I/L->1.
- * Rejects U/u.
+ * Rejects U/u and non-canonical pad bits.
  */
 export function decodeSetupCode(code: string): Uint8Array {
   if (typeof code !== 'string') throw new Error('Invalid Setup Code: string expected');
@@ -283,16 +298,13 @@ export function decodeSetupCode(code: string): Uint8Array {
     digits.push(val);
   }
 
-  let sum = 0;
-  for (let i = 0; i < 26; i++) {
-    sum += (i + 1) * digits[i];
-  }
-  if ((sum % 32) !== digits[26]) {
-    throw new Error('Invalid Setup Code checksum');
+  if ((digits[25] & 0x03) !== 0) {
+    throw new Error('Invalid Setup Code padding: non-canonical non-zero pad bits');
   }
 
-  if ((digits[25] & 0x03) !== 0) {
-    throw new Error('Invalid Setup Code padding');
+  const expectedCrc = crc5(digits.slice(0, 26));
+  if (expectedCrc !== digits[26]) {
+    throw new Error('Invalid Setup Code checksum');
   }
 
   const bytes = new Uint8Array(16);
