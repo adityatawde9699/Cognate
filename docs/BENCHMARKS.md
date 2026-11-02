@@ -32,6 +32,14 @@ Before optimization (Issue E), every write held the store mutex, cloned the stor
 | 15 MB | 136.2 ms | 180.6 ms | 53.3 ms | 77.9 ms | 2.5x |
 | 30 MB | 246.7 ms | 355.5 ms | 102.4 ms | 133.5 ms | 2.4x |
 
+### Store write linearity & architectural scaling limits
+
+Even with the single-clone/serialize optimization, because the relay serializes and fsyncs the entire `relay-data.json` store file on every durable write, the measured write latency is **approximately 3.5 ms per MB of total store size** (17.3 ms at 5 MB, 53.3 ms at 15 MB, 102.4 ms at 30 MB). Each write remains strictly linear ($O(N)$ with total store size) rather than proportional to the individual batch size.
+
+**Proposals for sub-linear write scaling (proposals only; not implemented):**
+1. **Append-Only Write-Ahead Journal (WAL)**: Each `PUT` appends the new batch JSON line directly to `journal.log` followed by `fsync` ($O(1)$ in batch size, $\approx 0.5\text{–}1\text{ ms}$ per write). An asynchronous background worker periodically compacts the journal into a base snapshot file without blocking the write path.
+2. **Embedded SQLite Backing Store**: Replace single-file JSON persistence with SQLite in WAL mode (`PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;`). Individual batch inserts are $O(1)$ indexed writes, allowing the relay to scale to gigabytes of ciphertext without per-write serialization or snapshot rewrite overhead.
+
 CI uses generous provisional regression ceilings (p95 250 ms for each TypeScript planner size, 2.5 seconds for merge, 2 seconds for materialize/projection, 500 ms for serialization, and 1 second per local relay upload). They are regression alarms derived from this baseline, not user-facing performance promises or product acceptance targets. CI reports are retained as workflow artifacts. Benchmark results must be recaptured on stable hardware before making release claims.
 
 Still unmeasured here: native Rust-vs-TypeScript timing and RSS, SQLite throughput/migration time, browser render/input latency, cold/warm application startup, large-history encryption/sync, slow-client and public-relay load, and mobile PWA performance. See [TESTING.md](TESTING.md) and the [production roadmap](PRODUCTION_ROADMAP.md).

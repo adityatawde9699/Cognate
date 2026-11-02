@@ -78,8 +78,21 @@ fn load_store(path: &str) -> Result<Data,String> {
 }
 
 static WRITE_LOCK: Mutex<()> = Mutex::new(());
+static PERSIST_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+#[cfg(test)]
+thread_local! {
+    static TEST_FSYNC_DELAY: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
 
 fn persist_bytes(json: &[u8], path: &str) -> Result<(),String> {
+    #[cfg(test)]
+    {
+        let delay = TEST_FSYNC_DELAY.with(|c| c.get());
+        if delay > 0 {
+            std::thread::sleep(Duration::from_millis(delay));
+        }
+    }
     use std::io::Write;
     let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e|e.to_string())?.as_nanos();
     let tmp = format!("{path}.{}.{}.pending",std::process::id(),unique);
@@ -122,7 +135,7 @@ fn durable_put(store: &Store, versions: &Versions, path: &str, body: &str, data_
     let _write_permit = WRITE_LOCK.lock().unwrap();
 
     let candidate_versions = Mutex::new(HashMap::new());
-    let (candidate, response, json_bytes) = {
+    let (candidate, response, json_bytes, next_gen) = {
         let guard = store.lock().unwrap();
         let candidate = Mutex::new(guard.clone());
         let response = route_v(&candidate, &candidate_versions, "PUT", path, body);
@@ -138,7 +151,8 @@ fn durable_put(store: &Store, versions: &Versions, path: &str, body: &str, data_
                 return (503, json!({"error": format!("serialization failed: {e}"), "acknowledged": false}).to_string());
             }
         };
-        (candidate, response, json)
+        let current_gen = PERSIST_GENERATION.load(std::sync::atomic::Ordering::SeqCst);
+        (candidate, response, json, current_gen + 1)
     }; // store mutex dropped here before fsync
 
     if let Err(error) = persist_bytes(&json_bytes, data_path) {
@@ -148,6 +162,7 @@ fn durable_put(store: &Store, versions: &Versions, path: &str, body: &str, data_
     }
 
     *store.lock().unwrap() = candidate;
+    PERSIST_GENERATION.store(next_gen, std::sync::atomic::Ordering::SeqCst);
     DURABLE_WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     for (room, v) in candidate_versions.into_inner().unwrap() {
         if room.starts_with("@v2:") {
@@ -1297,5 +1312,48 @@ mod tests {
         stopped.store(true, std::sync::atomic::Ordering::SeqCst);
         worker.join().unwrap();
         let _ = std::fs::remove_file(p);
+    }
+
+    #[test]
+    fn two_interleaved_puts_with_slow_fsync_persist_monotonically() {
+        let path = std::env::temp_dir().join(format!("cognate-monotonic-{}.json", std::process::id()));
+        let p = path.to_str().unwrap().to_string();
+        let _ = std::fs::remove_file(&p);
+
+        let store = Arc::new(empty());
+        let versions = Arc::new(Mutex::new(HashMap::new()));
+
+        let p1 = p.clone();
+        let s1 = store.clone();
+        let v1 = versions.clone();
+        let t1 = thread::spawn(move || {
+            TEST_FSYNC_DELAY.with(|c| c.set(50));
+            let body = r#"{"v":1,"nonce":"nonce-1","ct":"ct-1"}"#;
+            durable_put(&s1, &v1, "/v2/rooms/mono/batches/b1", body, &p1)
+        });
+
+        // Let t1 start and enter durable_put
+        thread::sleep(Duration::from_millis(10));
+
+        let p2 = p.clone();
+        let s2 = store.clone();
+        let v2 = versions.clone();
+        let t2 = thread::spawn(move || {
+            let body = r#"{"v":1,"nonce":"nonce-2","ct":"ct-2"}"#;
+            durable_put(&s2, &v2, "/v2/rooms/mono/batches/b2", body, &p2)
+        });
+
+        let (status1, _) = t1.join().unwrap();
+        let (status2, _) = t2.join().unwrap();
+        assert_eq!(status1, 200);
+        assert_eq!(status2, 200);
+
+        // Reload the store file from disk: must contain BOTH b1 and b2
+        let loaded = load_store(&p).unwrap();
+        let room = loaded.get("@v2:mono").expect("room @v2:mono must exist on disk");
+        assert!(room.contains_key("b1"), "b1 must be persisted");
+        assert!(room.contains_key("b2"), "b2 must be persisted");
+
+        let _ = std::fs::remove_file(&p);
     }
 }
