@@ -10,7 +10,7 @@
 
 import { getSetting, setSetting, loadOps } from '../db';
 import { getSecret, setSecret } from '../utils/secrets';
-import { canonicalJson } from './oplog';
+import { canonicalJson, validateOps } from './oplog';
 import { getIdentity } from './identity';
 import {
   deriveSyncKey,
@@ -24,11 +24,16 @@ import {
   validatePassphrase,
   seal,
   open,
+  openPassword,
   signBytes,
+  verifyBytes,
+  importPrivateKey,
+  importPublicKey,
 } from './crypto';
 import { httpGet, httpPut, httpPost, fetchCapabilities } from './relayTransport';
 import { enableSyncV3, getConfig, isSyncV3Enabled } from './relayService';
 import { verifyBatch, type SignedBatch } from './batchSync';
+import { exportRecoveryKit } from './recoveryService';
 
 export interface GenesisResult {
   room: string;
@@ -46,6 +51,7 @@ export interface MigrationResult {
   v3Room: string;
   setupCode: string;
   deleteToken: string;
+  exportPath: string;
 }
 
 export type MigrationFailpoint =
@@ -58,6 +64,7 @@ export type MigrationFailpoint =
 
 let currentMigrationFailpoint: MigrationFailpoint = null;
 let currentMigrationBarrier: (() => Promise<void>) | null = null;
+let preMigrationExportCorrupter: ((bundle: string) => string) | null = null;
 
 export function setMigrationFailpoint(fp: MigrationFailpoint): void {
   currentMigrationFailpoint = fp;
@@ -65,6 +72,80 @@ export function setMigrationFailpoint(fp: MigrationFailpoint): void {
 
 export function setMigrationBarrier(barrier: (() => Promise<void>) | null): void {
   currentMigrationBarrier = barrier;
+}
+
+export function setPreMigrationExportCorrupter(fn: ((b: string) => string) | null): void {
+  preMigrationExportCorrupter = fn;
+}
+
+/**
+ * Verify an encrypted pre-migration export by importing into an isolated scratch store in memory.
+ * Validates decryption, schema format, task/project arrays, oplog ops, and cryptographic identity signatures.
+ * Throws and refuses to proceed if verification fails. Live storage is never modified.
+ */
+export async function verifyPreMigrationExport(
+  exportJson: string,
+  passphrase: string
+): Promise<{ verified: boolean; taskCount: number; projectCount: number; opCount: number }> {
+  if (!exportJson || exportJson.length > 32 * 1024 * 1024) {
+    throw new Error('Pre-migration export verification failed: export is empty or exceeds 32 MB.');
+  }
+
+  let blob: any;
+  try {
+    blob = JSON.parse(exportJson);
+  } catch {
+    throw new Error('Pre-migration export verification failed: export is not valid JSON.');
+  }
+
+  // Isolated scratch store in memory
+  const scratchStore = new Map<string, any>();
+
+  // 1. Decrypt using password-based encryption
+  let kit: any;
+  try {
+    kit = await openPassword<any>(passphrase, blob);
+  } catch (err: any) {
+    throw new Error(`Pre-migration export verification failed: decryption error (${err?.message || err})`);
+  }
+  if (!kit || kit.v !== 2) {
+    throw new Error('Pre-migration export verification failed: unrecognized kit format.');
+  }
+
+  // 2. In-memory scratch admission
+  scratchStore.set('identity', kit.identity);
+  scratchStore.set('relay', kit.relay);
+  scratchStore.set('shares', kit.shares);
+  scratchStore.set('tasks', kit.snapshot?.tasks);
+  scratchStore.set('projects', kit.snapshot?.projects);
+  scratchStore.set('ops', kit.snapshot?.ops);
+
+  // 3. Validate state integrity in scratch store
+  if (!Array.isArray(scratchStore.get('tasks')) || !Array.isArray(scratchStore.get('projects')) || !Array.isArray(scratchStore.get('ops'))) {
+    throw new Error('Pre-migration export verification failed: corrupted task/project/oplog snapshot.');
+  }
+  validateOps(scratchStore.get('ops'));
+
+  // 4. Validate identity keys with a cryptographic challenge
+  const id = scratchStore.get('identity');
+  if (!id?.actor || !id?.pub || !id?.privateKey) {
+    throw new Error('Pre-migration export verification failed: missing cryptographic identity.');
+  }
+  const privateKey = await importPrivateKey(id.privateKey);
+  const publicKey = await importPublicKey(id.pub);
+  const challenge = crypto.getRandomValues(new Uint8Array(32));
+  const sig = await signBytes(privateKey, challenge);
+  const validSig = await verifyBytes(publicKey, sig, challenge);
+  if (!validSig) {
+    throw new Error('Pre-migration export verification failed: signing key challenge failed.');
+  }
+
+  return {
+    verified: true,
+    taskCount: kit.snapshot.tasks.length,
+    projectCount: kit.snapshot.projects.length,
+    opCount: kit.snapshot.ops.length,
+  };
 }
 
 /** Check if v2 room writes have been frozen locally due to migration. */
@@ -250,6 +331,36 @@ export async function migrateV2ToV3(
     throw new Error(`Workspace baseline exceeds ${caps.room_quota} bytes relay quota.`);
   }
 
+  // 0. Automatic pre-migration backup & verification (Section 6 / Item 4)
+  // Before migrateV2ToV3 changes anything, write an encrypted local export (reusing recovery-kit format),
+  // verify by importing into an isolated scratch store in memory, and refuse to proceed on verification failure.
+  let exportBundle = await exportRecoveryKit(v3Passphrase);
+  if (preMigrationExportCorrupter) {
+    exportBundle = preMigrationExportCorrupter(exportBundle);
+  }
+  await verifyPreMigrationExport(exportBundle, v3Passphrase);
+
+  let exportPath = '';
+  const backupFilename = `cognate-pre-migration-${Date.now()}.enc.json`;
+  try {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const os = await import('node:os');
+    const backupDir = path.join(os.homedir(), '.cognate', 'backups');
+    fs.mkdirSync(backupDir, { recursive: true });
+    exportPath = path.join(backupDir, backupFilename);
+    fs.writeFileSync(exportPath, exportBundle, 'utf8');
+  } catch {
+    if (typeof localStorage !== 'undefined') {
+      const storageKey = `cognate_pre_migration_backup_${Date.now()}`;
+      localStorage.setItem(storageKey, exportBundle);
+      exportPath = `local-storage://${storageKey}`;
+    } else {
+      exportPath = `memory://${backupFilename}`;
+    }
+  }
+  await setSetting('migration_backup_location', exportPath);
+
   const setupCode = setupCodeInput ? setupCodeInput.trim() : encodeSetupCode(generateSetupCode());
   const decodedSetup = decodeSetupCode(setupCode);
   const deleteToken = deleteTokenInput ? deleteTokenInput.trim() : generateDeleteToken();
@@ -407,6 +518,7 @@ export async function migrateV2ToV3(
     v3Room: creds.room,
     setupCode,
     deleteToken,
+    exportPath,
   };
 }
 

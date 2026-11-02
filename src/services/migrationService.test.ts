@@ -14,6 +14,7 @@ import {
   cancelLegacyV2SoftDelete,
   checkAllActorsSyncedV3,
   verifyRoomClaim,
+  setPreMigrationExportCorrupter,
 } from './migrationService';
 import {
   enableSync,
@@ -379,6 +380,33 @@ describe('Sync Protocol v3 Genesis, Join & Migration State Machine', () => {
       // Sync now succeeds again without throwing 410
       const syncRes = await syncNow();
       expect(syncRes).toBeDefined();
+    });
+
+    it('writes encrypted local export and verifies in scratch store before migrating, blocking on corruption', async () => {
+      (globalThis as any).localStorage = A;
+      _resetForTests(); resetIdentity();
+      await enableSync(RELAY, PASS_V2);
+      await logTaskUpsert(task('t-export', { title: 'Pre-migration task' }));
+      await syncNow();
+
+      // 1. Corrupted export blocks migration and leaves v2 writable
+      setPreMigrationExportCorrupter((bundle: string) => {
+        const parsed = JSON.parse(bundle);
+        if (parsed.sealed) parsed.sealed.ct = 'corrupted_ciphertext_payload';
+        else parsed.ct = 'corrupted_ciphertext_payload';
+        return JSON.stringify(parsed);
+      });
+
+      await expect(migrateV2ToV3(PASS_V3, SETUP_CODE)).rejects.toThrow(/verification failed/i);
+      expect(await isV2WriteFrozen()).toBe(false);
+
+      // 2. Clean export verifies and migration proceeds
+      setPreMigrationExportCorrupter(null);
+      const res = await migrateV2ToV3(PASS_V3, SETUP_CODE);
+      expect(res.exportPath).toBeDefined();
+      expect(typeof res.exportPath).toBe('string');
+      expect(res.exportPath.length).toBeGreaterThan(0);
+      expect(await isV2WriteFrozen()).toBe(true);
     });
   });
 });

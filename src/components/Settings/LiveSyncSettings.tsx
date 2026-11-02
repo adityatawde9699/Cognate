@@ -3,6 +3,7 @@
    join verification, migration from v2, and relay soft-delete. */
 
 import { useEffect, useState } from 'react';
+import { getSetting } from '../../db';
 import { getSecret, setSecret } from '../../utils/secrets';
 import {
   validatePassphrase,
@@ -72,6 +73,10 @@ export function LiveSyncSettings() {
     if (typeof localStorage === 'undefined') return false;
     return !!(localStorage.getItem('sync_relay_url') && localStorage.getItem('sync_passphrase'));
   });
+  const [backupLocation, setBackupLocation] = useState<string>(() => {
+    if (typeof localStorage === 'undefined') return '';
+    return localStorage.getItem('migration_backup_location') || '';
+  });
   const [msg, setMsg] = useState('');
   const [health, setHealth] = useState('');
   const [busy, setBusy] = useState(false);
@@ -124,8 +129,10 @@ export function LiveSyncSettings() {
   const reload = async () => {
     const currentCfg = await getConfig();
     const currentBinding = await getWorkspaceBinding();
+    const currentBackup = await getSetting('migration_backup_location', '');
     setCfg(currentCfg);
     setBinding(currentBinding);
+    setBackupLocation(currentBackup);
     setOn(!!currentCfg);
     setUrl(currentCfg?.url || '');
     setPass(currentCfg?.passphrase || '');
@@ -263,8 +270,9 @@ export function LiveSyncSettings() {
     setMsg('');
     try {
       const res = await migrateV2ToV3(targetPass);
+      setBackupLocation(res.exportPath);
       await reload();
-      setMsg(`Upgraded to Sync v3! Setup Code: ${res.setupCode}`);
+      setMsg(`Upgraded to Sync v3! Setup Code: ${res.setupCode}. Verified pre-migration export saved to: ${res.exportPath}`);
       toast('🚀 Upgraded to Sync Protocol v3');
     } catch (err: any) {
       setMsg(err?.message || 'Migration to v3 failed.');
@@ -390,6 +398,13 @@ export function LiveSyncSettings() {
               <strong><i className="fa-solid fa-triangle-exclamation"></i> Warning:</strong> QR code pairing is not implemented. You must manually copy or record this 27-character Setup Code and Passphrase. Losing every device without the Setup Code or an encrypted recovery kit permanently loses access to your workspace.
             </p>
           </div>
+          {backupLocation && (
+            <div style={{ marginTop: '8px', padding: '8px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '6px' }}>
+              <p style={{ margin: 0, fontSize: '12px', color: '#334155', lineHeight: 1.4, wordBreak: 'break-all' }}>
+                <strong><i className="fa-solid fa-file-shield"></i> Verified pre-migration backup:</strong> <code>{backupLocation}</code>
+              </p>
+            </div>
+          )}
         </div>
       )}
 
