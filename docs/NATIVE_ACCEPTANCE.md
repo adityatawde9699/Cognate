@@ -1,6 +1,6 @@
 # Native desktop acceptance
 
-The Linux smoke runner uses Tauri WebDriver against a dedicated build with application identifier `com.cognate.smoke` and temporary config/data/cache roots. It refuses any other application identifier. Never point it at an installed Cognate profile. Run it on Linux with Xvfb, WebKitWebDriver, a Secret Service session, and `tauri-driver` installed:
+The Linux smoke runner uses Tauri WebDriver against a dedicated build with application identifier `com.cognate.smoke` and temporary config/data/cache roots. It refuses any other application identifier. Never point it at an installed Cognate profile. Run it on Linux with Xvfb, the `webkitgtk-webdriver` package, a Secret Service session, and `tauri-driver` installed:
 
 ```sh
 npm run tauri build -- --no-bundle --config src-tauri/tauri.smoke.conf.json -- --bin cognate
