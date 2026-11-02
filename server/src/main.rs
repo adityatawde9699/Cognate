@@ -37,6 +37,22 @@ const MAX_BODY: usize = 1_048_576;
 const MAX_STORE: usize = 32 * 1_048_576;
 const MAX_ROOMS: usize = 1000;
 const MAX_ACTORS: usize = 128;
+/// Default per-room byte quota (8 MB). Configurable via RELAY_ROOM_QUOTA.
+const DEFAULT_ROOM_QUOTA: usize = 8 * 1_048_576;
+static ROOM_QUOTA: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(DEFAULT_ROOM_QUOTA);
+
+fn room_quota() -> usize {
+    ROOM_QUOTA.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+#[cfg(test)]
+fn set_room_quota_for_tests(quota: usize) {
+    ROOM_QUOTA.store(quota, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn room_bytes(room_data: &HashMap<String, Value>) -> usize {
+    room_data.values().map(|v| serde_json::to_vec(v).map_or(0, |b| b.len())).sum()
+}
 type Data = HashMap<String,HashMap<String,Value>>;
 
 /// Missing data starts empty; corruption/permission errors fail startup.
@@ -136,6 +152,11 @@ pub fn route_v(store: &Store, versions: &Versions, method: &str, path: &str, bod
             let mut candidate = s.clone();
             candidate.entry((*room).into()).or_default().insert((*actor).into(),blob.clone());
             if serde_json::to_vec(&candidate).map_or(true,|data|data.len()>MAX_STORE) {return (507,json!({"error":"store quota exceeded"}).to_string());}
+            if let Some(r) = candidate.get(*room) {
+                if room_bytes(r) > room_quota() {
+                    return (507, json!({"error": "room quota exceeded"}).to_string());
+                }
+            }
             if old.as_ref()==Some(&blob) {return (200,json!({"ok":true}).to_string());}
             s.entry((*room).to_string()).or_default().insert((*actor).to_string(), blob);
             *versions.lock().unwrap().entry((*room).to_string()).or_insert(0) += 1;
@@ -194,6 +215,11 @@ fn batch_route(store: &Store, method: &str, path: &str, body: &str) -> (u16,Stri
             blob["batch_id"]=json!(parts[4]); blob["cursor"]=json!(cursor);
             let mut candidate=guard.clone(); candidate.entry(room).or_default().insert(parts[4].into(),blob);
             if serde_json::to_vec(&candidate).map_or(true,|d|d.len()>MAX_STORE) {return (507,json!({"error":"store quota exceeded"}).to_string());}
+            if let Some(r) = candidate.get(&format!("@v2:{}",parts[2])) {
+                if room_bytes(r) > room_quota() {
+                    return (507, json!({"error": "room quota exceeded"}).to_string());
+                }
+            }
             *guard=candidate;
             (200,json!({"batch_id":parts[4],"cursor":cursor,"durable":true}).to_string())
         },
@@ -436,6 +462,11 @@ fn main() {
     let data_path = std::env::var("RELAY_DATA").unwrap_or_else(|_| "relay-data.json".to_string());
     let token = std::env::var("RELAY_TOKEN").unwrap_or_default();
     let allow_open = std::env::var("RELAY_ALLOW_OPEN").is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"));
+    let room_quota_env = std::env::var("RELAY_ROOM_QUOTA")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(DEFAULT_ROOM_QUOTA);
+    ROOM_QUOTA.store(room_quota_env, std::sync::atomic::Ordering::Relaxed);
 
     if let Err(err) = validate_startup_addr(&addr, &token, allow_open) {
         eprintln!("ERROR: {err}");
@@ -704,5 +735,34 @@ mod tests {
         let err = validate_startup_addr("0.0.0.0:8787", "", false).unwrap_err();
         assert!(err.contains("RELAY_TOKEN is empty"));
         assert!(err.contains("RELAY_ALLOW_OPEN=1"));
+    }
+
+    #[test]
+    fn room_quota_blocks_excessive_room_storage_before_global_exhaustion() {
+        let s = empty();
+        set_room_quota_for_tests(80);
+        let blob = r#"{"v":1,"nonce":"12345678","ct":"ciphertext-payload"}"#;
+        // First blob in room 1 succeeds (52 bytes <= 80)
+        let (code, _) = route(&s, "PUT", "/rooms/room1/blobs/actor1", blob);
+        assert_eq!(code, 200);
+        // Second blob in room 1 pushes room 1 over 80 bytes (104 > 80) -> 507 room quota exceeded
+        let (code, body) = route(&s, "PUT", "/rooms/room1/blobs/actor2", blob);
+        assert_eq!(code, 507);
+        assert!(body.contains("room quota exceeded"));
+        // Room 2 is independent and can still write successfully
+        let (code, _) = route(&s, "PUT", "/rooms/room2/blobs/actor1", blob);
+        assert_eq!(code, 200);
+
+        // Also test v2 batch per-room quota
+        let (code, _) = route(&s, "PUT", "/v2/rooms/v2room1/batches/b1", blob);
+        assert_eq!(code, 200);
+        let (code, body) = route(&s, "PUT", "/v2/rooms/v2room1/batches/b2", blob);
+        assert_eq!(code, 507);
+        assert!(body.contains("room quota exceeded"));
+        let (code, _) = route(&s, "PUT", "/v2/rooms/v2room2/batches/b1", blob);
+        assert_eq!(code, 200);
+
+        // Reset room quota back to default
+        set_room_quota_for_tests(DEFAULT_ROOM_QUOTA);
     }
 }

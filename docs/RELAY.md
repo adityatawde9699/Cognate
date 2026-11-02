@@ -19,6 +19,7 @@ cargo clippy -- -D warnings
 | `RELAY_RATE_LIMIT` | `240` | Per-IP requests per fixed window |
 | `RELAY_RATE_WINDOW` | `60` | Window seconds |
 | `RELAY_WORKERS` | `16` | Request worker count |
+| `RELAY_ROOM_QUOTA` | `8388608` (8 MB) | Per-room byte quota to prevent single-room exhaustion |
 
 Set the URL, passphrase, and optional access token in Settings → Live sync. See [server/README.md](../server/README.md) for endpoint details.
 
@@ -33,9 +34,44 @@ Clients verify ECDSA signatures over version, batch ID, actor/public key, contex
 
 Workspace passphrase possession grants device enrollment and read access. Existing keys are pinned; this is not a server-managed user account or per-device membership service. V2 key/room derivation uses PBKDF2-SHA256 with 600000 iterations and versioned labels. Portable recovery uses its own random salt. Shared invitations are owner-signed; revoked epochs freeze uploads in old clients after they receive the signed marker and require new invitations. A hostile relay can withhold data/markers; cryptography does not establish availability or global freshness.
 
-Store quota is 32 MB, request quota 1 MB, at most 1000 stored rooms, 10000 v2 batches per room and 128 legacy actors per room. Journals do not compact automatically; quota exhaustion fails explicitly. Legacy data is retained, but the new client does not silently ingest unsigned v1 live blobs. Export/import reviewed local operation bundles before moving old clients to v2. Signed v2 invitations must be minted by the original owner; old recovery kits restore capabilities only.
+Store quota is 32 MB, request quota 1 MB, at most 1000 stored rooms, 10000 v2 batches per room, per-room quota configurable via `RELAY_ROOM_QUOTA` (default 8 MB), and 128 legacy actors per room. Journals do not compact automatically; quota exhaustion fails explicitly. Legacy data is retained, but the new client does not silently ingest unsigned v1 live blobs. Export/import reviewed local operation bundles before moving old clients to v2. Signed v2 invitations must be minted by the original owner; old recovery kits restore capabilities only.
 
 Tests include immutable cursors across restart, collisions, exact retry, quota admission, real HTTP persistence failure and saturated polls with health still available. Actual disk-full, slow uploads, process-kill durability and staging/public load remain required deployment evidence.
+
+## Proposal: Monotonic v2 Journal Compaction & TTL (Design Only)
+
+### Problem Statement
+Currently, Protocol v2 batches in `server/src/main.rs` are immutable append-only records with no deletion mechanism. While the per-room byte quota (`RELAY_ROOM_QUOTA`, default 8 MB) prevents a single room from consuming the entire 32 MB store quota, active workspaces will eventually exhaust their room quota or hit the 10,000 batch limit unless older history can be compacted safely. Crucially, cursor identifiers must remain strictly monotonic so that clients polling with `?after={cursor}` never experience rewinds or missed updates.
+
+### Proposed Architecture
+
+1. **Monotonic Cursor Invariant**:
+   - The relay assigns cursors sequentially: `1, 2, 3, ... N`.
+   - Compacting batches `1..K` MUST NOT renumber subsequent batches `K+1..N`.
+   - The room metadata tracks `watermark_cursor` (the highest cursor deleted) and `next_cursor` (the next cursor to allocate).
+   - If a client requests `GET /v2/rooms/{room}/batches?after={cursor}` where `cursor < watermark_cursor`, the relay returns HTTP `410 Gone` with `{ "error": "history compacted", "watermark_cursor": K }` or returns the latest signed compaction checkpoint.
+
+2. **Client-Driven Compaction Checkpoints**:
+   - Because the relay is ciphertext-only and dumb, it cannot merge CRDT operations or compute application state snapshots.
+   - Any client holding the full state can publish a special checkpoint batch:
+     `PUT /v2/rooms/{room}/checkpoints/{checkpoint_id}`
+     containing:
+     - `compacts_up_to_cursor: K`
+     - Signed snapshot of state at cursor `K`
+   - The relay verifies that `K <= current_max_cursor` and stores the checkpoint.
+
+3. **TTL and Pruning Policy**:
+   - Environment variables:
+     - `RELAY_BATCH_TTL`: Maximum age of raw batches before compaction eligibility (e.g., 30 days).
+     - `RELAY_COMPACT_MIN_BATCHES`: Minimum batch count before pruning activates (e.g., 1,000).
+   - Pruning only deletes individual batches `1..K` when:
+     - A validated checkpoint covers up to cursor `K`, AND
+     - The batch age exceeds `RELAY_BATCH_TTL`.
+   - The room's watermark cursor is updated to `K`.
+
+4. **Rollback & Safety Plan**:
+   - Pruning is performed using the existing atomic write pattern (`write_tmp -> fsync -> rename -> fsync_parent`).
+   - If an edge-case client is partitioned for longer than `RELAY_BATCH_TTL`, receiving `410 Gone` instructs the client to download the signed checkpoint at `watermark_cursor`, reset its local oplog projection, and resume incremental sync from `watermark_cursor`.
 
 ## Deployment requirements
 
