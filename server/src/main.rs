@@ -306,16 +306,13 @@ fn header(name: &str, value: &str) -> Header {
 // a decryption key (the relay still can't read blobs); it just stops anonymous
 // strangers from filling your relay. Empty token = open (dev/self-host default).
 
+use subtle::ConstantTimeEq;
+
 /// Compare two byte slices in constant time to prevent timing attacks against tokens.
+/// Note: timing guarantees cannot be unit-tested portably; the guarantee rests on the
+/// subtle crate's ConstantTimeEq trait contract.
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut diff: u8 = 0;
-    for (&x, &y) in a.iter().zip(b.iter()) {
-        diff |= x ^ y;
-    }
-    std::hint::black_box(diff) == 0
+    a.ct_eq(b).into()
 }
 
 fn bearer_ok(headers: &[Header], expected: &str) -> bool {
@@ -1207,17 +1204,26 @@ mod tests {
 
     #[test]
     fn bearer_token_comparison_constant_time() {
+        // Confirms two tokens of the same length compare equal / unequal
         assert!(constant_time_eq(b"", b""));
         assert!(constant_time_eq(b"token123", b"token123"));
         assert!(!constant_time_eq(b"token123", b"token124"));
         assert!(!constant_time_eq(b"token123", b"xoken123"));
+
+        // Confirms two tokens of DIFFERENT lengths compare unequal without panicking
         assert!(!constant_time_eq(b"token123", b"token12"));
         assert!(!constant_time_eq(b"token12", b"token123"));
+        assert!(!constant_time_eq(b"", b"token123"));
+        assert!(!constant_time_eq(b"token123", b""));
+        assert!(!constant_time_eq(b"short", b"a very long token that exceeds the length of short significantly"));
+        assert!(!constant_time_eq(b"a very long token that exceeds the length of short significantly", b"short"));
 
         let h = vec![Header::from_bytes(&b"Authorization"[..], &b"Bearer my-secret-token"[..]).unwrap()];
         assert!(bearer_ok(&h, "my-secret-token"));
         assert!(!bearer_ok(&h, "my-secret-tokeo"));
         assert!(!bearer_ok(&h, "ny-secret-token"));
+        assert!(!bearer_ok(&h, "short"));
+        assert!(!bearer_ok(&h, "my-secret-token-extended"));
     }
 
     #[test]
