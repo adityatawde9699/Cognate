@@ -349,6 +349,10 @@ fn env_u32(key: &str, default: u32) -> u32 {
     std::env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
 }
 
+fn env_usize(key: &str, default: usize) -> usize {
+    std::env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+}
+
 // ── Real-time long-poll (Act 3) ──────────────────────────
 // A client GETs /rooms/{room}/poll?since=N and we hold the request until the
 // room's version moves (someone wrote) or a timeout elapses, then return the
@@ -411,6 +415,15 @@ fn resolve_client_ip(socket_ip: &str, headers: &[Header], trust_proxy: bool) -> 
     }
 }
 
+#[derive(Default)]
+struct ClientBudget {
+    write_window_start: u64,
+    write_bytes: usize,
+    new_rooms_window_start: u64,
+    new_rooms_count: usize,
+    created_rooms: std::collections::HashSet<String>,
+}
+
 /// Immutable relay configuration shared across worker threads.
 struct Config {
     data_path: String,
@@ -420,6 +433,54 @@ struct Config {
     active_polls: std::sync::atomic::AtomicUsize,
     max_polls: usize,
     trust_proxy: bool,
+    ip_write_limit_bytes: usize,
+    ip_new_rooms_limit: usize,
+    ip_max_store_bytes: usize,
+    quotas: Mutex<HashMap<String, ClientBudget>>,
+}
+
+impl Config {
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        data_path: String,
+        token: String,
+        rate_limit: u32,
+        rate_window: u64,
+        max_polls: usize,
+        trust_proxy: bool,
+        ip_write_limit_bytes: usize,
+        ip_new_rooms_limit: usize,
+        ip_max_store_bytes: usize,
+    ) -> Self {
+        Self {
+            data_path,
+            token,
+            rate_limit,
+            rate_window,
+            active_polls: std::sync::atomic::AtomicUsize::new(0),
+            max_polls,
+            trust_proxy,
+            ip_write_limit_bytes,
+            ip_new_rooms_limit,
+            ip_max_store_bytes,
+            quotas: Mutex::new(HashMap::new()),
+        }
+    }
+
+    #[cfg(test)]
+    fn test_default(data_path: String, token: String) -> Self {
+        Self::new(
+            data_path,
+            token,
+            100,
+            60,
+            1,
+            false,
+            16 * 1024 * 1024,
+            1000,
+            16 * 1024 * 1024,
+        )
+    }
 }
 
 /// Handle one request end-to-end (CORS, rate limit, auth, route). Runs on a
@@ -435,6 +496,71 @@ fn reserve_poll(active: &std::sync::atomic::AtomicUsize, limit: usize) -> bool {
         }
     }
     false
+}
+
+fn check_write_limits(ip: &str, path: &str, body: &str, store: &Store, cfg: &Config) -> Option<(u16, String)> {
+    let parts: Vec<&str> = path.split('?').next().unwrap_or("").split('/').filter(|s| !s.is_empty()).collect();
+    let room_key = if parts.len() == 5 && parts[0] == "v2" && parts[1] == "rooms" {
+        format!("@v2:{}", parts[2])
+    } else if parts.len() == 4 && parts[0] == "rooms" {
+        parts[1].to_string()
+    } else {
+        return None;
+    };
+
+    let now = now_secs();
+    let mut q_guard = cfg.quotas.lock().unwrap();
+    if q_guard.len() >= 10000 {
+        q_guard.retain(|_, b| {
+            now.saturating_sub(b.write_window_start) < 3600
+                || now.saturating_sub(b.new_rooms_window_start) < 3600
+                || !b.created_rooms.is_empty()
+        });
+    }
+    let budget = q_guard.entry(ip.to_string()).or_default();
+
+    if now.saturating_sub(budget.write_window_start) >= 3600 {
+        budget.write_window_start = now;
+        budget.write_bytes = 0;
+    }
+    if budget.write_bytes.saturating_add(body.len()) > cfg.ip_write_limit_bytes {
+        return Some((429, json!({"error": "client write byte budget exceeded"}).to_string()));
+    }
+
+    if now.saturating_sub(budget.new_rooms_window_start) >= 3600 {
+        budget.new_rooms_window_start = now;
+        budget.new_rooms_count = 0;
+    }
+    let store_guard = store.lock().unwrap();
+    let is_new_room = !store_guard.contains_key(&room_key);
+    if is_new_room && budget.new_rooms_count >= cfg.ip_new_rooms_limit {
+        return Some((429, json!({"error": "new room limit exceeded for IP"}).to_string()));
+    }
+
+    let ip_stored: usize = budget.created_rooms.iter().filter_map(|r| store_guard.get(r).map(room_bytes)).sum();
+    if ip_stored.saturating_add(body.len()) > cfg.ip_max_store_bytes {
+        return Some((507, json!({"error": "client storage quota exceeded"}).to_string()));
+    }
+
+    None
+}
+
+fn record_successful_write(ip: &str, path: &str, body: &str, cfg: &Config) {
+    let parts: Vec<&str> = path.split('?').next().unwrap_or("").split('/').filter(|s| !s.is_empty()).collect();
+    let room_key = if parts.len() == 5 && parts[0] == "v2" && parts[1] == "rooms" {
+        format!("@v2:{}", parts[2])
+    } else if parts.len() == 4 && parts[0] == "rooms" {
+        parts[1].to_string()
+    } else {
+        return;
+    };
+    let mut q_guard = cfg.quotas.lock().unwrap();
+    let budget = q_guard.entry(ip.to_string()).or_default();
+    budget.write_bytes = budget.write_bytes.saturating_add(body.len());
+    if !budget.created_rooms.contains(&room_key) {
+        budget.new_rooms_count += 1;
+        budget.created_rooms.insert(room_key);
+    }
 }
 
 fn serve(mut req: Request, store: &Store, versions: &Versions, rate: &RateMap, cfg: &Config) {
@@ -507,8 +633,19 @@ fn serve(mut req: Request, store: &Store, versions: &Versions, rate: &RateMap, c
             (200u16, json!({ "version": v }).to_string())
         }
     } else {
-        if method==Method::Put {durable_put(store,versions,&path,&body,&cfg.data_path)}
-        else {route_v(store, versions, method.as_str(), &path, &body)}
+        if method == Method::Put {
+            if let Some(err) = check_write_limits(&ip, &path, &body, store, cfg) {
+                err
+            } else {
+                let res = durable_put(store, versions, &path, &body, &cfg.data_path);
+                if res.0 == 200 {
+                    record_successful_write(&ip, &path, &body, cfg);
+                }
+                res
+            }
+        } else {
+            route_v(store, versions, method.as_str(), &path, &body)
+        }
     };
     let _ = req.respond(cors_json(status, payload));
 }
@@ -573,12 +710,24 @@ fn main() {
     let store: Arc<Store> = Arc::new(Mutex::new(load_store(&data_path).expect("Refusing to start with unreadable/corrupt relay data")));
     let versions: Arc<Versions> = Arc::new(Mutex::new(HashMap::new()));
     let rate: Arc<RateMap> = Arc::new(Mutex::new(HashMap::new()));
-    let open = token.is_empty();
-    let cfg = Arc::new(Config { data_path, token, rate_limit, rate_window, active_polls: std::sync::atomic::AtomicUsize::new(0), max_polls, trust_proxy });
+    let ip_write_limit_bytes = env_usize("RELAY_IP_WRITE_LIMIT_BYTES", 16 * 1024 * 1024);
+    let ip_new_rooms_limit = env_usize("RELAY_IP_NEW_ROOMS_LIMIT", 10);
+    let ip_max_store_bytes = env_usize("RELAY_IP_MAX_STORE_BYTES", 16 * 1024 * 1024);
+    let cfg = Arc::new(Config::new(
+        data_path,
+        token,
+        rate_limit,
+        rate_window,
+        max_polls,
+        trust_proxy,
+        ip_write_limit_bytes,
+        ip_new_rooms_limit,
+        ip_max_store_bytes,
+    ));
     println!(
         "Cognate relay (E2E, ciphertext-only) on http://{addr} (data: {}, auth: {}, limit: {rate_limit}/{rate_window}s, workers: {workers}, max_polls: {max_polls})",
         cfg.data_path,
-        if open { "open" } else { "token" }
+        if cfg.token.is_empty() { "open" } else { "token" }
     );
 
     let mut handles = Vec::new();
@@ -778,7 +927,7 @@ mod tests {
         let store=Arc::new(empty());let versions=Arc::new(Mutex::new(HashMap::new()));
         let copy=store.clone();let vc=versions.clone();
         let worker=thread::spawn(move || {
-            let cfg=Config {data_path:"/nonexistent-cognate-directory/relay.json".into(),token:"test-token".into(),rate_limit:100,rate_window:60,active_polls:std::sync::atomic::AtomicUsize::new(0),max_polls:1,trust_proxy:false};
+            let cfg=Config::test_default("/nonexistent-cognate-directory/relay.json".into(), "test-token".into());
             let request=server.recv_timeout(Duration::from_secs(3)).unwrap().unwrap();
             serve(request,&copy,&vc,&Mutex::new(HashMap::new()),&cfg);
         });
@@ -799,7 +948,7 @@ mod tests {
         }
         let server=Arc::new(Server::http("127.0.0.1:0").unwrap());let addr=server.server_addr().to_ip().unwrap();
         let store=Arc::new(empty());let versions=Arc::new(Mutex::new(HashMap::new()));let rate=Arc::new(Mutex::new(HashMap::new()));
-        let cfg=Arc::new(Config {data_path:"unused".into(),token:String::new(),rate_limit:100,rate_window:60,active_polls:std::sync::atomic::AtomicUsize::new(0),max_polls:1,trust_proxy:false});
+        let cfg=Arc::new(Config::test_default("unused".into(), String::new()));
         let stopped=Arc::new(std::sync::atomic::AtomicBool::new(false));let mut workers=Vec::new();
         for _ in 0..2 {
             let (server,store,versions,rate,cfg,stopped)=(server.clone(),store.clone(),versions.clone(),rate.clone(),cfg.clone(),stopped.clone());
@@ -874,15 +1023,7 @@ mod tests {
         let store = Arc::new(empty());
         let versions = Arc::new(Mutex::new(HashMap::new()));
         let rate = Arc::new(Mutex::new(HashMap::new()));
-        let cfg = Arc::new(Config {
-            data_path: "unused".into(),
-            token: String::new(),
-            rate_limit: 100,
-            rate_window: 60,
-            active_polls: std::sync::atomic::AtomicUsize::new(0),
-            max_polls: 1,
-            trust_proxy: false,
-        });
+        let cfg = Arc::new(Config::test_default("unused".into(), String::new()));
         let stopped = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let mut workers = Vec::new();
         for _ in 0..2 {
@@ -1000,15 +1141,10 @@ mod tests {
         let versions = Arc::new(Mutex::new(HashMap::new()));
         let rate = Arc::new(Mutex::new(HashMap::new()));
         // Rate limit: 2 requests per window. trust_proxy: true.
-        let cfg = Arc::new(Config {
-            data_path: "unused".into(),
-            token: String::new(),
-            rate_limit: 2,
-            rate_window: 60,
-            active_polls: std::sync::atomic::AtomicUsize::new(0),
-            max_polls: 1,
-            trust_proxy: true,
-        });
+        let mut cfg_val = Config::test_default("unused".into(), String::new());
+        cfg_val.rate_limit = 2;
+        cfg_val.trust_proxy = true;
+        let cfg = Arc::new(cfg_val);
         let stopped = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let (s, st, v, r, c, sp) = (server.clone(), store.clone(), versions.clone(), rate.clone(), cfg.clone(), stopped.clone());
         let worker = thread::spawn(move || {
@@ -1067,15 +1203,7 @@ mod tests {
         let store = Arc::new(empty());
         let versions = Arc::new(Mutex::new(HashMap::new()));
         let rate = Arc::new(Mutex::new(HashMap::new()));
-        let cfg = Arc::new(Config {
-            data_path: "unused".into(),
-            token: String::new(),
-            rate_limit: 100,
-            rate_window: 60,
-            active_polls: std::sync::atomic::AtomicUsize::new(0),
-            max_polls: 1,
-            trust_proxy: false,
-        });
+        let cfg = Arc::new(Config::test_default("unused".into(), String::new()));
         let stopped = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let (s, st, v, r, c, sp) = (server.clone(), store.clone(), versions.clone(), rate.clone(), cfg.clone(), stopped.clone());
         let worker = thread::spawn(move || {
@@ -1095,15 +1223,7 @@ mod tests {
         // Case 2: Configured token -> requires matching bearer token
         let server2 = Arc::new(Server::http("127.0.0.1:0").unwrap());
         let addr2 = server2.server_addr().to_ip().unwrap();
-        let cfg2 = Arc::new(Config {
-            data_path: "unused".into(),
-            token: "secret-token".into(),
-            rate_limit: 100,
-            rate_window: 60,
-            active_polls: std::sync::atomic::AtomicUsize::new(0),
-            max_polls: 1,
-            trust_proxy: false,
-        });
+        let cfg2 = Arc::new(Config::test_default("unused".into(), "secret-token".into()));
         let stopped2 = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let (s2, st2, v2, r2, c2, sp2) = (server2.clone(), store.clone(), versions.clone(), rate.clone(), cfg2.clone(), stopped2.clone());
         let worker2 = thread::spawn(move || {
@@ -1124,5 +1244,58 @@ mod tests {
 
         stopped2.store(true, std::sync::atomic::Ordering::SeqCst);
         worker2.join().unwrap();
+    }
+
+    #[test]
+    fn client_spreading_writes_hits_quota_and_other_client_can_write() {
+        let server = Arc::new(Server::http("127.0.0.1:0").unwrap());
+        let addr = server.server_addr().to_ip().unwrap();
+        let store = Arc::new(empty());
+        let versions = Arc::new(Mutex::new(HashMap::new()));
+        let rate = Arc::new(Mutex::new(HashMap::new()));
+        let temp_dir = std::env::temp_dir().join(format!("cognate-quota-{}.json", std::process::id()));
+        let p = temp_dir.to_str().unwrap().to_string();
+
+        let mut cfg_val = Config::test_default(p.clone(), String::new());
+        cfg_val.ip_new_rooms_limit = 3; // Cap at 3 new rooms for an IP
+        cfg_val.trust_proxy = true;
+        let cfg = Arc::new(cfg_val);
+
+        let stopped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (s, st, v, r, c, sp) = (server.clone(), store.clone(), versions.clone(), rate.clone(), cfg.clone(), stopped.clone());
+        let worker = thread::spawn(move || {
+            while !sp.load(std::sync::atomic::Ordering::SeqCst) {
+                if let Some(req) = s.recv_timeout(Duration::from_millis(100)).unwrap() {
+                    serve(req, &st, &v, &r, &c);
+                }
+            }
+        });
+
+        fn put_batch(addr: std::net::SocketAddr, room: &str, batch_id: &str, xff: &str) -> u16 {
+            use std::io::{Read, Write};
+            let mut client = std::net::TcpStream::connect(addr).unwrap();
+            client.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+            let body = r#"{"v":1,"nonce":"YWJjZGVmZ2hpamts","ct":"dGVzdA=="}"#;
+            let req = format!("PUT /v2/rooms/{room}/batches/{batch_id} HTTP/1.1\r\nHost: {addr}\r\nX-Forwarded-For: {xff}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+            client.write_all(req.as_bytes()).unwrap();
+            let mut result = String::new();
+            client.read_to_string(&mut result).unwrap();
+            result.split_whitespace().nth(1).and_then(|s| s.parse::<u16>().ok()).unwrap_or(0)
+        }
+
+        // Client 1 (10.0.0.1) creates 3 rooms -> all succeed
+        assert_eq!(put_batch(addr, "room1", "b1", "10.0.0.1"), 200);
+        assert_eq!(put_batch(addr, "room2", "b1", "10.0.0.1"), 200);
+        assert_eq!(put_batch(addr, "room3", "b1", "10.0.0.1"), 200);
+
+        // Client 1 tries to create 4th room -> blocked by quota (429)
+        assert_eq!(put_batch(addr, "room4", "b1", "10.0.0.1"), 429);
+
+        // Global store is NOT exhausted; Client 2 (10.0.0.2) can still write to room4
+        assert_eq!(put_batch(addr, "room4", "b1", "10.0.0.2"), 200);
+
+        stopped.store(true, std::sync::atomic::Ordering::SeqCst);
+        worker.join().unwrap();
+        let _ = std::fs::remove_file(p);
     }
 }
