@@ -20,6 +20,18 @@ The Node report measured these medians and p95 latencies:
 
 The relay report measured 8.3 ms median and 14.2 ms p95 per 30 KB durable upload for 250 sequential local requests; the run took 2.10 seconds total and relay peak RSS was 151.4 MiB. These are local loopback measurements.
 
+## Relay write-path scaling benchmarks
+
+`node scripts/relay-scale-benchmark.mjs` measures durable write latency (`PUT /v2/rooms/.../batches/...`) across stores pre-populated to 5 MB, 15 MB, and 30 MB (approaching the 32 MB store limit).
+
+Before optimization (Issue E), every write held the store mutex, cloned the store twice, serialized JSON twice, and held the global lock across `fsync`. After optimization, the write path performs at most one clone, one serialization, and releases the store lock before `fsync`, allowing concurrent reads.
+
+| Pre-populated Store Size | Baseline Median | Baseline p95 | Optimized Median | Optimized p95 | Speedup (Median) |
+|---|---:|---:|---:|---:|---:|
+| 5 MB | 47.4 ms | 64.0 ms | 17.3 ms | 26.7 ms | 2.7x |
+| 15 MB | 136.2 ms | 180.6 ms | 53.3 ms | 77.9 ms | 2.5x |
+| 30 MB | 246.7 ms | 355.5 ms | 102.4 ms | 133.5 ms | 2.4x |
+
 CI uses generous provisional regression ceilings (p95 250 ms for each TypeScript planner size, 2.5 seconds for merge, 2 seconds for materialize/projection, 500 ms for serialization, and 1 second per local relay upload). They are regression alarms derived from this baseline, not user-facing performance promises or product acceptance targets. CI reports are retained as workflow artifacts. Benchmark results must be recaptured on stable hardware before making release claims.
 
 Still unmeasured here: native Rust-vs-TypeScript timing and RSS, SQLite throughput/migration time, browser render/input latency, cold/warm application startup, large-history encryption/sync, slow-client and public-relay load, and mobile PWA performance. See [TESTING.md](TESTING.md) and the [production roadmap](PRODUCTION_ROADMAP.md).

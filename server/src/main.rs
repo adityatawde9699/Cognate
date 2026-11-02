@@ -77,10 +77,10 @@ fn load_store(path: &str) -> Result<Data,String> {
     serde_json::from_slice(&std::fs::read(path).map_err(|e|e.to_string())?).map_err(|e|e.to_string())
 }
 
-fn persist_data(data: &Data, path: &str) -> Result<(),String> {
+static WRITE_LOCK: Mutex<()> = Mutex::new(());
+
+fn persist_bytes(json: &[u8], path: &str) -> Result<(),String> {
     use std::io::Write;
-    let json = serde_json::to_vec(data).map_err(|e|e.to_string())?;
-    if json.len()>MAX_STORE {return Err("Relay store quota exceeded".into());}
     let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e|e.to_string())?.as_nanos();
     let tmp = format!("{path}.{}.{}.pending",std::process::id(),unique);
     let result = (|| -> std::io::Result<()> {
@@ -88,7 +88,7 @@ fn persist_data(data: &Data, path: &str) -> Result<(),String> {
         options.write(true).create_new(true);
         #[cfg(unix)] { use std::os::unix::fs::OpenOptionsExt; options.mode(0o600); }
         let mut file = options.open(&tmp)?;
-        file.write_all(&json)?;
+        file.write_all(json)?;
         file.sync_all()?;
         drop(file);
         std::fs::rename(&tmp,path)?;
@@ -101,6 +101,13 @@ fn persist_data(data: &Data, path: &str) -> Result<(),String> {
     if result.is_err() {let _=std::fs::remove_file(&tmp);}
     result.map_err(|e|e.to_string())
 }
+
+#[cfg(test)]
+fn persist_data(data: &Data, path: &str) -> Result<(),String> {
+    let json = serde_json::to_vec(data).map_err(|e|e.to_string())?;
+    if json.len()>MAX_STORE {return Err("Relay store quota exceeded".into());}
+    persist_bytes(&json, path)
+}
 #[cfg(test)]
 fn persist(store: &Store, path: &str) -> Result<(),String> {
     persist_data(&*store.lock().map_err(|e|e.to_string())?,path)
@@ -110,20 +117,38 @@ fn identifier(value: &str) -> bool {
 }
 
 /// Acknowledge only after the proposed snapshot has been synced and published.
+/// Mutex is released during fsync to reduce contention.
 fn durable_put(store: &Store, versions: &Versions, path: &str, body: &str, data_path: &str) -> (u16,String) {
-    let mut guard = store.lock().unwrap();
-    let candidate = Mutex::new(guard.clone());
+    let _write_permit = WRITE_LOCK.lock().unwrap();
+
     let candidate_versions = Mutex::new(HashMap::new());
-    let response = route_v(&candidate,&candidate_versions,"PUT",path,body);
-    if response.0!=200 {return response;}
-    let candidate = candidate.into_inner().unwrap();
-    if let Err(error) = persist_data(&candidate,data_path) {
-        STORAGE_FAILURES.fetch_add(1,std::sync::atomic::Ordering::Relaxed);
+    let (candidate, response, json_bytes) = {
+        let guard = store.lock().unwrap();
+        let candidate = Mutex::new(guard.clone());
+        let response = route_v(&candidate, &candidate_versions, "PUT", path, body);
+        if response.0 != 200 {
+            return response;
+        }
+        let candidate = candidate.into_inner().unwrap();
+        let json = match serde_json::to_vec(&candidate) {
+            Ok(j) if j.len() <= MAX_STORE => j,
+            Ok(_) => return (507, json!({"error": "store quota exceeded"}).to_string()),
+            Err(e) => {
+                STORAGE_FAILURES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                return (503, json!({"error": format!("serialization failed: {e}"), "acknowledged": false}).to_string());
+            }
+        };
+        (candidate, response, json)
+    }; // store mutex dropped here before fsync
+
+    if let Err(error) = persist_bytes(&json_bytes, data_path) {
+        STORAGE_FAILURES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         eprintln!("Relay persistence failed: {error}");
-        return (503,json!({"error":"durable storage unavailable; retry","acknowledged":false}).to_string());
+        return (503, json!({"error": "durable storage unavailable; retry", "acknowledged": false}).to_string());
     }
-    *guard = candidate;
-    DURABLE_WRITES.fetch_add(1,std::sync::atomic::Ordering::Relaxed);
+
+    *store.lock().unwrap() = candidate;
+    DURABLE_WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     for (room, v) in candidate_versions.into_inner().unwrap() {
         if room.starts_with("@v2:") {
             versions.lock().unwrap().insert(room, v);
@@ -164,16 +189,14 @@ pub fn route_v(store: &Store, versions: &Versions, method: &str, path: &str, bod
             let mut s = store.lock().unwrap();
             if (!s.contains_key(*room) && s.len()>=MAX_ROOMS) || s.get(*room).is_some_and(|actors|!actors.contains_key(*actor) && actors.len()>=MAX_ACTORS) {return (507,json!({"error":"room/actor quota exceeded"}).to_string());}
             let old = s.get(*room).and_then(|actors|actors.get(*actor)).cloned();
-            let mut candidate = s.clone();
-            candidate.entry((*room).into()).or_default().insert((*actor).into(),blob.clone());
-            if serde_json::to_vec(&candidate).map_or(true,|data|data.len()>MAX_STORE) {return (507,json!({"error":"store quota exceeded"}).to_string());}
-            if let Some(r) = candidate.get(*room) {
-                if room_bytes(r) > room_quota() {
-                    return (507, json!({"error": "room quota exceeded"}).to_string());
-                }
-            }
             if old.as_ref()==Some(&blob) {return (200,json!({"ok":true}).to_string());}
-            s.entry((*room).to_string()).or_default().insert((*actor).to_string(), blob);
+            let old_bytes = old.as_ref().map(|v| serde_json::to_vec(v).map_or(0, |b| b.len())).unwrap_or(0);
+            let new_bytes = serde_json::to_vec(&blob).map_or(0, |b| b.len());
+            let room_data = s.entry((*room).to_string()).or_default();
+            if room_bytes(room_data) + new_bytes - old_bytes > room_quota() {
+                return (507, json!({"error": "room quota exceeded"}).to_string());
+            }
+            room_data.insert((*actor).to_string(), blob);
             *versions.lock().unwrap().entry((*room).to_string()).or_insert(0) += 1;
             (200, json!({"ok": true}).to_string())
         }
@@ -226,17 +249,15 @@ fn batch_route(store: &Store, versions: &Versions, method: &str, path: &str, bod
                 return (200,json!({"batch_id":parts[4],"cursor":old["cursor"],"durable":true}).to_string());
             }
             if (!guard.contains_key(&room) && guard.len()>=MAX_ROOMS) || guard.get(&room).is_some_and(|r|r.len()>=10000) {return (507,json!({"error":"batch journal quota exceeded"}).to_string());}
+            let current_room_bytes = guard.get(&room).map(room_bytes).unwrap_or(0);
+            let new_bytes = serde_json::to_vec(&blob).map_or(0, |b| b.len());
+            if current_room_bytes + new_bytes > room_quota() {
+                return (507, json!({"error": "room quota exceeded"}).to_string());
+            }
             let cursor=guard.get(&room).map(|r|r.values().filter_map(|v|v["cursor"].as_u64()).max().unwrap_or(0)).unwrap_or(0)+1;
             blob["batch_id"]=json!(parts[4]); blob["cursor"]=json!(cursor);
-            let mut candidate=guard.clone(); candidate.entry(room.clone()).or_default().insert(parts[4].into(),blob);
-            if serde_json::to_vec(&candidate).map_or(true,|d|d.len()>MAX_STORE) {return (507,json!({"error":"store quota exceeded"}).to_string());}
-            if let Some(r) = candidate.get(&format!("@v2:{}",parts[2])) {
-                if room_bytes(r) > room_quota() {
-                    return (507, json!({"error": "room quota exceeded"}).to_string());
-                }
-            }
-            *guard=candidate;
-            versions.lock().unwrap().insert(room.clone(), cursor);
+            guard.entry(room.clone()).or_default().insert(parts[4].into(),blob);
+            versions.lock().unwrap().insert(room, cursor);
             (200,json!({"batch_id":parts[4],"cursor":cursor,"durable":true}).to_string())
         },
         ("GET",4) => {
@@ -880,5 +901,27 @@ mod tests {
         assert_eq!(resolve_max_polls(16, Some("4")), 4);
         assert_eq!(resolve_max_polls(16, Some("12")), 12);
         assert_eq!(resolve_max_polls(16, Some("invalid")), 8);
+    }
+
+    #[test]
+    fn write_path_persists_safely_and_records_durable_writes() {
+        let path = std::env::temp_dir().join(format!("cognate-write-path-{}.json", std::process::id()));
+        let p = path.to_str().unwrap();
+        let _ = std::fs::remove_file(p);
+
+        let store = empty();
+        let versions = Mutex::new(HashMap::new());
+        let body = r#"{"v":1,"nonce":"nonce-1","ct":"ciphertext-1"}"#;
+        let before_writes = DURABLE_WRITES.load(std::sync::atomic::Ordering::Relaxed);
+        let (status, ack) = durable_put(&store, &versions, "/v2/rooms/bench/batches/b1", body, p);
+        assert_eq!(status, 200);
+        assert!(ack.contains("\"durable\":true"));
+        assert_eq!(DURABLE_WRITES.load(std::sync::atomic::Ordering::Relaxed), before_writes + 1);
+
+        // Verify the file was written and can be reloaded
+        let loaded = load_store(p).unwrap();
+        assert!(loaded.contains_key("@v2:bench"));
+
+        let _ = std::fs::remove_file(p);
     }
 }
