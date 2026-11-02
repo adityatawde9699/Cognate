@@ -23,8 +23,25 @@ cargo clippy -- -D warnings
 | `RELAY_ROOM_QUOTA` | `8388608` (8 MB) | Per-room byte quota to prevent single-room exhaustion |
 | `RELAY_IP_WRITE_LIMIT_BYTES` | `16777216` (16 MB) | Rolling per-client-IP write byte budget per hour |
 | `RELAY_IP_NEW_ROOMS_LIMIT` | `10` | Maximum new rooms created per client IP per hour |
-| `RELAY_IP_MAX_STORE_BYTES` | `16777216` (16 MB) | Maximum stored bytes for a single client IP (reserves headroom against global 32 MB cap) |
-| `RELAY_TRUST_PROXY` | unset (false) | When set to `1` or `true`, rate limits by first `X-Forwarded-For` hop instead of socket IP |
+| `RELAY_TRUSTED_HOPS` | `0` (or `1` if `RELAY_TRUST_PROXY=1`) | Number of trusted reverse proxy hops from the right in `X-Forwarded-For`. Default 0 (uses socket IP). |
+| `RELAY_TRUST_PROXY` | unset (false) | Legacy compatibility flag: when set to `1` or `true`, defaults `RELAY_TRUSTED_HOPS` to `1` |
+
+### Reverse Proxy & IP Resolution (`RELAY_TRUSTED_HOPS`)
+
+To prevent spoofing via client-crafted `X-Forwarded-For` headers, the relay resolves client IP by reading `N` hops from the **right** (1-indexed) where `N = RELAY_TRUSTED_HOPS`:
+
+Example topology:
+```text
+Client (203.0.113.195) -> Cloudflare -> nginx -> Relay (127.0.0.1:8787)
+```
+- A client sends `X-Forwarded-For: 1.2.3.4` (spoofed).
+- Cloudflare receives the connection from `203.0.113.195` and appends it: `1.2.3.4, 203.0.113.195`.
+- Nginx receives from Cloudflare (`198.51.100.5`) and forwards to relay: `1.2.3.4, 203.0.113.195, 198.51.100.5`.
+- With `RELAY_TRUSTED_HOPS=2`:
+  - 1st hop from right = `198.51.100.5` (nginx hop)
+  - 2nd hop from right = `203.0.113.195` (Cloudflare hop = authentic client IP)
+  - Leftmost `1.2.3.4` is ignored as untrusted input.
+- If fewer than `RELAY_TRUSTED_HOPS` hops are present or if candidate parsing fails, the relay safely falls back to the direct socket IP.
 
 Set the URL, passphrase, and optional access token in Settings → Live sync. See [server/README.md](../server/README.md) for endpoint details.
 

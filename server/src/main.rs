@@ -416,18 +416,22 @@ fn cors_json(status: u16, body: String) -> Response<std::io::Cursor<Vec<u8>>> {
         .with_header(header("Access-Control-Allow-Origin", "*"))
 }
 
-fn resolve_client_ip(socket_ip: &str, headers: &[Header], trust_proxy: bool) -> String {
-    if trust_proxy {
-        headers
-            .iter()
-            .find(|h| h.field.equiv("X-Forwarded-For"))
-            .and_then(|h| h.value.as_str().split(',').next())
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| socket_ip.to_string())
-    } else {
-        socket_ip.to_string()
+fn resolve_client_ip(socket_ip: &str, headers: &[Header], trusted_hops: usize) -> String {
+    if trusted_hops == 0 {
+        return socket_ip.to_string();
     }
+    let hops: Vec<&str> = headers
+        .iter()
+        .filter(|h| h.field.equiv("X-Forwarded-For"))
+        .flat_map(|h| h.value.as_str().split(',').map(|s| s.trim()).filter(|s| !s.is_empty()))
+        .collect();
+    if hops.len() >= trusted_hops {
+        let candidate = hops[hops.len() - trusted_hops];
+        if candidate.parse::<std::net::IpAddr>().is_ok() {
+            return candidate.to_string();
+        }
+    }
+    socket_ip.to_string()
 }
 
 #[derive(Default)]
@@ -447,7 +451,7 @@ struct Config {
     rate_window: u64,
     active_polls: std::sync::atomic::AtomicUsize,
     max_polls: usize,
-    trust_proxy: bool,
+    trusted_hops: usize,
     ip_write_limit_bytes: usize,
     ip_new_rooms_limit: usize,
     ip_max_store_bytes: usize,
@@ -462,7 +466,7 @@ impl Config {
         rate_limit: u32,
         rate_window: u64,
         max_polls: usize,
-        trust_proxy: bool,
+        trusted_hops: usize,
         ip_write_limit_bytes: usize,
         ip_new_rooms_limit: usize,
         ip_max_store_bytes: usize,
@@ -474,7 +478,7 @@ impl Config {
             rate_window,
             active_polls: std::sync::atomic::AtomicUsize::new(0),
             max_polls,
-            trust_proxy,
+            trusted_hops,
             ip_write_limit_bytes,
             ip_new_rooms_limit,
             ip_max_store_bytes,
@@ -490,7 +494,7 @@ impl Config {
             100,
             60,
             1,
-            false,
+            0,
             16 * 1024 * 1024,
             1000,
             16 * 1024 * 1024,
@@ -593,10 +597,10 @@ fn serve(mut req: Request, store: &Store, versions: &Versions, rate: &RateMap, c
         return;
     }
 
-    // Rate limit by client IP. When RELAY_TRUST_PROXY is set, use the first
-    // X-Forwarded-For hop; otherwise use the socket IP.
+    // Rate limit by client IP. When RELAY_TRUSTED_HOPS is set, use the Nth
+    // X-Forwarded-For hop from the right; otherwise use the socket IP.
     let socket_ip = req.remote_addr().map(|a| a.ip().to_string()).unwrap_or_else(|| "unknown".into());
-    let ip = resolve_client_ip(&socket_ip, req.headers(), cfg.trust_proxy);
+    let ip = resolve_client_ip(&socket_ip, req.headers(), cfg.trusted_hops);
     if !rate_ok(rate, &ip, now_secs(), cfg.rate_limit, cfg.rate_window) {
         let _ = req.respond(cors_json(429, json!({"error": "rate limited"}).to_string()));
         return;
@@ -719,7 +723,13 @@ fn main() {
     let workers = env_u32("RELAY_WORKERS", 16).clamp(2,64); // a pool so long-polls don't block others
     let max_polls = resolve_max_polls(workers, std::env::var("RELAY_MAX_POLLS").ok().as_deref());
 
-    let trust_proxy = std::env::var("RELAY_TRUST_PROXY").is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"));
+    let trusted_hops = std::env::var("RELAY_TRUSTED_HOPS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or_else(|| {
+            let trust_proxy = std::env::var("RELAY_TRUST_PROXY").is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"));
+            if trust_proxy { 1 } else { 0 }
+        });
 
     let server = Arc::new(Server::http(&addr).expect("failed to bind relay address"));
     let store: Arc<Store> = Arc::new(Mutex::new(load_store(&data_path).expect("Refusing to start with unreadable/corrupt relay data")));
@@ -734,7 +744,7 @@ fn main() {
         rate_limit,
         rate_window,
         max_polls,
-        trust_proxy,
+        trusted_hops,
         ip_write_limit_bytes,
         ip_new_rooms_limit,
         ip_max_store_bytes,
@@ -1118,24 +1128,36 @@ mod tests {
     }
 
     #[test]
-    fn client_ip_respects_relay_trust_proxy() {
+    fn client_ip_with_trusted_hops_from_right_and_fallback() {
         let headers = vec![
-            Header::from_bytes(&b"X-Forwarded-For"[..], &b"203.0.113.195, 70.41.3.18"[..]).unwrap(),
+            Header::from_bytes(&b"X-Forwarded-For"[..], &b"1.2.3.4, 203.0.113.195"[..]).unwrap(),
         ];
-        // Default (trust_proxy = false): stays socket IP
-        assert_eq!(resolve_client_ip("127.0.0.1", &headers, false), "127.0.0.1");
+        // 1 hop trusted: leftmost spoofed value ignored, proxy-appended value used (1st from right)
+        assert_eq!(resolve_client_ip("127.0.0.1", &headers, 1), "203.0.113.195");
 
-        // trust_proxy = true: uses first X-Forwarded-For hop
-        assert_eq!(resolve_client_ip("127.0.0.1", &headers, true), "203.0.113.195");
+        // 2 hops trusted: intermediate hop extracted
+        let two_hops = vec![
+            Header::from_bytes(&b"X-Forwarded-For"[..], &b"1.2.3.4, 203.0.113.195, 10.0.0.1"[..]).unwrap(),
+        ];
+        assert_eq!(resolve_client_ip("127.0.0.1", &two_hops, 2), "203.0.113.195");
 
-        // trust_proxy = true but no header: falls back to socket IP
-        assert_eq!(resolve_client_ip("127.0.0.1", &[], true), "127.0.0.1");
+        // Fewer hops than configured: falls back to socket IP
+        assert_eq!(resolve_client_ip("127.0.0.1", &headers, 3), "127.0.0.1");
+
+        // Malformed header: falls back to socket IP
+        let malformed = vec![
+            Header::from_bytes(&b"X-Forwarded-For"[..], &b"not-an-ip"[..]).unwrap(),
+        ];
+        assert_eq!(resolve_client_ip("127.0.0.1", &malformed, 1), "127.0.0.1");
+
+        // 0 hops trusted: always socket IP
+        assert_eq!(resolve_client_ip("127.0.0.1", &headers, 0), "127.0.0.1");
 
         // whitespace trimming
         let padded = vec![
             Header::from_bytes(&b"X-Forwarded-For"[..], &b"  198.51.100.2 , 10.0.0.1 "[..]).unwrap(),
         ];
-        assert_eq!(resolve_client_ip("127.0.0.1", &padded, true), "198.51.100.2");
+        assert_eq!(resolve_client_ip("127.0.0.1", &padded, 2), "198.51.100.2");
     }
 
     #[test]
@@ -1155,10 +1177,10 @@ mod tests {
         let store = Arc::new(empty());
         let versions = Arc::new(Mutex::new(HashMap::new()));
         let rate = Arc::new(Mutex::new(HashMap::new()));
-        // Rate limit: 2 requests per window. trust_proxy: true.
+        // Rate limit: 2 requests per window. trusted_hops: 1.
         let mut cfg_val = Config::test_default("unused".into(), String::new());
         cfg_val.rate_limit = 2;
-        cfg_val.trust_proxy = true;
+        cfg_val.trusted_hops = 1;
         let cfg = Arc::new(cfg_val);
         let stopped = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let (s, st, v, r, c, sp) = (server.clone(), store.clone(), versions.clone(), rate.clone(), cfg.clone(), stopped.clone());
@@ -1273,7 +1295,7 @@ mod tests {
 
         let mut cfg_val = Config::test_default(p.clone(), String::new());
         cfg_val.ip_new_rooms_limit = 3; // Cap at 3 new rooms for an IP
-        cfg_val.trust_proxy = true;
+        cfg_val.trusted_hops = 1;
         let cfg = Arc::new(cfg_val);
 
         let stopped = Arc::new(std::sync::atomic::AtomicBool::new(false));
