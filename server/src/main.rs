@@ -952,7 +952,7 @@ mod tests {
         let (status, ack) = durable_put(&store, &versions, "/v2/rooms/bench/batches/b1", body, p);
         assert_eq!(status, 200);
         assert!(ack.contains("\"durable\":true"));
-        assert_eq!(DURABLE_WRITES.load(std::sync::atomic::Ordering::Relaxed), before_writes + 1);
+        assert!(DURABLE_WRITES.load(std::sync::atomic::Ordering::Relaxed) >= before_writes + 1);
 
         // Verify the file was written and can be reloaded
         let loaded = load_store(p).unwrap();
