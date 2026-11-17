@@ -10,7 +10,7 @@ import { toast } from '../utils/toast';
 const C_ACCENT = '#34d399';
 const C_NEUTRAL = '#3f3f46';
 const C_DANGER = '#f87171';
-const C_WARNING = '#fbbf24';
+const C_MID = '#85858b';
 const C_LABEL = '#a1a1aa';
 
 export function Analytics() {
@@ -33,7 +33,7 @@ export function Analytics() {
     try {
       setSummary(await summarizeBoard(currentTasks));
     } catch (e: any) {
-      toast(`⚠️ ${e.message || String(e)}`);
+      toast(`${e.message || String(e)}`);
     } finally {
       setSummaryBusy(null);
     }
@@ -44,7 +44,7 @@ export function Analytics() {
     try {
       setSummary(await weeklyReport(currentTasks, stats));
     } catch (e: any) {
-      toast(`⚠️ ${e.message || String(e)}`);
+      toast(`${e.message || String(e)}`);
     } finally {
       setSummaryBusy(null);
     }
@@ -55,7 +55,7 @@ export function Analytics() {
     try {
       setRisks(await assessDeadlineRisk(currentTasks, stats));
     } catch (e: any) {
-      toast(`⚠️ ${e.message || String(e)}`);
+      toast(`${e.message || String(e)}`);
     } finally {
       setRiskBusy(false);
     }
@@ -80,18 +80,21 @@ export function Analytics() {
     (async () => {
       const { default: Chart } = await import('chart.js/auto');
       if (disposed) return;
+      Chart.defaults.font.family = "'Geist Variable', system-ui, sans-serif";
+      Chart.defaults.font.size = 12;
 
       const barCtx = barRef.current?.getContext('2d');
       if (barCtx) {
         charts.push(new Chart(barCtx, {
           type: 'bar',
           data: {
-            labels: stats.weekData.map((d: any) => d.label).reverse(),
+            labels: stats.weekData.map((d: any) => d.label),
             datasets: [{
-              label: 'Completed Tasks',
-              data: stats.weekData.map((d: any) => d.count).reverse(),
-              backgroundColor: C_ACCENT,
-              borderRadius: 6,
+              label: 'Completed tasks',
+              data: stats.weekData.map((d: any) => d.count),
+              // today (last) carries the accent, earlier days stay neutral
+              backgroundColor: stats.weekData.map((_: any, i: number) => (i === stats.weekData.length - 1 ? C_ACCENT : C_NEUTRAL)),
+              borderRadius: 4,
               maxBarThickness: 26,
             }]
           },
@@ -101,7 +104,7 @@ export function Analytics() {
             plugins: { legend: { display: false } },
             scales: {
               x: { grid: { display: false }, ticks: { color: C_LABEL } },
-              y: { grid: { color: 'rgba(255,255,255,.06)' }, ticks: { color: C_LABEL, precision: 0 } as any },
+              y: { grid: { color: 'rgba(237,237,237,.08)' }, ticks: { color: C_LABEL, precision: 0 } as any },
             },
           }
         }));
@@ -136,7 +139,7 @@ export function Analytics() {
             labels: ['High', 'Medium', 'Low'],
             datasets: [{
               data: [stats.high, stats.medium, stats.low],
-              backgroundColor: [C_DANGER, C_WARNING, C_ACCENT],
+              backgroundColor: [C_DANGER, C_MID, C_NEUTRAL],
               borderWidth: 0,
             }]
           },
@@ -163,7 +166,7 @@ export function Analytics() {
       <header className="insights-header">
         <div className="insights-title">
           <h2>Insights</h2>
-          <p>A calm read on your momentum.</p>
+          <p>Last 7 days</p>
         </div>
         <div className="insights-actions">
           <button className="btn-soft" title="Export as CSV" onClick={exportCSV}>
@@ -193,12 +196,12 @@ export function Analytics() {
         </section>
 
         <section className="tile tile-figure">
-          <span className="figure-val" style={{ color: 'var(--accent)' }}>{stats?.done ?? 0}</span>
+          <span className="figure-val">{stats?.done ?? 0}</span>
           <span className="figure-lbl">Completed</span>
         </section>
 
         <section className="tile tile-figure">
-          <span className="figure-val">{stats?.streak ?? 0}<i className="fa-solid fa-fire figure-icon"></i></span>
+          <span className="figure-val">{stats?.streak ?? 0}</span>
           <span className="figure-lbl">Day streak</span>
         </section>
 
@@ -230,9 +233,9 @@ export function Analytics() {
             </button>
           </div>
           {risks === null ? (
-            <p className="tile-ai-text">AI checks your deadlines against recent velocity and flags what may slip.</p>
+            <p className="tile-ai-text">Compares your deadlines with recent pace and lists tasks that may slip</p>
           ) : risks.length === 0 ? (
-            <p className="tile-ai-text">Nothing flagged — your deadlines look achievable. ✨</p>
+            <p className="tile-ai-text">Nothing flagged — your deadlines look achievable.</p>
           ) : (
             <ul className="risk-list">
               {risks.map((r) => (
@@ -250,7 +253,7 @@ export function Analytics() {
 
         <section className="tile tile-ai">
           <div className="tile-ai-head">
-            <h3><i className="fa-solid fa-wand-magic-sparkles"></i> AI summary</h3>
+            <h3><i className="fa-solid fa-align-left"></i> AI summary</h3>
             <div className="tile-ai-actions">
               <button className="btn-ai" disabled={!!summaryBusy} onClick={handleSummarize}>
                 <i className={`fa-solid ${summaryBusy === 'standup' ? 'fa-spinner fa-spin' : 'fa-list-check'}`}></i>
@@ -263,7 +266,7 @@ export function Analytics() {
             </div>
           </div>
           <p className="tile-ai-text">
-            {summary || 'Generate a quick standup, or a fuller weekly report from your tasks and stats.'}
+            {summary || 'Generate a standup or a weekly report from your tasks'}
           </p>
         </section>
       </div>

@@ -79,7 +79,7 @@ export function TaskModal() {
     if (saving) return;
     setSaveError('');
     if (!title.trim()) {
-      toast('⚠️ Please enter a task title');
+      toast('Please enter a task title');
       return;
     }
 
@@ -101,11 +101,11 @@ export function TaskModal() {
     try {
       if (editingTask) {
         await editTask(editingTask.id, payload);
-        toast('✏️ Task updated');
+        toast('Task updated');
       } else {
         const task = await addTask(payload);
         if (!task) throw new Error('Task could not be saved. Your input has been preserved.');
-        toast('✅ Task created!');
+        toast('Task created!');
       }
       setTaskModalOpen(false);
     } catch (error) {
@@ -123,57 +123,57 @@ export function TaskModal() {
   });
 
   const handleImprove = async () => {
-    if (!title.trim()) { toast('⚠️ Add a title first'); return; }
+    if (!title.trim()) { toast('Add a title first'); return; }
     setAiBusy('improve');
     try {
       const text = await improveDescription(aiTask());
       setDescription(text);
-      toast('✨ Description improved');
+      toast('Description improved');
     } catch (e: any) {
-      toast(`⚠️ ${e.message || String(e)}`);
+      toast(`${e.message || String(e)}`);
     } finally {
       setAiBusy(null);
     }
   };
 
   const handleSubtasks = async () => {
-    if (!title.trim()) { toast('⚠️ Add a title first'); return; }
+    if (!title.trim()) { toast('Add a title first'); return; }
     setAiBusy('subtasks');
     try {
       const list = await breakIntoSubtasks(aiTask());
       setDescription(d => (d.trim() ? `${d.trim()}\n\n${list}` : list));
-      toast('✨ Subtasks added');
+      toast('Subtasks added');
     } catch (e: any) {
-      toast(`⚠️ ${e.message || String(e)}`);
+      toast(`${e.message || String(e)}`);
     } finally {
       setAiBusy(null);
     }
   };
 
   const handleSuggestTags = async () => {
-    if (!title.trim()) { toast('⚠️ Add a title first'); return; }
+    if (!title.trim()) { toast('Add a title first'); return; }
     setAiBusy('tags');
     try {
       const suggested = await suggestTags(aiTask());
       const existing = tags.split(',').map(t => t.trim()).filter(Boolean);
       const merged = Array.from(new Set([...existing, ...suggested]));
       setTags(merged.join(', '));
-      toast('✨ Tags suggested');
+      toast('Tags suggested');
     } catch (e: any) {
-      toast(`⚠️ ${e.message || String(e)}`);
+      toast(`${e.message || String(e)}`);
     } finally {
       setAiBusy(null);
     }
   };
 
   const handleSuggestPriority = async () => {
-    if (!title.trim()) { toast('⚠️ Add a title first'); return; }
+    if (!title.trim()) { toast('Add a title first'); return; }
     setAiBusy('priority');
     try {
       const suggestion = await suggestPriority(aiTask());
-      toast(`✨ ${suggestion}`);
+      toast(`${suggestion}`);
     } catch (e: any) {
-      toast(`⚠️ ${e.message || String(e)}`);
+      toast(`${e.message || String(e)}`);
     } finally {
       setAiBusy(null);
     }
@@ -210,7 +210,7 @@ export function TaskModal() {
               onChange={e => setTitle(e.target.value)}
               placeholder="What needs doing?"
               autoFocus
-              style={{ display: 'block', width: '100%', minHeight: '44px', fontSize: '1.15rem', fontWeight: 700, color: 'var(--text)', background: 'var(--bg-2)', border: '1px solid rgba(255,255,255,.18)', borderRadius: '9px', padding: '12px 14px', boxSizing: 'border-box', outline: 'none', WebkitAppearance: 'none', appearance: 'none' as any }}
+              style={{ display: 'block', width: '100%', minHeight: '44px', fontSize: '1.15rem', fontWeight: 500, color: 'var(--text)', background: 'var(--bg-2)', border: '1px solid rgba(255,255,255,.18)', borderRadius: '9px', padding: '12px 14px', boxSizing: 'border-box', outline: 'none', WebkitAppearance: 'none', appearance: 'none' as any }}
             />
           </div>
 
@@ -229,7 +229,7 @@ export function TaskModal() {
 
           <div className="ai-actions" style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
             <button type="button" className="btn-ai" disabled={!!aiBusy} onClick={handleImprove} style={{ padding: '8px 14px', borderRadius: '9px', fontSize: '.85rem' }}>
-              <i className={`fa-solid ${aiBusy === 'improve' ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'}`}></i>
+              <i className={`fa-solid ${aiBusy === 'improve' ? 'fa-spinner fa-spin' : 'fa-pen'}`}></i>
               {' '}Improve
             </button>
             <button type="button" className="btn-ai" disabled={!!aiBusy} onClick={handleSubtasks} style={{ padding: '8px 14px', borderRadius: '9px', fontSize: '.85rem' }}>
@@ -239,7 +239,7 @@ export function TaskModal() {
           </div>
 
           <div style={{ borderTop: '1px solid var(--border)', paddingTop: '12px' }}>
-            <div style={{ fontSize: '.68rem', letterSpacing: '.12em', textTransform: 'uppercase' as const, color: 'var(--text-d)', fontWeight: 600, padding: '4px 0 8px' }}>Properties</div>
+            <div style={{ fontSize: 12, color: 'var(--text-d)', fontWeight: 500, padding: '4px 0 8px' }}>Properties</div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '110px minmax(0, 1fr)', alignItems: 'center', gap: '12px', padding: '7px 0' }}>
               <label style={{ color: 'var(--text-m)', fontSize: '.83rem' }}><i className="fa-solid fa-calendar-day" style={{ marginRight: '8px', color: 'var(--text-d)' }}></i>Deadline</label>
@@ -264,7 +264,7 @@ export function TaskModal() {
                   style={{ flex: 1, padding: '9px 12px', fontSize: '.87rem', color: 'var(--text)', background: 'var(--bg-2)', border: '1px solid rgba(255,255,255,.18)', borderRadius: '9px', outline: 'none', boxSizing: 'border-box', WebkitAppearance: 'none', appearance: 'none' as any }}
                 />
                 <button type="button" className="btn-ai btn-ai-inline" disabled={!!aiBusy} onClick={handleSuggestTags} style={{ padding: '6px 10px', borderRadius: '8px', fontSize: '.8rem', flexShrink: 0 }}>
-                  <i className={`fa-solid ${aiBusy === 'tags' ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'}`}></i>
+                  <i className={`fa-solid ${aiBusy === 'tags' ? 'fa-spinner fa-spin' : 'fa-tags'}`}></i>
                   {' '}Suggest
                 </button>
               </div>
@@ -326,7 +326,7 @@ export function TaskModal() {
             <div style={{ padding: '7px 0' }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-m)', fontSize: '.83rem', marginBottom: '8px' }}>
                 <i className="fa-solid fa-star" style={{ color: 'var(--text-d)' }}></i>
-                Importance <span style={{ color: 'var(--accent)', fontFamily: 'monospace', fontSize: '.78rem', marginLeft: '6px' }}>{importance}</span>
+                Importance <span style={{ color: 'var(--accent)', fontFamily: 'monospace', fontSize: 12, marginLeft: '6px' }}>{importance}</span>
               </label>
               <input
                 type="range"
@@ -341,7 +341,7 @@ export function TaskModal() {
             <div style={{ padding: '7px 0' }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-m)', fontSize: '.83rem', marginBottom: '8px' }}>
                 <i className="fa-solid fa-gauge-high" style={{ color: 'var(--text-d)' }}></i>
-                Effort <span style={{ color: 'var(--accent)', fontFamily: 'monospace', fontSize: '.78rem', marginLeft: '6px' }}>{effort}</span>
+                Effort <span style={{ color: 'var(--accent)', fontFamily: 'monospace', fontSize: 12, marginLeft: '6px' }}>{effort}</span>
               </label>
               <input
                 type="range"
@@ -361,7 +361,7 @@ export function TaskModal() {
                 </strong>
                 <span style={{ fontSize: '.7rem', color: 'var(--text-d)' }}>computed</span>
                 <button type="button" className="btn-ai btn-ai-inline" disabled={!!aiBusy} onClick={handleSuggestPriority} style={{ marginLeft: 'auto', padding: '6px 10px', borderRadius: '8px', fontSize: '.8rem' }}>
-                  <i className={`fa-solid ${aiBusy === 'priority' ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'}`}></i>
+                  <i className={`fa-solid ${aiBusy === 'priority' ? 'fa-spinner fa-spin' : 'fa-gauge'}`}></i>
                   {' '}Suggest
                 </button>
               </div>
@@ -373,7 +373,7 @@ export function TaskModal() {
           )}
 
           {editingTask && (
-            <p style={{ fontSize: '.74rem', color: 'var(--text-d)', paddingTop: '4px' }}>
+            <p style={{ fontSize: 12, color: 'var(--text-d)', paddingTop: '4px' }}>
               Created {new Date(editingTask.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
               {editingTask.pomodoros_spent > 0 && ` · ${editingTask.pomodoros_spent} pomodoros`}
             </p>

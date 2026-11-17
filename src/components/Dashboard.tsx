@@ -7,9 +7,6 @@ import { fmtDate, isOverdue } from '../utils/format';
 import { toast } from '../utils/toast';
 
 const WORK = 25 * 60;
-const ARC_LEN = 267.04; // π·r, r = 85
-
-const AVA = ['#16794f', '#0e7490', '#0f766e', '#b45309', '#be123c', '#4d7c0f'];
 
 function initials(s: string) {
   const parts = s.trim().split(/\s+/);
@@ -59,7 +56,6 @@ export function Dashboard() {
   const inProgress = tasks.filter((t) => !t.done && t.pomodoros_spent > 0).length;
   const pending = active - inProgress;
   const pct = total ? Math.round((done / total) * 100) : 0;
-  const projects = new Set(tasks.flatMap((t) => t.tags || [])).size;
   const weekDone: number = stats?.weekData?.reduce((n: number, d: any) => n + d.count, 0) ?? 0;
 
   const open = tasks.filter((t) => !t.done);
@@ -72,144 +68,131 @@ export function Dashboard() {
     .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
     .slice(0, 4);
 
-  // Week chart
+  // Week chart: today is the last bar and the only one that carries the accent
   const week = stats?.weekData ?? [];
   const maxCount = Math.max(1, ...week.map((d: any) => d.count));
-  const peakIdx = week.reduce((mi: number, d: any, i: number) => (d.count > week[mi].count ? i : mi), 0);
+  const todayIdx = week.length - 1;
 
   const fmt = (s: number) =>
     `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 
   const startFocus = (t?: Task) => {
-    if (!t) { toast('No upcoming reminders'); return; }
+    if (!t) { toast('No upcoming deadlines'); return; }
     useStore.setState({ pomoTaskId: t.id } as any);
     trackerToggle();
-    toast(`⏱ Focusing on “${t.title}”`);
+    toast(`Focusing on “${t.title}”`);
   };
 
   const statusOf = (t: Task) =>
-    t.done ? { l: 'Completed', c: 'ok' } : t.pomodoros_spent > 0 ? { l: 'In Progress', c: 'wip' } : { l: 'Pending', c: 'wait' };
+    t.done ? { l: 'Completed', c: 'ok' } : t.pomodoros_spent > 0 ? { l: 'In progress', c: 'wip' } : { l: 'Pending', c: 'wait' };
 
   const cards = [
-    { k: 'total', label: 'Total Tasks', val: total, cap: `Across ${projects} project${projects === 1 ? '' : 's'}`, feat: true },
-    { k: 'done', label: 'Completed', val: done, cap: `${pct}% completion rate` },
-    { k: 'active', label: 'In Progress', val: active, cap: `${stats?.todayCount ?? 0} due today` },
-    { k: 'flag', label: 'Flagged', val: flagged, cap: 'High priority' },
+    { k: 'total', label: 'Total tasks', val: total, cap: `${active} open` },
+    { k: 'done', label: 'Completed', val: done, cap: `${pct}% of all tasks` },
+    { k: 'active', label: 'In progress', val: inProgress, cap: `${stats?.todayCount ?? 0} due today` },
+    { k: 'flag', label: 'Flagged', val: flagged, cap: 'High priority, open' },
   ];
+  const dateStr = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+  const share = (n: number) => `${total ? (n / total) * 100 : 0}%`;
 
   return (
     <div className="dash">
       <header className="dash-head">
         <div>
           <h1 className="dash-title">Dashboard</h1>
-          <p className="dash-sub">Plan, prioritize, and accomplish your tasks with ease.</p>
+          <p className="dash-sub">{dateStr}</p>
         </div>
         <div className="dash-head-actions">
+          <button className="btn-ghost" onClick={() => setAnalyticsOpen(true)}>
+            <i className="fa-solid fa-chart-simple"></i> Insights
+          </button>
           <button className="btn-primary" onClick={() => setTaskModalOpen(true)}>
             <i className="fa-solid fa-plus"></i> New task
-          </button>
-          <button className="btn-ghost-pill" onClick={() => setAnalyticsOpen(true)}>
-            <i className="fa-solid fa-chart-simple"></i> Insights
           </button>
         </div>
       </header>
 
       <div className="dash-grid">
-        {/* ── Stat cards ─────────────────────────────── */}
+        {/* Stat cards: a label, a figure, what it compares to */}
         {cards.map((c) => (
           <button
             key={c.k}
-            className={`stat-card ${c.feat ? 'feat' : ''}`}
-            onClick={() => setFilter(c.k === 'flag' ? 'high' : c.k === 'active' ? 'all' : 'all')}
+            className="stat-card"
+            onClick={() => setFilter(c.k === 'flag' ? 'high' : 'all')}
           >
-            <div className="stat-top">
-              <span className="stat-label">{c.label}</span>
-              <span className="stat-arrow"><i className="fa-solid fa-arrow-up-right-from-square"></i></span>
-            </div>
-            <div className="stat-num">{c.val}</div>
-            <div className="stat-cap"><i className="fa-solid fa-arrow-trend-up"></i> {c.cap}</div>
+            <span className="stat-label">{c.label}</span>
+            <span className="stat-num">{c.val}</span>
+            <span className="stat-cap">{c.cap}</span>
           </button>
         ))}
 
-        {/* ── Project Analytics ──────────────────────── */}
+        {/* Main chart */}
         <section className="panel panel-analytics">
           <div className="panel-hd">
-            <h3>Task Analytics</h3>
-            <span className="panel-meta">This week</span>
+            <h3>Completed this week</h3>
+            <span className="panel-meta">{weekDone} task{weekDone === 1 ? '' : 's'}</span>
           </div>
           <div className="bars">
             {week.map((d: any, i: number) => (
               <div className="bar-col" key={i}>
-                {i === peakIdx && maxCount > 0 && (
-                  <span className="bar-badge">{Math.round((d.count / Math.max(1, weekDone)) * 100)}%</span>
-                )}
+                <span className={`bar-val ${i === todayIdx ? 'is-today' : ''}`}>{d.count}</span>
                 <div className="bar-track">
                   <div
-                    className={`bar-fill ${i === peakIdx ? 'peak' : ''} ${d.count === 0 ? 'empty' : ''}`}
-                    style={{ height: `${Math.max(8, (d.count / maxCount) * 100)}%` }}
+                    className={`bar-fill ${i === todayIdx ? 'peak' : ''} ${d.count === 0 ? 'empty' : ''}`}
+                    style={{ height: `${Math.max(2, (d.count / maxCount) * 100)}%` }}
                   ></div>
                 </div>
-                <span className="bar-lbl">{(d.label || '')[0]}</span>
+                <span className={`bar-lbl ${i === todayIdx ? 'is-today' : ''}`}>{(d.label || '')[0]}</span>
               </div>
             ))}
           </div>
         </section>
 
-        {/* ── Reminders ──────────────────────────────── */}
+        {/* Next deadline */}
         <section className="panel panel-reminder">
-          <div className="panel-hd"><h3>Reminders</h3></div>
+          <div className="panel-hd"><h3>Next deadline</h3></div>
           {reminder ? (
             <>
               <p className="rem-title">{reminder.title}</p>
               <p className="rem-time">
-                <i className="fa-regular fa-clock"></i>
-                {isOverdue(reminder.deadline) ? 'Overdue · ' : 'Due '}{fmtDate(reminder.deadline)}
+                {isOverdue(reminder.deadline) ? 'Overdue since ' : 'Due '}{fmtDate(reminder.deadline)}
               </p>
               <button className="btn-focus" onClick={() => startFocus(reminder)}>
-                <i className="fa-solid fa-play"></i> Start Focus
+                <i className="fa-solid fa-play"></i> Start focus
               </button>
             </>
           ) : (
-            <p className="rem-empty">No upcoming deadlines. You're clear. ✨</p>
+            <p className="rem-empty">No upcoming deadlines</p>
           )}
         </section>
 
-        {/* ── Project / task list ────────────────────── */}
+        {/* Ranked list */}
         <section className="panel panel-projects">
-          <div className="panel-hd">
-            <h3>Tasks</h3>
-            <button className="pill-new" onClick={() => setTaskModalOpen(true)}>+ New task</button>
-          </div>
+          <div className="panel-hd"><h3>Up next</h3></div>
           <ul className="proj-list">
-            {projectList.length === 0 && <li className="proj-empty">No active tasks.</li>}
-            {projectList.map((t, i) => (
+            {projectList.length === 0 && <li className="proj-empty">No open tasks</li>}
+            {projectList.map((t) => (
               <li key={t.id} className="proj-row" onClick={() => setTaskModalOpen(true, t)}>
-                <span className="proj-ico" style={{ background: AVA[i % AVA.length] }}>
-                  <i className="fa-solid fa-diagram-project"></i>
-                </span>
+                <span className={`proj-dot ${t.priority}`}></span>
                 <div className="proj-info">
                   <span className="proj-name">{t.title}</span>
                   <span className="proj-date">{t.deadline ? `Due ${fmtDate(t.deadline)}` : 'No deadline'}</span>
                 </div>
-                <span className={`proj-dot ${t.priority}`}></span>
               </li>
             ))}
           </ul>
         </section>
 
-        {/* ── Recent activity (Team Collaboration slot) ─ */}
+        {/* Recent activity */}
         <section className="panel panel-activity">
-          <div className="panel-hd">
-            <h3>Recent Activity</h3>
-            <button className="pill-new" onClick={() => setTaskModalOpen(true)}>+ New task</button>
-          </div>
+          <div className="panel-hd"><h3>Recently added</h3></div>
           <ul className="act-list">
-            {recent.length === 0 && <li className="proj-empty">Nothing here yet.</li>}
-            {recent.map((t, i) => {
+            {recent.length === 0 && <li className="proj-empty">Nothing here yet</li>}
+            {recent.map((t) => {
               const st = statusOf(t);
               return (
                 <li key={t.id} className="act-row" onClick={() => setTaskModalOpen(true, t)}>
-                  <span className="act-ava" style={{ background: AVA[i % AVA.length] }}>{initials(t.title)}</span>
+                  <span className="act-ava">{initials(t.title)}</span>
                   <div className="act-info">
                     <span className="act-name">{t.title}</span>
                     <span className="act-sub">{(t.tags?.[0] && `#${t.tags[0]}`) || `${t.priority} priority`}</span>
@@ -221,44 +204,37 @@ export function Dashboard() {
           </ul>
         </section>
 
-        {/* ── Project Progress gauge ─────────────────── */}
+        {/* Share of tasks by state: one stacked bar */}
         <section className="panel panel-progress">
-          <div className="panel-hd"><h3>Task Progress</h3></div>
-          <div className="gauge-wrap">
-            <svg viewBox="0 0 220 132" className="gauge">
-              <path className="g-track" d="M 25 115 A 85 85 0 0 1 195 115" />
-              <path
-                className="g-val"
-                d="M 25 115 A 85 85 0 0 1 195 115"
-                strokeDasharray={`${ARC_LEN} ${ARC_LEN}`}
-                style={{ strokeDashoffset: ARC_LEN * (1 - pct / 100) }}
-              />
-            </svg>
-            <div className="gauge-center">
-              <span className="gauge-pct">{pct}%</span>
-              <span className="gauge-lbl">Tasks Done</span>
-            </div>
+          <div className="panel-hd">
+            <h3>Progress</h3>
+            <span className="panel-meta">{pct}% done</span>
           </div>
-          <div className="gauge-legend">
-            <span><i className="dot ok"></i> Completed {done}</span>
-            <span><i className="dot wip"></i> In Progress {inProgress}</span>
-            <span><i className="dot wait"></i> Pending {pending}</span>
+          <div className="stack" role="img" aria-label={`${done} completed, ${inProgress} in progress, ${pending} pending`}>
+            <span className="stack-seg ok" style={{ width: share(done) }}></span>
+            <span className="stack-seg wip" style={{ width: share(inProgress) }}></span>
+            <span className="stack-seg wait" style={{ width: share(pending) }}></span>
           </div>
+          <ul className="stack-legend">
+            <li><i className="dot ok"></i>Completed<b>{done}</b></li>
+            <li><i className="dot wip"></i>In progress<b>{inProgress}</b></li>
+            <li><i className="dot wait"></i>Pending<b>{pending}</b></li>
+          </ul>
         </section>
 
-        {/* ── Time Tracker ───────────────────────────── */}
+        {/* Timer */}
         <section className={`panel panel-tracker ${running ? 'live' : ''}`}>
           <div className="tracker-hd">
-            <span><i className="fa-regular fa-clock"></i> {mode === 'break' ? 'On Break' : 'Time Tracker'}</span>
-            {running && <span className="live-dot">● Live</span>}
+            <span>{mode === 'break' ? 'Break' : 'Focus timer'}</span>
+            {running && <span className="live-dot"><i></i>Running</span>}
           </div>
           <div className="tracker-time">{fmt(timeLeft)}</div>
           <div className="tracker-ctrls">
-            <button className="trk-btn" onClick={trackerToggle} title="Play / Pause">
+            <button className="trk-btn" onClick={trackerToggle} title="Play / Pause" aria-label={running ? 'Pause' : 'Start'}>
               <i className={`fa-solid ${running ? 'fa-pause' : 'fa-play'}`}></i>
             </button>
-            <button className="trk-btn stop" onClick={trackerStop} title="Stop">
-              <i className="fa-solid fa-stop"></i>
+            <button className="trk-btn stop" onClick={trackerStop} title="Reset" aria-label="Reset">
+              <i className="fa-solid fa-rotate-left"></i>
             </button>
           </div>
         </section>

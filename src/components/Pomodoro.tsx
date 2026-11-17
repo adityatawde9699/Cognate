@@ -38,7 +38,7 @@ export function Pomodoro() {
         const id = useStore.getState() && (useStore.getState() as any).pomoTaskId;
         if (id) import('../services/taskService').then(({ addPomodoroToTask }) => addPomodoroToTask(id));
         import('../utils/notify').then(({ notify }) =>
-          notify('Focus session complete', 'Time for a break — nice work. 🌿')
+          notify('Focus session complete', 'Time for a break — nice work.')
         );
       });
     };
@@ -92,7 +92,7 @@ export function Pomodoro() {
 
       <div className="pomo-meta">
         <p className="pomo-task-name" title={task?.title || 'Select a task to focus'}>
-          {mode === 'break' ? '☕ Break' : task?.title || 'Select a task'}
+          {mode === 'break' ? 'Break' : task?.title || 'Select a task'}
         </p>
         <div className="pomo-row">
           <div className="pomo-controls">

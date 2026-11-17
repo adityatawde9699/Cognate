@@ -21,7 +21,7 @@ import { UpdatesSection } from '../Settings/UpdatesSection';
 import { DiagnosticsSection } from '../Settings/DiagnosticsSection';
 import { SharedProjects } from '../SharedProjects';
 
-/** "09:00" ⇄ minutes-since-midnight, for the work-hours inputs. */
+/** "09:00"minutes-since-midnight, for the work-hours inputs. */
 function timeToMin(s: string): number {
   const m = /^(\d{1,2}):(\d{2})$/.exec(s.trim());
   return m ? Number(m[1]) * 60 + Number(m[2]) : 0;
@@ -211,7 +211,7 @@ export function SettingsModal() {
       await setCalendarUrl(calUrl);
       const n = await syncCalendarUrl(calUrl);
       setCalMsg(`Imported ${n} busy event${n === 1 ? '' : 's'}.`);
-      toast(`📅 Calendar synced — ${n} event${n === 1 ? '' : 's'}`);
+      toast(`Calendar synced — ${n} event${n === 1 ? '' : 's'}`);
     } catch (err: any) {
       setCalMsg(err?.message || 'Sync failed.');
     } finally {
@@ -223,7 +223,7 @@ export function SettingsModal() {
     try {
       const n = await importBusyText(text);
       setCalMsg(`Imported ${n} busy event${n === 1 ? '' : 's'} from file.`);
-      toast(n ? `📅 Imported ${n} busy event${n === 1 ? '' : 's'}` : 'No timed events in that file');
+      toast(n ? `Imported ${n} busy event${n === 1 ? '' : 's'}` : 'No timed events in that file');
     } catch (err: any) {
       setCalMsg(err?.message || 'Import failed.');
     }
@@ -276,7 +276,7 @@ export function SettingsModal() {
       const json = await exportBundle();
       downloadStr(json, `cognate-sync-${Date.now()}.json`, 'application/json');
       setSyncMsg('Bundle exported. Import it on another device to converge.');
-      toast('🔀 Sync bundle exported');
+      toast('Sync bundle exported');
     } catch (err: any) {
       setSyncMsg(err?.message || 'Export failed.');
     } finally {
@@ -289,7 +289,7 @@ export function SettingsModal() {
     try {
       const r = await importBundle(text);
       setSyncMsg(`Merged ${r.applied} ops · ${r.upserts} task${r.upserts === 1 ? '' : 's'} updated, ${r.deletes} removed.`);
-      toast(`🔀 Synced — ${r.upserts} updated, ${r.deletes} removed`);
+      toast(`Synced — ${r.upserts} updated, ${r.deletes} removed`);
     } catch (err: any) {
       setSyncMsg(err?.message || 'Import failed.');
     } finally {
@@ -300,17 +300,17 @@ export function SettingsModal() {
   const exportCalendar = async () => {
     const tasks = await getAllTasks('all');
     const n = exportIcs(tasks as any);
-    toast(`📅 Exported ${n} event${n === 1 ? '' : 's'} (.ics)`);
+    toast(`Exported ${n} event${n === 1 ? '' : 's'} (.ics)`);
   };
   const importCalendar = () => pickFile('.ics,text/calendar', async (text) => {
     const n = await importIcsText(text);
-    toast(n ? `📅 Imported ${n} event${n === 1 ? '' : 's'}` : 'No events found in that file');
+    toast(n ? `Imported ${n} event${n === 1 ? '' : 's'}` : 'No events found in that file');
   });
   const importData = () => pickFile('.json,.csv', async (text, name) => {
     const drafts = parseImport(name, text);
     if (!drafts.length) { toast('No tasks found in that file'); return; }
     const n = await importTasks(drafts);
-    toast(`📥 Imported ${n} task${n === 1 ? '' : 's'}`);
+    toast(`Imported ${n} task${n === 1 ? '' : 's'}`);
   });
 
   const startOAuth = async (provider: string) => {
@@ -466,7 +466,7 @@ export function SettingsModal() {
             <button className="btn-soft" onClick={async () => {
               const p = await enablePrivateAi();
               setAiProvider(p.provider); setAiBaseUrl(p.baseUrl); setAiModel(p.model);
-              toast('🔒 Private mode — AI now runs locally');
+              toast('Private mode — AI now runs locally');
             }}>
               <i className="fa-solid fa-shield-halved"></i> Go fully private (Ollama)
             </button>

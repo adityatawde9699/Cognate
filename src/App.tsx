@@ -40,26 +40,18 @@ import { useAutoShareSync } from './hooks/useAutoShareSync';
 import { useMorningBrief } from './hooks/useMorningBrief';
 
 const VIEW_META: Record<string, { title: string; sub: string }> = {
-  all: { title: 'Inbox', sub: 'Everything on your plate, in one place.' },
-  today: { title: 'Today', sub: 'Due before the day is out.' },
-  week: { title: 'This Week', sub: 'Landing in the next seven days.' },
-  high: { title: 'Flagged', sub: 'High-priority work that needs you first.' },
+  all: { title: 'Inbox', sub: 'All open and completed tasks' },
+  today: { title: 'Today', sub: 'Due before the day ends' },
+  week: { title: 'This week', sub: 'Due in the next seven days' },
+  high: { title: 'Flagged', sub: 'High priority, open' },
 };
 
 function viewMeta(filter: string) {
   if (filter.startsWith('tag:')) {
     const tag = filter.slice(4);
-    return { title: `#${tag}`, sub: `Tasks tagged ${tag}.` };
+    return { title: `#${tag}`, sub: `Tasks tagged ${tag}` };
   }
   return VIEW_META[filter] ?? VIEW_META.all;
-}
-
-function greeting() {
-  const h = new Date().getHours();
-  if (h < 5) return 'Burning the midnight oil';
-  if (h < 12) return 'Good morning';
-  if (h < 18) return 'Good afternoon';
-  return 'Good evening';
 }
 
 function App() {
@@ -128,10 +120,7 @@ function App() {
           <>
           <header className="canvas-header">
             <div className="canvas-heading">
-              <div className="canvas-eyebrow">
-                <i className="fa-regular fa-sun"></i>
-                {greeting()} · {dateStr}
-              </div>
+              <div className="canvas-eyebrow">{dateStr}</div>
               <h1 className="canvas-title">{meta.title}</h1>
               <p className="canvas-sub">{meta.sub}</p>
             </div>
@@ -170,7 +159,7 @@ function App() {
                 <span className="l">Active</span>
               </div>
               <div className="deck-stat">
-                <span className="v" style={{ color: 'var(--accent)' }}>{done}</span>
+                <span className="v">{done}</span>
                 <span className="l">Completed</span>
               </div>
               <div className="deck-stat">

@@ -34,7 +34,7 @@ export async function notifyTaskComplete(task: Task): Promise<void> {
   if (!IS_TAURI) return;
   const enabled = await getSetting('webhook_on_complete', '0');
   if (enabled !== '1') return;
-  await broadcast(`✅ Completed: ${task.title}`);
+  await broadcast(`Completed: ${task.title}`);
 }
 
 function todayStr(): string {
@@ -51,7 +51,7 @@ export async function notifyDeadlineWebhook(task: Task): Promise<void> {
   if (localStorage.getItem(key)) return;
   localStorage.setItem(key, '1');
   const overdue = task.deadline < day;
-  await broadcast(`${overdue ? '⚠️ Overdue' : '⏰ Due today'}: ${task.title}`);
+  await broadcast(`${overdue ? 'Overdue' : 'Due today'}: ${task.title}`);
 }
 
 /** Post a once-per-day digest of the board, if enabled. */
@@ -68,7 +68,7 @@ export async function sendDailyDigest(tasks: Task[]): Promise<void> {
   const flagged = open.filter((t) => t.priority === 'high');
 
   const lines = [
-    `🗓️ *Cognate daily digest — ${day}*`,
+    `*Cognate daily digest — ${day}*`,
     `• ${open.length} open · ${dueToday.length} due today · ${overdue.length} overdue · ${flagged.length} flagged`,
   ];
   if (dueToday.length) lines.push('', 'Due today:', ...dueToday.slice(0, 8).map((t) => `  – ${t.title}`));

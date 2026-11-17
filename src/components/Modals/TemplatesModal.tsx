@@ -26,12 +26,12 @@ export function TemplatesModal() {
   const close = () => setMode(null);
 
   const handleSave = async () => {
-    if (!name.trim()) { toast('⚠️ Name your template'); return; }
+    if (!name.trim()) { toast('Name your template'); return; }
     if (saveTasks.length === 0) { toast('No tasks here to save'); return; }
     setBusy(true);
     try {
       await saveTemplate(name.trim(), saveTasks);
-      toast(`✅ Saved template “${name.trim()}”`);
+      toast(`Saved template “${name.trim()}”`);
       close();
     } finally { setBusy(false); }
   };
@@ -40,7 +40,7 @@ export function TemplatesModal() {
     setBusy(true);
     try {
       const n = await applyTemplate(tpl, applyProject || null);
-      toast(`✅ Added ${n} task${n === 1 ? '' : 's'} from “${tpl.name}”`);
+      toast(`Added ${n} task${n === 1 ? '' : 's'} from “${tpl.name}”`);
       close();
     } finally { setBusy(false); }
   };

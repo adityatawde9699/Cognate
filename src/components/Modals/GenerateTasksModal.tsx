@@ -38,7 +38,7 @@ export function GenerateTasksModal() {
   };
 
   const handleGenerate = async () => {
-    if (!desc.trim()) { toast('⚠️ Describe a project first'); return; }
+    if (!desc.trim()) { toast('Describe a project first'); return; }
     setBusy(true);
     try {
       if (!projectName.trim()) setProjectName(detectProjectName(desc.trim()));
@@ -47,7 +47,7 @@ export function GenerateTasksModal() {
       setDrafts(result);
       setPicked(result.map(() => true));
     } catch (e: any) {
-      toast(`⚠️ ${e.message || String(e)}`);
+      toast(`${e.message || String(e)}`);
     } finally {
       setBusy(false);
     }
@@ -56,7 +56,7 @@ export function GenerateTasksModal() {
   const handleCreate = async () => {
     const chosen = drafts.filter((_, i) => picked[i]);
     if (chosen.length === 0) { toast('Select at least one task'); return; }
-    if (!projectName.trim()) { toast('⚠️ Add a project name before creating tasks'); return; }
+    if (!projectName.trim()) { toast('Add a project name before creating tasks'); return; }
     setCreating(true);
     try {
       const projectId = await ensureProject(projectName);
@@ -72,10 +72,10 @@ export function GenerateTasksModal() {
           project_id: projectId,
         });
       }
-      toast(`✅ Added ${chosen.length} task${chosen.length === 1 ? '' : 's'}`);
+      toast(`Added ${chosen.length} task${chosen.length === 1 ? '' : 's'}`);
       close();
     } catch (e: any) {
-      toast(`⚠️ ${e.message || String(e)}`);
+      toast(`${e.message || String(e)}`);
     } finally {
       setCreating(false);
     }
@@ -118,7 +118,7 @@ export function GenerateTasksModal() {
             autoFocus
           />
           <button className="btn-ai gen-run" disabled={busy} onClick={handleGenerate}>
-            <i className={`fa-solid ${busy ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'}`}></i>
+            <i className={`fa-solid ${busy ? 'fa-spinner fa-spin' : 'fa-list-check'}`}></i>
             {drafts.length ? 'Regenerate' : 'Generate breakdown'}
           </button>
 

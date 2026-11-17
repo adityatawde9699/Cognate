@@ -62,7 +62,7 @@ export function CalendarAccount() {
       setAuthUrl(''); setCode('');
       const n = await syncFreeBusy(7);
       setMsg(`Connected — imported ${n} busy block${n === 1 ? '' : 's'} for the next 7 days.`);
-      toast('📅 Calendar connected');
+      toast('Calendar connected');
     } catch (e: any) {
       setMsg(e?.message || 'Could not complete sign-in.');
     } finally { setBusy(false); }
@@ -73,7 +73,7 @@ export function CalendarAccount() {
     try {
       const n = await syncFreeBusy(7);
       setMsg(`Refreshed — ${n} busy block${n === 1 ? '' : 's'} for the next 7 days.`);
-      toast('📅 Free/busy synced');
+      toast('Free/busy synced');
     } catch (e: any) {
       setMsg(e?.message || 'Sync failed.');
     } finally { setBusy(false); }
@@ -119,7 +119,7 @@ export function CalendarAccount() {
             <div style={{ marginTop: '8px' }}>
               <button className="btn-ghost" onClick={cancel}>Cancel sign-in</button>
               <a href={authUrl} target="_blank" rel="noreferrer" className="form-hint" style={{ color: 'var(--accent)', wordBreak: 'break-all' }}>
-                Open the consent page ↗
+                Open the consent page
               </a>
               <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
                 <input

@@ -249,7 +249,7 @@ function rowToTask(r) {
     };
 }
 
-// ── Seed data (Cognote starter tasks) ─────────────────────────────
+// ── Seed data (development sample tasks) ─────────────────────────────
 const today = getLocalDateString();
 const tomorrow = getLocalDateString(new Date(Date.now() + 86_400_000));
 const in3days = getLocalDateString(new Date(Date.now() + 3 * 86_400_000));
@@ -257,12 +257,12 @@ const in7days = getLocalDateString(new Date(Date.now() + 7 * 86_400_000));
 const in10days = getLocalDateString(new Date(Date.now() + 10 * 86_400_000));
 
 const SEED_TASKS = [
-    { title: '📝 Design Cognote landing page', description: 'Create a vibrant, conversion-focused landing page for the Cognote product launch.', tags: ['design', 'marketing'], deadline: today, importance: 5, effort: 2, pomodorosSpent: 2 },
-    { title: '🐛 Fix banana-peel memory leak', description: 'Profiler shows uncleaned iterators in BananaStream. Patch and benchmark.', tags: ['bug', 'perf'], deadline: tomorrow, importance: 5, effort: 4, pomodorosSpent: 3 },
-    { title: '📦 Publish cognote v0.1 to crates.io', description: 'Package, tag, and publish the first public release of Cognote.', tags: ['devops', 'release'], deadline: in3days, importance: 5, effort: 2, pomodorosSpent: 1 },
-    { title: '🧪 Write unit tests for Banana API', description: 'Cover all /banana/* endpoints with pytest. Aim for >90% coverage.', tags: ['backend', 'testing'], deadline: in7days, importance: 4, effort: 3, pomodorosSpent: 0 },
-    { title: '📝 Write README and API docs', description: 'Document installation, quick-start, and full API reference.', tags: ['docs'], deadline: in10days, importance: 3, effort: 2, pomodorosSpent: 0 },
-    { title: '✅ Set up CI/CD pipeline', description: 'GitHub Actions: lint → test → auto-publish on version tag.', tags: ['devops'], deadline: in3days, importance: 3, effort: 3, pomodorosSpent: 4, done: true },
+    { title: 'Draft Q4 planning brief', description: 'Outline goals, owners and open risks for the Q4 planning review.', tags: ['planning', 'writing'], deadline: today, importance: 5, effort: 3, pomodorosSpent: 2 },
+    { title: 'Review pull request for sync relay', description: 'Check claim-age handling and the 410 data-preservation path before merge.', tags: ['review', 'relay'], deadline: tomorrow, importance: 5, effort: 2, pomodorosSpent: 1 },
+    { title: 'Prepare release notes for v3.1', description: 'Summarise migration backup, relay changes and known limits.', tags: ['release', 'docs'], deadline: in3days, importance: 4, effort: 2, pomodorosSpent: 1 },
+    { title: 'Book dentist appointment', description: 'Call before 5 pm. Prefer a morning slot next week.', tags: ['personal'], deadline: in7days, importance: 2, effort: 1, pomodorosSpent: 0 },
+    { title: 'Update onboarding checklist', description: 'Fold in the new offline-storage notice and calendar import step.', tags: ['docs'], deadline: in10days, importance: 3, effort: 2, pomodorosSpent: 0 },
+    { title: 'Back up project archive', description: 'Export a verified copy to external storage.', tags: ['maintenance'], deadline: in3days, importance: 3, effort: 1, pomodorosSpent: 3, done: true },
 ];
 
 async function isSeedNeeded() {

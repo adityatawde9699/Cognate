@@ -18,9 +18,9 @@ export async function exportJSON() {
     const tasks = await getAllTasks('all');
     const json = JSON.stringify(tasks, null, 2);
     downloadStr(json, 'cognote-export.json', 'application/json');
-    toast('⬇ JSON Exported');
+    toast('JSON Exported');
   } catch (err) {
-    toast('⚠️ Export failed');
+    toast('Export failed');
     console.error(err);
   }
 }
@@ -28,7 +28,7 @@ export async function exportJSON() {
 export async function exportCSV() {
   try {
     const tasks = await getAllTasks('all');
-    if (!tasks.length) return toast('⚠️ No tasks to export');
+    if (!tasks.length) return toast('No tasks to export');
 
     const headers = ['id', 'title', 'deadline', 'priority', 'done', 'pomodoros_spent', 'tags'];
     const csv = [
@@ -45,9 +45,9 @@ export async function exportCSV() {
     ].join('\n');
 
     downloadStr(csv, 'cognote-export.csv', 'text/csv');
-    toast('⬇ CSV Exported');
+    toast('CSV Exported');
   } catch (err) {
-    toast('⚠️ Export failed');
+    toast('Export failed');
     console.error(err);
   }
 }

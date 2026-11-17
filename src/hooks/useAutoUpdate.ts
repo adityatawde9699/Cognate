@@ -14,7 +14,7 @@ export function useAutoUpdate() {
     (async () => {
       const update = await checkForUpdate();
       if (!cancelled && update) {
-        toast(`⬆️ Update ${update.version} available — install in Settings.`);
+        toast(`Update ${update.version} available — install in Settings.`);
       }
     })();
     return () => {

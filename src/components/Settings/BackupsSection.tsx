@@ -29,7 +29,7 @@ export function BackupsSection() {
     try {
       await createBackup('manual');
       await refresh();
-      toast('💾 Backup created');
+      toast('Backup created');
     } catch (e: any) {
       toast(`Backup failed: ${e?.message || e}`);
     } finally {

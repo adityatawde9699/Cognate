@@ -53,7 +53,7 @@ export function FocusMode() {
 
       <div className="focus-inner">
         <span className="focus-kicker">{mode === 'break' ? 'On a break' : 'Focusing on'}</span>
-        <h1 className="focus-task">{mode === 'break' ? 'Take a breather ☕' : task?.title || 'No task selected'}</h1>
+        <h1 className="focus-task">{mode === 'break' ? 'Take a breather' : task?.title || 'No task selected'}</h1>
 
         <div className="focus-ring-wrap">
           <svg viewBox="0 0 220 220" className="focus-ring">

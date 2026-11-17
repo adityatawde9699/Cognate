@@ -68,9 +68,9 @@ export function SharedProjects() {
     try {
       const token = await inviteFor(id);
       await navigator.clipboard.writeText(token);
-      toast('🔗 Invite copied — share it over a secure channel');
+      toast('Invite copied — share it over a secure channel');
     } catch {
-      toast('⚠️ Could not copy the invite');
+      toast('Could not copy the invite');
     }
   };
 
@@ -84,7 +84,7 @@ export function SharedProjects() {
       setNewName('');
       await refresh();
       setMsg('Share created — invite copied to your clipboard. Send it to a teammate securely.');
-      toast('👥 Project shared');
+      toast('Project shared');
     } catch (e: any) {
       setMsg(e?.message || 'Could not create the share.');
     } finally { setBusy(false); }
@@ -102,7 +102,7 @@ export function SharedProjects() {
       await refresh();
       await loadAllTasks('all');
       setMsg(`Joined "${share.name}" — pulled ${res.upserts} task${res.upserts === 1 ? '' : 's'}. You're a ${res.myRole}.`);
-      toast('👥 Joined shared project');
+      toast('Joined shared project');
     } catch (e: any) {
       setMsg(e?.message || 'Could not join — is the invite token valid?');
     } finally { setBusy(false); }
@@ -177,7 +177,7 @@ export function SharedProjects() {
       await refresh();
       await loadAllTasks('all');
       setMsg(`Applied ${plan.assignments.length} assignment${plan.assignments.length === 1 ? '' : 's'}.`);
-      toast('🤝 Workload balanced');
+      toast('Workload balanced');
     } catch (e: any) {
       setMsg(e?.message || 'Could not apply assignments.');
     } finally { setBusy(false); }
@@ -190,7 +190,7 @@ export function SharedProjects() {
       const kit = await exportRecoveryKit(recoveryPass);
       setRecoveryKit(kit);
       await navigator.clipboard.writeText(kit);
-      toast('🔐 Recovery kit copied — store it safely');
+      toast('Recovery kit copied — store it safely');
       setMsg('Recovery kit copied to clipboard. Keep it somewhere safe (e.g. a password manager).');
     } catch (e: any) {
       setMsg(e?.message || 'Could not export recovery kit.');
@@ -212,7 +212,7 @@ export function SharedProjects() {
       await refresh();
       await loadAllTasks('all');
       setMsg(`Restored ${res.shares} shared project${res.shares === 1 ? '' : 's'}${res.relay ? ' and live sync' : ''}.`);
-      toast('🔐 Recovery kit restored');
+      toast('Recovery kit restored');
     } catch (e: any) {
       setMsg(e?.message || 'Could not restore — wrong passphrase or invalid kit.');
     } finally { setBusy(false); }
@@ -279,7 +279,7 @@ export function SharedProjects() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                     <strong style={{ flex: 1 }}>{s.name}</strong>
                     {onlineCount(s.id) > 0 && (
-                      <span style={{ fontSize: '.72rem', color: 'var(--accent)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                      <span style={{ fontSize: 12, color: 'var(--accent)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                         <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: 'var(--accent)', display: 'inline-block' }}></span>
                         {onlineCount(s.id)} online
                       </span>
@@ -334,13 +334,13 @@ export function SharedProjects() {
 
                   {showFeed[s.id] && (
                     <div style={{ marginTop: '10px', borderTop: '1px solid var(--border)', paddingTop: '8px' }}>
-                      <div style={{ fontSize: '.68rem', letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--text-d)', marginBottom: '6px' }}>Activity</div>
+                      <div style={{ fontSize: 12, color: 'var(--text-d)', marginBottom: '6px' }}>Activity</div>
                       {(activity[s.id] || []).length === 0 ? (
                         <small className="form-hint">No activity yet.</small>
                       ) : (
                         <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '4px' }}>
                           {(activity[s.id] || []).map((e) => (
-                            <li key={e.id} style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', fontSize: '.78rem' }}>
+                            <li key={e.id} style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', fontSize: 12 }}>
                               <span style={{ color: 'var(--text-m)' }}>{e.summary}</span>
                               <span style={{ color: 'var(--text-d)', flexShrink: 0 }}>
                                 {new Date(e.at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
@@ -355,7 +355,7 @@ export function SharedProjects() {
                   {(role === 'owner' || role === 'editor') && (
                     <div style={{ marginTop: '10px', borderTop: '1px solid var(--border)', paddingTop: '8px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ fontSize: '.68rem', letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--text-d)', flex: 1 }}>
+                        <span style={{ fontSize: 12, color: 'var(--text-d)', flex: 1 }}>
                           Team plan <span className="opt-tag">today</span>
                         </span>
                         <button className="btn-soft" onClick={()=>handleAvailability(s.id)} disabled={busy}>Share my busy times</button>
@@ -372,7 +372,7 @@ export function SharedProjects() {
                             {teamPlan[s.id].loads.map((l) => {
                               const pct = l.capacity_min > 0 ? Math.min(100, Math.round((l.scheduled_min / l.capacity_min) * 100)) : 0;
                               return (
-                                <li key={l.actor} style={{ fontSize: '.78rem' }}>
+                                <li key={l.actor} style={{ fontSize: 12 }}>
                                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px' }}>
                                     <span style={{ fontFamily: 'monospace' }}>{l.actor.slice(0, 8)}{l.actor === me ? ' (you)' : ''}</span>
                                     <span style={{ color: l.overloaded ? 'var(--danger)' : 'var(--text-d)' }}>

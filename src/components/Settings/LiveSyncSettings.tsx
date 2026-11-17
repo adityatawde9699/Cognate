@@ -202,7 +202,7 @@ export function LiveSyncSettings() {
       setMsg(
         `Connected. Pushed ${r.pushed} ops · merged ${r.mergedOps} · ${r.upserts} updated, ${r.deletes} removed.`
       );
-      toast('🔐 Live sync v3 workspace created');
+      toast('Live sync v3 workspace created');
     } catch (err: any) {
       setMsg(err?.message || 'Could not create workspace on relay.');
     } finally {
@@ -226,7 +226,7 @@ export function LiveSyncSettings() {
       setMsg(
         `Joined workspace. Merged ${r.mergedOps} ops · ${r.upserts} updated, ${r.deletes} removed.`
       );
-      toast('🔐 Joined workspace successfully');
+      toast('Joined workspace successfully');
     } catch (err: any) {
       setMsg(err?.message || 'Could not join workspace.');
     } finally {
@@ -250,7 +250,7 @@ export function LiveSyncSettings() {
       setMsg(
         `Connected to v2 relay. Pushed ${r.pushed} ops · merged ${r.mergedOps} · ${r.upserts} updated, ${r.deletes} removed.`
       );
-      toast('🔐 Connected to legacy relay');
+      toast('Connected to legacy relay');
     } catch (err: any) {
       setMsg(err?.message || 'Could not connect to relay.');
     } finally {
@@ -273,7 +273,7 @@ export function LiveSyncSettings() {
       setBackupLocation(res.exportPath);
       await reload();
       setMsg(`Upgraded to Sync v3! Setup Code: ${res.setupCode}. Verified pre-migration export saved to: ${res.exportPath}`);
-      toast('🚀 Upgraded to Sync Protocol v3');
+      toast('Upgraded to Sync Protocol v3');
     } catch (err: any) {
       setMsg(err?.message || 'Migration to v3 failed.');
     } finally {
@@ -293,7 +293,7 @@ export function LiveSyncSettings() {
         setMsg(
           `Legacy v2 room is soft-deleted. Permanent purge in 7 days (${res.purge_after_seconds} seconds).`
         );
-        toast('🗑️ Legacy v2 room soft-deleted');
+        toast('Legacy v2 room soft-deleted');
       }
     } catch (err: any) {
       setMsg(err?.message || 'Failed to soft-delete legacy relay data.');
@@ -311,7 +311,7 @@ export function LiveSyncSettings() {
       if (!res.soft_deleted) {
         setSoftDeletePending(false);
         setMsg('Soft-delete cancelled. Legacy v2 room has been restored.');
-        toast('↩️ Legacy room deletion cancelled');
+        toast('Legacy room deletion cancelled');
       }
     } catch (err: any) {
       setMsg(err?.message || 'Failed to cancel soft-delete.');
@@ -326,7 +326,7 @@ export function LiveSyncSettings() {
     try {
       const r = await syncNow();
       setMsg(`Synced. Merged ${r.mergedOps} ops · ${r.upserts} updated, ${r.deletes} removed.`);
-      toast('🔐 Synced');
+      toast('Synced');
     } catch (err: any) {
       setMsg(err?.message || 'Sync failed.');
     } finally {
@@ -347,7 +347,7 @@ export function LiveSyncSettings() {
   const copySetupCode = () => {
     if (cfg?.setupCode) {
       navigator.clipboard.writeText(cfg.setupCode);
-      toast('📋 Setup Code copied to clipboard');
+      toast('Setup Code copied to clipboard');
     }
   };
 

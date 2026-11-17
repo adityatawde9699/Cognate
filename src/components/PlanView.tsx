@@ -222,8 +222,8 @@ export function PlanView() {
       const n = result.blocks.length;
       toast(
         result.unscheduled.length
-          ? `🗓 Planned ${n} task${n === 1 ? '' : 's'} · ${result.unscheduled.length} didn't fit`
-          : `🗓 Your day is planned — ${n} task${n === 1 ? '' : 's'}`
+          ? `Planned ${n} task${n === 1 ? '' : 's'} · ${result.unscheduled.length} didn't fit`
+          : `Your day is planned — ${n} task${n === 1 ? '' : 's'}`
       );
     } catch (e: any) {
       setActionError(e instanceof PlanRefreshError ? e.message : `Planning failed: ${e?.message || e}. Your previous plan is preserved.`);
@@ -238,7 +238,7 @@ export function PlanView() {
     setEnriching(true);
     try {
       const n = await enrichScheduling();
-      toast(n ? `✨ Estimated ${n} task${n === 1 ? '' : 's'} — re-planning…` : '✨ Everything was already sized');
+      toast(n ? `Estimated ${n} task${n === 1 ? '' : 's'} — re-planning…` : 'Everything was already sized');
       await handleAutoPlan();
     } catch (e: any) {
       // Tauri may reject with a string, a plain object, or an Error. Preserve
@@ -271,7 +271,7 @@ export function PlanView() {
         count = await syncCalendarUrl(input);
       }
       await refreshEvents();
-      toast(`📅 Imported ${count} calendar event${count === 1 ? '' : 's'}`);
+      toast(`Imported ${count} calendar event${count === 1 ? '' : 's'}`);
     } catch (e: any) {
       toast(e?.message || 'Calendar sync failed');
     } finally {
@@ -313,7 +313,7 @@ export function PlanView() {
       const result = await planDay(date,{pin:{taskId:d.id,startMin:d.curMin,durationMin:d.dur}});
       setReasons(Object.fromEntries(result.blocks.map(block=>[block.task_id,block.reason])));
       setLastOverflow(result.unscheduled.map(item=>item.task_id));
-      toast('📌 Pinned — plan updated');
+      toast('Pinned — plan updated');
     } catch(error) {toast(error instanceof Error ? error.message : 'Move could not be saved.');}
     finally {setPlanning(false);}
   };
@@ -375,7 +375,7 @@ export function PlanView() {
       <header className="plan-header">
         <div className="plan-heading">
           {calendarStatus.length>0 && <p role="status">{calendarStatus.join(' ')}</p>}
-          <div className="plan-eyebrow"><i className="fa-regular fa-calendar-check"></i> Your day, planned</div>
+          <div className="plan-eyebrow">Your day</div>
           <h1 className="plan-title">{prettyDate(date)}</h1>
           <p className="plan-sub">
             {fmtClock(work.start)}–{fmtClock(work.end)}
@@ -393,7 +393,7 @@ export function PlanView() {
           </div>
           <button className="btn-ghost plan-capture" onClick={()=>setTaskModalOpen(true)}><i className="fa-solid fa-plus" aria-hidden="true" /> Capture task</button>
           <button className="btn-primary plan-autoplan" onClick={handleAutoPlan} disabled={planning}>
-            <i className={`fa-solid ${planning ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'}`}></i>
+            <i className={`fa-solid ${planning ? 'fa-spinner fa-spin' : 'fa-calendar-check'}`}></i>
             <span>{planning ? 'Planning…' : 'Auto-plan'}</span>
           </button>
         </div>
@@ -407,7 +407,7 @@ export function PlanView() {
             <span>{syncing ? 'Syncing…' : 'Sync calendar'}</span>
           </button>
           <button className="btn-ghost plan-enrich" onClick={handleEnrich} disabled={enriching || planning} title="Let AI estimate durations and energy, then re-plan">
-            <i className={`fa-solid ${enriching ? 'fa-spinner fa-spin' : 'fa-brain'}`}></i>
+            <i className={`fa-solid ${enriching ? 'fa-spinner fa-spin' : 'fa-hourglass-half'}`}></i>
             <span>{enriching ? 'Estimating…' : 'AI estimate'}</span>
           </button>
           <button className="btn-ghost plan-brief" onClick={handleBrief} disabled={briefing || scheduled.length === 0} title="Ask your AI chief of staff to brief you on the day">
@@ -447,7 +447,7 @@ export function PlanView() {
 
           {showNow && (
             <div className="plan-now" style={{ top: `${toY(nowMin)}px` }} aria-hidden="true">
-              <span className="plan-now-dot" />
+              <span className="plan-now-tag">{fmtClock(nowMin)}</span>
             </div>
           )}
 
@@ -526,8 +526,8 @@ export function PlanView() {
           {scheduled.length === 0 && busyToday.length === 0 && (
             <div className="plan-empty">
               <i className="fa-regular fa-calendar"></i>
-              <p>Nothing scheduled yet.</p>
-              <p className="plan-empty-sub">Hit <strong>Auto-plan</strong> and your day lays itself out.</p>
+              <p>Nothing scheduled</p>
+              <p className="plan-empty-sub">Run Auto-plan to place your tasks around your calendar</p>
             </div>
           )}
         </div>
@@ -537,7 +537,7 @@ export function PlanView() {
           <h3>Backlog <span className="plan-backlog-count">{unplanned.length}</span></h3>
           <p className="plan-backlog-hint">Tasks waiting for a place in your day.</p>
           {unplanned.length === 0 ? (
-            <p className="plan-backlog-empty">Everything's on the calendar. ✨</p>
+            <p className="plan-backlog-empty">Everything's on the calendar.</p>
           ) : (
             <ul className="plan-backlog-list">
               {unplanned.map((t) => (

@@ -36,7 +36,7 @@ export function TimelineView() {
         </div>
       </div>
       <div className="tl-rows">
-        {rows.length === 0 && <div className="empty-state"><div className="empty-emoji">🗓️</div><p>No upcoming deadlines in this window.</p></div>}
+        {rows.length === 0 && <div className="empty-state"><i className="fa-regular fa-calendar empty-icon"></i><p>No upcoming deadlines in this window.</p></div>}
         {rows.map(({ t, dl }) => {
           const start = t.created_at ? new Date(t.created_at) : today;
           const s = Math.max(start.getTime(), windowStart.getTime());

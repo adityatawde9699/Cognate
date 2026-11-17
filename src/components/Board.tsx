@@ -64,8 +64,8 @@ export function Board() {
     if (tasks.length === 0) {
       return (
         <div className="empty-state">
-          <div className="empty-emoji">{droppable ? '🌱' : '📋'}</div>
-          <p>{droppable ? "No pending tasks. You're on fire! 🔥" : 'Complete a task to see it here.'}</p>
+          <i className={`fa-regular ${droppable ? 'fa-circle-check' : 'fa-square-check'} empty-icon`}></i>
+          <p>{droppable ? 'No pending tasks' : 'Completed tasks appear here'}</p>
         </div>
       );
     }

@@ -35,7 +35,7 @@ export function CommandPalette() {
 
   const actions: Cmd[] = useMemo(() => [
     { id: 'new', label: t('cmd.newTask'), icon: 'fa-plus', hint: 'N', run: () => setTaskModalOpen(true) },
-    { id: 'gen', label: t('cmd.generate'), icon: 'fa-wand-magic-sparkles', run: () => setGenerateModalOpen(true) },
+    { id: 'gen', label: t('cmd.generate'), icon: 'fa-list-check', run: () => setGenerateModalOpen(true) },
     { id: 'tpl-new', label: 'New from template', icon: 'fa-copy', run: () => setTemplatesMode('apply') },
     { id: 'tpl-save', label: 'Save current view as template', icon: 'fa-bookmark', run: () => setTemplatesMode('save') },
     { id: 'focus', label: t('cmd.focus'), icon: 'fa-bullseye', run: () => setFocusMode(true) },
@@ -77,8 +77,8 @@ export function CommandPalette() {
       hint: quickAddPreview(parsed) || 'enter',
       run: async () => {
         const out = await quickAdd(raw);
-        if (out.ok && out.task) toast(out.scheduled ? `⚡ Scheduled “${out.task.title}”` : `✅ Added “${out.task.title}”`);
-        else toast('⚠️ Couldn’t add that task');
+        if (out.ok && out.task) toast(out.scheduled ? `Scheduled “${out.task.title}”` : `Added “${out.task.title}”`);
+        else toast('Couldn’t add that task');
       },
     };
     // Lead with quick-add when the line carries task signals (a date/time/tag/

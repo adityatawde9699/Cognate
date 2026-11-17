@@ -38,7 +38,7 @@ export function useAutoReflow(): void {
           lastReflow = Date.now();
           const n = r.result.blocks.length;
           notify('Day re-planned', `Adjusted around ${r.disruption.reason}.`);
-          toast(`🔄 Re-planned around ${r.disruption.reason} · ${n} block${n === 1 ? '' : 's'}`);
+          toast(`Re-planned around ${r.disruption.reason} · ${n} block${n === 1 ? '' : 's'}`);
         }
       } catch (error) {
         if (!stopped) console.warn('[planner] Reflow did not commit:',error);

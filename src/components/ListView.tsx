@@ -53,7 +53,7 @@ export function ListView() {
   return (
     <div className="list-view">
       {parents.length === 0 && (
-        <div className="empty-state"><div className="empty-emoji">📋</div><p>No tasks here yet.</p></div>
+        <div className="empty-state"><i className="fa-regular fa-square-check empty-icon"></i><p>No tasks here</p></div>
       )}
       {pending.length > 0 && (
         <div className="lv-group">

@@ -212,7 +212,7 @@ export function suggestPriority(task: {
 export function summarizeBoard(tasks: Task[]): Promise<string> {
   const open = tasks.filter((t) => !t.done);
   if (open.length === 0) {
-    return Promise.resolve('🎉 No open tasks — your board is clear!');
+    return Promise.resolve('No open tasks — your board is clear!');
   }
 
   const lines = open.map((t) => {

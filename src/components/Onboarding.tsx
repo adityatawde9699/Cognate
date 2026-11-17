@@ -30,7 +30,7 @@ export function Onboarding() {
       await loadAllTasks('all');
       setFilter('plan');
       setShow(false);
-      toast(`✨ Your day is planned — ${r.planned} block${r.planned === 1 ? '' : 's'}${r.busy ? `, ${r.busy} from your calendar` : ''}`);
+      toast(`Your day is planned — ${r.planned} block${r.planned === 1 ? '' : 's'}${r.busy ? `, ${r.busy} from your calendar` : ''}`);
     } catch {
       toast('Could not plan your day — you can Auto-plan anytime.');
       setShow(false);
@@ -56,7 +56,7 @@ export function Onboarding() {
       background: 'rgba(0,0,0,.6)', backdropFilter: 'blur(4px)',
     }}>
       <div style={card}>
-        <div style={{ fontSize: '.72rem', letterSpacing: '.14em', textTransform: 'uppercase', color: 'var(--accent)', fontWeight: 700 }}>
+        <div style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 500 }}>
           {t('onboarding.welcome')}
         </div>
         <h1 style={{ margin: '6px 0 8px', fontSize: '1.5rem', color: 'var(--text)' }}>{t('onboarding.title')}</h1>
@@ -90,7 +90,7 @@ export function Onboarding() {
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' }}>
           <button className="btn-ghost" onClick={skip} disabled={busy}>{t('onboarding.skip')}</button>
           <button className="btn-primary" onClick={finish} disabled={busy}>
-            <i className={`fa-solid ${busy ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'}`}></i>{' '}
+            <i className={`fa-solid ${busy ? 'fa-spinner fa-spin' : 'fa-calendar-check'}`}></i>{' '}
             {t('onboarding.plan')}
           </button>
         </div>

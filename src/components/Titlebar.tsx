@@ -34,7 +34,7 @@ export function Titlebar() {
       setSearchQuery('');
       setAiQuery(pred, q);
     } catch (e: any) {
-      toast(`⚠️ ${e.message || String(e)}`);
+      toast(`${e.message || String(e)}`);
     } finally {
       setAiBusy(false);
     }
@@ -85,7 +85,7 @@ export function Titlebar() {
             id="searchInput"
             aria-label="Search tasks"
             type="search"
-            placeholder="Search tasks, or ask in plain English…"
+            placeholder="Search"
             autoComplete="off"
             value={value}
             onChange={(e) => {
@@ -106,13 +106,13 @@ export function Titlebar() {
             disabled={aiBusy}
             onClick={runAiQuery}
           >
-            <i className={`fa-solid ${aiBusy ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'}`}></i>
+            <i className={`fa-solid ${aiBusy ? 'fa-spinner fa-spin' : 'fa-arrow-turn-down'}`}></i>
           </button>
           <kbd className="cmd-kbd">/</kbd>
         </div>
         {aiQueryLabel && (
           <button className="cmd-aichip" onClick={clearAiQuery} title="Clear AI filter">
-            <i className="fa-solid fa-wand-magic-sparkles"></i>
+            <i className="fa-solid fa-arrow-turn-down"></i>
             <span>{aiQueryLabel}</span>
             <i className="fa-solid fa-xmark"></i>
           </button>

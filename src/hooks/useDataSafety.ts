@@ -13,7 +13,7 @@ export function useDataSafety() {
     (async () => {
       const status = await runIntegrityCheck();
       if (!cancelled && status !== 'ok') {
-        toast(`⚠ Database integrity issue (${status}). Restore a backup in Settings → Data safety.`);
+        toast(`Database integrity issue (${status}). Restore a backup in Settings → Data safety.`);
       }
       if (!cancelled) {
         try { await maybeAutoBackup(); }

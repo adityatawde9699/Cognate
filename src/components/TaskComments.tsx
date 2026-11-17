@@ -50,7 +50,7 @@ export function TaskComments({ taskId, projectId }: { taskId: string; projectId:
       setDraft('');
       await load(share);
     } catch (e: any) {
-      toast(`⚠️ ${e?.message || 'Could not post comment'}`);
+      toast(`${e?.message || 'Could not post comment'}`);
     } finally { setBusy(false); }
   };
 
@@ -60,7 +60,7 @@ export function TaskComments({ taskId, projectId }: { taskId: string; projectId:
       await setAssignee(share.id, taskId, actor);
       setAssigneeState(actor);
     } catch (e: any) {
-      toast(`⚠️ ${e?.message || 'Could not assign'}`);
+      toast(`${e?.message || 'Could not assign'}`);
     } finally { setBusy(false); }
   };
 
@@ -68,7 +68,7 @@ export function TaskComments({ taskId, projectId }: { taskId: string; projectId:
 
   return (
     <div style={{ borderTop: '1px solid var(--border)', paddingTop: '12px', marginTop: '12px' }}>
-      <div style={{ fontSize: '.68rem', letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--text-d)', fontWeight: 600, padding: '4px 0 8px' }}>
+      <div style={{ fontSize: 12, color: 'var(--text-d)', fontWeight: 500, padding: '4px 0 8px' }}>
         Collaboration · {share.name}
       </div>
 
@@ -100,7 +100,7 @@ export function TaskComments({ taskId, projectId }: { taskId: string; projectId:
             {comments.map((c) => (
               <li key={c.id} style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: '9px', padding: '8px 10px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px' }}>
-                  <span style={{ fontFamily: 'monospace', fontSize: '.74rem', color: 'var(--accent)' }}>{short(c.author)}</span>
+                  <span style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--accent)' }}>{short(c.author)}</span>
                   <span style={{ fontSize: '.7rem', color: 'var(--text-d)' }}>
                     {c.createdAt ? new Date(c.createdAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}
                   </span>
