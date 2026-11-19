@@ -1,5 +1,7 @@
-import { useState, type MouseEvent } from 'react';
+import { useEffect, useState, type MouseEvent } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+
+type ResizeDirection = Parameters<ReturnType<typeof getCurrentWindow>['startResizeDragging']>[0];
 import { useStore } from '../store';
 import { useTheme } from '../hooks/useTheme';
 import { queryToPredicate } from '../services/aiService';
@@ -42,14 +44,20 @@ export function Titlebar() {
 
   const clearAiQuery = () => { setAiQuery(null); setSearchQuery(''); setValue(''); };
 
-  // Frameless Tauri windows do not get native drag behavior automatically on
-  // every platform/webview. Start the drag explicitly from non-interactive
-  // title-bar areas so the window behaves like a normal desktop window.
-  const dragWindow = async (e: MouseEvent<HTMLElement>) => {
-    if (!(window as any).__TAURI_INTERNALS__) return;
+  const maximized = useMaximized();
+
+  // Frameless window: one handler owns the title bar. A second click of a
+  // double-click toggles maximize; any other press starts a window move. (Using
+  // both this and data-tauri-drag-region ran the drag twice and toggled
+  // maximize twice, which cancelled out.)
+  const onTitlePress = async (e: MouseEvent<HTMLElement>) => {
+    if (e.button !== 0 || !(window as any).__TAURI_INTERNALS__) return;
     const target = e.target as HTMLElement;
     if (target.closest('button, input, select, textarea, a, [role="button"]')) return;
-    try { await getCurrentWindow().startDragging(); } catch (error) { console.error(error); }
+    try {
+      if (e.detail === 2) await getCurrentWindow().toggleMaximize();
+      else await getCurrentWindow().startDragging();
+    } catch (error) { console.error(error); }
   };
 
   const toggleWindowSize = async () => {
@@ -67,14 +75,9 @@ export function Titlebar() {
   return (
     <header
       className={`cmdbar ${IS_TAURI ? 'is-native' : 'is-web'}`}
-      data-tauri-drag-region
-      onMouseDown={(e) => { if (e.button === 0) void dragWindow(e); }}
-      onDoubleClick={(e) => {
-        const target = e.target as HTMLElement;
-        if (!target.closest('button, input, select, textarea, a, [role="button"]')) void toggleWindowSize();
-      }}
+      onMouseDown={(e) => { void onTitlePress(e); }}
     >
-      <div className="cmd-brand" data-tauri-drag-region>
+      <div className="cmd-brand">
         <Logo className="cmd-logo" />
       </div>
 
@@ -136,8 +139,8 @@ export function Titlebar() {
           <button className="cmd-btn wc" title="Minimize" aria-label="Minimize" onClick={() => winAction((w) => w.minimize())}>
             <i className="fa-solid fa-minus"></i>
           </button>
-          <button className="cmd-btn wc" title="Maximize" aria-label="Maximize" onClick={toggleWindowSize}>
-            <i className="fa-regular fa-square"></i>
+          <button className="cmd-btn wc" title={maximized ? 'Restore' : 'Maximize'} aria-label={maximized ? 'Restore' : 'Maximize'} onClick={toggleWindowSize}>
+            <i className={`fa-regular ${maximized ? 'fa-window-restore' : 'fa-square'}`}></i>
           </button>
           <button className="cmd-btn wc danger" title="Close to tray" aria-label="Close to tray" onClick={() => winAction((w) => w.close())}>
             <i className="fa-solid fa-xmark"></i>
@@ -145,5 +148,44 @@ export function Titlebar() {
         </>)}
       </div>
     </header>
+  );
+}
+
+/** Tracks whether the native window is maximized (false on the web). */
+function useMaximized(): boolean {
+  const [maximized, setMaximized] = useState(false);
+  useEffect(() => {
+    if (!(window as any).__TAURI_INTERNALS__) return;
+    const w = getCurrentWindow();
+    let off: (() => void) | undefined; let alive = true;
+    const read = () => { w.isMaximized().then((m) => { if (alive) setMaximized(m); }).catch(() => {}); };
+    read();
+    w.onResized(read).then((fn) => { if (alive) off = fn; else fn(); }).catch(() => {});
+    return () => { alive = false; off?.(); };
+  }, []);
+  useEffect(() => { document.documentElement.toggleAttribute('data-maximized', maximized); }, [maximized]);
+  return maximized;
+}
+
+const EDGES: [string, ResizeDirection][] = [
+  ['n', 'North'], ['s', 'South'], ['e', 'East'], ['w', 'West'],
+  ['ne', 'NorthEast'], ['nw', 'NorthWest'], ['se', 'SouthEast'], ['sw', 'SouthWest'],
+];
+
+/**
+ * Resize handles for the frameless window on Linux, where GTK gives an
+ * undecorated window no resize border. Windows and macOS resize natively.
+ * Hidden while maximized.
+ */
+export function WindowEdges() {
+  const linux = typeof navigator !== 'undefined' && /Linux/.test(navigator.userAgent) && !/Android/.test(navigator.userAgent);
+  if (!IS_TAURI || !linux) return null;
+  return (
+    <div className="win-edges" aria-hidden="true">
+      {EDGES.map(([cls, dir]) => (
+        <div key={cls} className={`win-edge win-edge-${cls}`}
+          onMouseDown={(e) => { if (e.button === 0) { e.preventDefault(); void getCurrentWindow().startResizeDragging(dir).catch(() => {}); } }} />
+      ))}
+    </div>
   );
 }

@@ -34,6 +34,9 @@ struct PomoState {
     long_break_secs: u32,
     auto_start_break: bool,
     completed_work: u32,
+    /// Bumped on every start, so a tick loop from an earlier run exits
+    /// instead of ticking alongside the new one (pause+resume within 1 s).
+    run_id: u64,
 }
 
 /// Payload emitted to the frontend on every `pomo-tick`.
@@ -108,6 +111,7 @@ pub fn run() {
             long_break_secs: 15 * 60,
             auto_start_break: false,
             completed_work: 0,
+            run_id: 0,
         }))
         // ── Plugins ──────────────────────────────────
         .plugin(tauri_plugin_notification::init())
@@ -328,6 +332,10 @@ fn toggle_pomodoro(
     let mut s = state.lock().unwrap();
     s.is_active = !s.is_active;
     let is_active = s.is_active;
+    if is_active {
+        s.run_id = s.run_id.wrapping_add(1);
+    }
+    let run_id = s.run_id;
 
     if is_active {
         // Start the background ticking loop.
@@ -340,7 +348,7 @@ fn toggle_pomodoro(
                 let (payload, still_active) = {
                     let state_mutex = app_clone.state::<std::sync::Mutex<PomoState>>();
                     let mut s_curr = state_mutex.lock().unwrap();
-                    if !s_curr.is_active {
+                    if !s_curr.is_active || s_curr.run_id != run_id {
                         break;
                     }
                     if s_curr.time_left > 0 {

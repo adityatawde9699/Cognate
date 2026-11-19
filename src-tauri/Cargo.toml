@@ -70,3 +70,9 @@ embedded-llm = ["dep:llama-cpp-2"]
 # CUDA toolkit at build time; the backend modules must ship next to the app
 # (see docs/LOCAL_LLM.md).
 embedded-llm-gpu = ["embedded-llm", "llama-cpp-2/cuda", "llama-cpp-2/dynamic-backends"]
+
+# Smaller, faster release binaries on every platform. Debug builds are unaffected.
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

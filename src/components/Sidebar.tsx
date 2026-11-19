@@ -123,18 +123,19 @@ export function Sidebar() {
         <Pomodoro />
 
         <div className="dock-links">
-          <button className="dock-link" onClick={() => setAnalyticsOpen(true)}>
+          <button className="dock-link" title="Insights" onClick={() => setAnalyticsOpen(true)}>
             <i className="fa-solid fa-chart-pie"></i>
             <span>Insights</span>
           </button>
           <button
             className={`dock-link ${currentFilter === 'trash' ? 'active' : ''}`}
             onClick={() => setFilter('trash')}
+            title="Trash"
           >
             <i className="fa-solid fa-trash-can"></i>
             <span>Trash</span>
           </button>
-          <button className="dock-link" onClick={() => setSettingsModalOpen(true)}>
+          <button className="dock-link" title="Settings" onClick={() => setSettingsModalOpen(true)}>
             <i className="fa-solid fa-gear"></i>
             <span>Settings</span>
           </button>

@@ -2,7 +2,7 @@ import { lazy, Suspense } from 'react';
 import { Board } from './components/Board';
 import { MilestoneStrip } from './components/MilestoneStrip';
 import { PlanView } from './components/PlanView';
-import { Titlebar } from './components/Titlebar';
+import { Titlebar, WindowEdges } from './components/Titlebar';
 import { Sidebar } from './components/Sidebar';
 import { MobileNav } from './components/MobileNav';
 import { AiRequestReview } from './components/AiRequestReview';
@@ -104,6 +104,7 @@ function App() {
 
   return (
     <div className="app-shell">
+      <WindowEdges />
       <Titlebar />
       <PwaStatus />
 
