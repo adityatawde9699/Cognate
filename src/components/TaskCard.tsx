@@ -2,7 +2,7 @@
 import { Task } from '../store';
 // @ts-ignore
 import { P_LABEL, fmtDate, isOverdue } from '../utils/format';
-import { useState } from 'react';
+import { memo } from 'react';
 
 interface Props {
   task: Task;
@@ -12,11 +12,10 @@ interface Props {
   onSelectPomo: (task: Task) => void;
   onToggle: (task: Task) => void;
   onDelete: (task: Task) => void;
-  onDragStart?: () => void;
+  onDragStart?: (id: string) => void;
 }
 
-export function TaskCard({ task, subInfo, onEdit, pomoTaskId, onSelectPomo, onToggle, onDelete, onDragStart }: Props) {
-  const [isHovered, setIsHovered] = useState(false);
+function TaskCardImpl({ task, subInfo, onEdit, pomoTaskId, onSelectPomo, onToggle, onDelete, onDragStart }: Props) {
   const isPomoSel = pomoTaskId === task.id && !task.done;
   const isOverdueTask = isOverdue(task.deadline) && !task.done;
 
@@ -32,7 +31,7 @@ export function TaskCard({ task, subInfo, onEdit, pomoTaskId, onSelectPomo, onTo
 
   const handleDragStart = (e: React.DragEvent) => {
     e.dataTransfer.setData('taskId', task.id);
-    if (onDragStart) onDragStart();
+    if (onDragStart) onDragStart(task.id);
   };
 
   return (
@@ -42,8 +41,6 @@ export function TaskCard({ task, subInfo, onEdit, pomoTaskId, onSelectPomo, onTo
       draggable={!task.done}
       onDragStart={handleDragStart}
       tabIndex={0}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
     >
       <div className="card-top">
         <div
@@ -64,7 +61,7 @@ export function TaskCard({ task, subInfo, onEdit, pomoTaskId, onSelectPomo, onTo
         </div>
         <span className="card-title">{task.title}</span>
         
-        <div className="card-actions" style={{ opacity: isHovered || isPomoSel ? 1 : 0 }}>
+        <div className={`card-actions ${isPomoSel ? 'is-shown' : ''}`}>
           <button 
             className={`icon-btn btn-focus-sel ${isPomoSel ? 'active' : ''}`} 
             onClick={() => onSelectPomo(task)}
@@ -133,3 +130,14 @@ export function TaskCard({ task, subInfo, onEdit, pomoTaskId, onSelectPomo, onTo
     </div>
   );
 }
+
+// Cards only re-render when their own task, subtask counts or focus selection change.
+// Handler props are stable (useCallback in Board), so they are not compared.
+export const TaskCard = memo(TaskCardImpl, (a, b) =>
+  a.task === b.task &&
+  a.subInfo?.done === b.subInfo?.done &&
+  a.subInfo?.total === b.subInfo?.total &&
+  (a.pomoTaskId === b.task.id) === (b.pomoTaskId === b.task.id) &&
+  a.onEdit === b.onEdit && a.onSelectPomo === b.onSelectPomo &&
+  a.onToggle === b.onToggle && a.onDelete === b.onDelete && a.onDragStart === b.onDragStart
+);

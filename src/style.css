@@ -607,7 +607,7 @@ select:focus-visible {
     transition: var(--t-ui);
 }
 
-.task-card:hover .card-actions { opacity: 1; }
+.task-card:hover .card-actions, .task-card:focus-within .card-actions, .card-actions.is-shown { opacity: 1; }
 
 .icon-btn {
     width: 27px;

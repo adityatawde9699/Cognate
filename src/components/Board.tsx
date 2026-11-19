@@ -1,7 +1,7 @@
 import { useStore, Task } from '../store';
 import { useVisibleTasks } from '../hooks/useVisibleTasks';
 import { TaskCard } from './TaskCard';
-import { useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { toggleTaskDone, removeTask, reorderTasks } from '../services/taskService';
 
 export function Board() {
@@ -13,17 +13,26 @@ export function Board() {
   const pending = visibleTasks.filter((t: Task) => !t.done && !t.parent_id);
   const done    = visibleTasks.filter((t: Task) => t.done && !t.parent_id);
 
-  const subInfoFor = (id: string) => {
-    const kids = allTasks.filter((t) => t.parent_id === id);
-    return kids.length ? { done: kids.filter((k) => k.done).length, total: kids.length } : undefined;
-  };
+  const pomoTaskId = useStore((s) => (s as any).pomoTaskId as string | null | undefined);
+
+  // One pass over all tasks instead of a filter per card.
+  const subInfo = useMemo(() => {
+    const m = new Map<string, { done: number; total: number }>();
+    for (const t of allTasks) {
+      if (!t.parent_id) continue;
+      const e = m.get(t.parent_id) ?? { done: 0, total: 0 };
+      e.total++; if (t.done) e.done++;
+      m.set(t.parent_id, e);
+    }
+    return m;
+  }, [allTasks]);
 
   // drag state – only IDs needed, no raw Task reference
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
 
   // ── DnD handlers ───────────────────────────────────
-  const handleDragStart = (id: string) => setDraggedId(id);
+  const handleDragStart = useCallback((id: string) => setDraggedId(id), []);
   const handleDragOver  = (e: React.DragEvent, id: string) => {
     e.preventDefault();
     setDragOverId(id);
@@ -46,18 +55,18 @@ export function Board() {
   };
 
   // ── Task actions (CQRS — optimistic) ───────────────
-  const handleToggle = async (task: Task) => {
+  const handleToggle = useCallback(async (task: Task) => {
     await toggleTaskDone(task.id);
-  };
+  }, []);
 
-  const handleDelete = async (task: Task) => {
+  const handleDelete = useCallback(async (task: Task) => {
     await removeTask(task.id);
-  };
+  }, []);
 
-  const handleEdit = (task: Task) => setTaskModalOpen(true, task);
-  const handleSelectPomo = (task: Task) => {
+  const handleEdit = useCallback((task: Task) => setTaskModalOpen(true, task), [setTaskModalOpen]);
+  const handleSelectPomo = useCallback((task: Task) => {
     useStore.setState({ pomoTaskId: task.id } as any);
-  };
+  }, []);
 
   // ── Render helpers ─────────────────────────────────
   const renderList = (tasks: Task[], droppable = false) => {
@@ -77,12 +86,13 @@ export function Board() {
       >
         <TaskCard
           task={task}
-          subInfo={subInfoFor(task.id)}
+          subInfo={subInfo.get(task.id)}
+          pomoTaskId={pomoTaskId}
           onEdit={handleEdit}
           onSelectPomo={handleSelectPomo}
           onToggle={handleToggle}
           onDelete={handleDelete}
-          onDragStart={() => handleDragStart(task.id)}
+          onDragStart={handleDragStart}
         />
       </div>
     ));

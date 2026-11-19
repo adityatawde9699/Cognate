@@ -11,7 +11,9 @@ const P_LABEL: Record<string, string> = { 'low': 'Low', 'medium': 'Medium', 'hig
 const P_COLOR: Record<string, string> = { 'low': 'var(--success)', 'medium': 'var(--warning)', 'high': 'var(--danger)' };
 
 export function TaskModal() {
-  const { isTaskModalOpen, editingTask, setTaskModalOpen } = useStore();
+  const isTaskModalOpen = useStore((s) => s.isTaskModalOpen);
+  const editingTask = useStore((s) => s.editingTask);
+  const setTaskModalOpen = useStore((s) => s.setTaskModalOpen);
   const projects = useStore((s) => s.projects);
   const milestones = useStore((s) => s.milestones);
   const customFieldDefs = useStore((s) => s.customFieldDefs);

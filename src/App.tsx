@@ -55,7 +55,9 @@ function viewMeta(filter: string) {
 }
 
 function App() {
-  const { appError, currentFilter, setTaskModalOpen } = useStore();
+  const appError = useStore((s) => s.appError);
+  const currentFilter = useStore((s) => s.currentFilter);
+  const setTaskModalOpen = useStore((s) => s.setTaskModalOpen);
   const tasks = useStore((s) => s.currentTasks);
   const canvasView = useStore((s) => s.canvasView);
   const setCanvasView = useStore((s) => s.setCanvasView);

@@ -14,7 +14,9 @@ const C_MID = '#85858b';
 const C_LABEL = '#a1a1aa';
 
 export function Analytics() {
-  const { isAnalyticsOpen, setAnalyticsOpen, currentTasks } = useStore();
+  const isAnalyticsOpen = useStore((s) => s.isAnalyticsOpen);
+  const setAnalyticsOpen = useStore((s) => s.setAnalyticsOpen);
+  const currentTasks = useStore((s) => s.currentTasks);
   const barRef = useRef<HTMLCanvasElement>(null);
   const pieRef = useRef<HTMLCanvasElement>(null);
   const doughRef = useRef<HTMLCanvasElement>(null);

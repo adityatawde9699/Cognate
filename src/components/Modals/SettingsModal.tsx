@@ -74,7 +74,8 @@ const PROVIDERS: Record<string, ProviderMeta> = {
 };
 
 export function SettingsModal() {
-  const { isSettingsModalOpen, setSettingsModalOpen } = useStore();
+  const isSettingsModalOpen = useStore((s) => s.isSettingsModalOpen);
+  const setSettingsModalOpen = useStore((s) => s.setSettingsModalOpen);
   const customFieldDefs = useStore((s) => s.customFieldDefs);
   const panelRef = useRef<HTMLDivElement>(null);
   const [activeTab, setActiveTab] = useState('general');
