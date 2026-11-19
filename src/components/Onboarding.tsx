@@ -53,10 +53,10 @@ export function Onboarding() {
   return (
     <div role="dialog" aria-modal="true" aria-label="Welcome to Cognate" style={{
       position: 'fixed', inset: 0, zIndex: 1000, display: 'grid', placeItems: 'center',
-      background: 'rgba(0,0,0,.6)', backdropFilter: 'blur(4px)',
+      background: 'rgba(0,0,0,.6)',
     }}>
       <div style={card}>
-        <div style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 500 }}>
+        <div style={{ fontSize: 12, color: 'var(--text-d)', fontWeight: 400 }}>
           {t('onboarding.welcome')}
         </div>
         <h1 style={{ margin: '6px 0 8px', fontSize: '1.5rem', color: 'var(--text)' }}>{t('onboarding.title')}</h1>

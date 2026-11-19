@@ -72,8 +72,8 @@ describe('Item 7: Feature Flag syncV3Enabled', () => {
       expect(html).not.toContain('Create Workspace (v3)');
       expect(html).not.toContain('Join Existing (v3)');
       expect(html).not.toContain('Upgrade to Sync v3');
-      expect(html).not.toContain('Legacy Relay Cleanup');
-      expect(html).toContain('Connect to Relay');
+      expect(html).not.toContain('Legacy relay cleanup');
+      expect(html).toContain('Connect to relay');
       expect(html).toContain('Advanced');
       expect(html).toContain('Enable Sync Protocol v3 (Experimental)');
     });
@@ -112,23 +112,23 @@ describe('Item 7: Feature Flag syncV3Enabled', () => {
       mem.setItem('test_relay_capabilities', JSON.stringify({ delete_supported: false }));
       mem.setItem('test_room_claimed_by_me', 'true');
       let html = ReactDOMServer.renderToString(React.createElement(LiveSyncSettings));
-      expect(html).not.toContain('Legacy Relay Cleanup');
+      expect(html).not.toContain('Legacy relay cleanup');
 
       // Case 2: Relay advertises capability, but room has NO registered matching hash
       mem.setItem('test_relay_capabilities', JSON.stringify({ delete_supported: true }));
       mem.setItem('test_room_claimed_by_me', 'false');
       html = ReactDOMServer.renderToString(React.createElement(LiveSyncSettings));
-      expect(html).not.toContain('Legacy Relay Cleanup');
+      expect(html).not.toContain('Legacy relay cleanup');
 
       // Case 3: Both conditions met (relay advertises delete AND room has matching token hash)
       mem.setItem('test_room_claimed_by_me', 'true');
       html = ReactDOMServer.renderToString(React.createElement(LiveSyncSettings));
-      expect(html).toContain('Legacy Relay Cleanup');
+      expect(html).toContain('Legacy relay cleanup');
 
       // Case 4: Another party controls the room -> delete UI hidden, hostile control warning shown
       mem.setItem('test_another_party_controls', 'true');
       html = ReactDOMServer.renderToString(React.createElement(LiveSyncSettings));
-      expect(html).not.toContain('Legacy Relay Cleanup');
+      expect(html).not.toContain('Legacy relay cleanup');
       expect(html).toContain('Another party controls this room. Treat its history as exposed.');
     });
   });

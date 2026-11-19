@@ -94,7 +94,7 @@ export function GenerateTasksModal() {
     }}>
       <div className="editor-panel" role="dialog" aria-modal="true">
         <div className="editor-header">
-          <span className="editor-prio-pill"><span className="p-dot" style={{ background: 'var(--accent)' }}></span> Generate tasks</span>
+          <span className="editor-prio-pill">Generate tasks</span>
           <button className="btn-icon" onClick={close} aria-label="Close">
             <i className="fa-solid fa-xmark"></i>
           </button>
@@ -106,7 +106,7 @@ export function GenerateTasksModal() {
             className="editor-title"
             value={projectName}
             onChange={(e) => setProjectName(e.target.value)}
-            placeholder="Project name, e.g. Cognate Production Roadmap"
+            placeholder="Project name"
             aria-label="Project name"
           />
           <textarea

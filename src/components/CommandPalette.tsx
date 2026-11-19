@@ -45,7 +45,7 @@ export function CommandPalette() {
     { id: 'go-dash', label: 'Go to Dashboard', icon: 'fa-table-columns', run: () => setFilter('dashboard') },
     { id: 'go-all', label: 'Go to Tasks', icon: 'fa-inbox', run: () => setFilter('all') },
     { id: 'go-today', label: 'Go to Today', icon: 'fa-sun', run: () => setFilter('today') },
-    { id: 'go-week', label: 'Go to This Week', icon: 'fa-calendar-week', run: () => setFilter('week') },
+    { id: 'go-week', label: 'Go to this week', icon: 'fa-calendar-week', run: () => setFilter('week') },
     { id: 'go-high', label: 'Go to Flagged', icon: 'fa-flag', run: () => setFilter('high') },
     // eslint-disable-next-line react-hooks/exhaustive-deps
   ], [locale]);

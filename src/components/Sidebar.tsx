@@ -2,7 +2,7 @@ import { useStore } from '../store';
 import { Pomodoro } from './Pomodoro';
 import { addProject, removeProject } from '../services/taskService';
 
-const PROJ_COLORS = ['#34d399', '#0ea5e9', '#a78bfa', '#f59e0b', '#f472b6', '#22d3ee'];
+const PROJ_COLORS = ['#5fb3a1', '#7aa2d6', '#c4a76a', '#b98ab0', '#93b07a', '#a39bd0'];
 
 function todayString() {
   const d = new Date();

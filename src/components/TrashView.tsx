@@ -48,7 +48,7 @@ export function TrashView() {
             title="Permanently delete everything in Trash"
           >
             <i className="fa-solid fa-broom"></i>
-            <span>Empty Trash</span>
+            <span>Empty trash</span>
           </button>
         </div>
       </header>

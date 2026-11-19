@@ -333,7 +333,7 @@ export function SettingsModal() {
       <div className="panel-header">
         <div className="panel-title-block">
           <h2>Settings</h2>
-          <p>Fine-tune Cognate once, then stay in flow.</p>
+          <p>Timer, AI, calendar and sync</p>
         </div>
         <button className="btn-icon" onClick={() => setSettingsModalOpen(false)}>
           <i className="fa-solid fa-xmark"></i>
@@ -343,7 +343,7 @@ export function SettingsModal() {
       <div className="settings-layout">
         <div className="settings-sidebar">
           <button className={`tag-nav-btn ${activeTab === 'general' ? 'active' : ''}`} onClick={() => setActiveTab('general')}><i className="fa-solid fa-sliders tn-hash"></i> General</button>
-          <button className={`tag-nav-btn ${activeTab === 'ai' ? 'active' : ''}`} onClick={() => setActiveTab('ai')}><i className="fa-solid fa-sparkles tn-hash"></i> AI Assistant</button>
+          <button className={`tag-nav-btn ${activeTab === 'ai' ? 'active' : ''}`} onClick={() => setActiveTab('ai')}><i className="fa-solid fa-microchip tn-hash"></i> AI assistant</button>
           <button className={`tag-nav-btn ${activeTab === 'calendar' ? 'active' : ''}`} onClick={() => setActiveTab('calendar')}><i className="fa-regular fa-calendar tn-hash"></i> Calendar</button>
           <button className={`tag-nav-btn ${activeTab === 'integrations' ? 'active' : ''}`} onClick={() => setActiveTab('integrations')}><i className="fa-solid fa-plug tn-hash"></i> Integrations</button>
           <button className={`tag-nav-btn ${activeTab === 'sync' ? 'active' : ''}`} onClick={() => setActiveTab('sync')}><i className="fa-solid fa-cloud-arrow-up tn-hash"></i> Sync & Team</button>
@@ -354,10 +354,10 @@ export function SettingsModal() {
               <LanguageSelect />
               <div className="settings-hero">
           <div>
-            <p className="settings-kicker">Workspace preferences</p>
-            <h3>Shape timers, AI, sync, and integrations from one place.</h3>
+            <p className="settings-kicker">Current setup</p>
+            <h3>AI provider and timer lengths</h3>
             <p className="settings-hero-text">
-              Keep the layout tidy, choose your AI provider, and keep Cognate aligned with the way you work.
+              Applies to this device. Sync and calendar settings are in their own tabs.
             </p>
           </div>
           <div className="settings-hero-meta">
@@ -400,7 +400,7 @@ export function SettingsModal() {
           </div>
 
           <div className="form-group row switch-row">
-            <label>Auto-start Breaks</label>
+            <label>Auto-start breaks</label>
             <label className="switch">
               <input type="checkbox" checked={autoBreak} onChange={e => {
                 setAutoBreak(e.target.checked);
@@ -460,7 +460,7 @@ export function SettingsModal() {
           {activeTab === 'ai' && (
             <>
               <SettingsSection id="ai" featured>
-          <h3>AI Assistant</h3>
+          <h3>AI assistant</h3>
 
           <div className="form-group">
             <button className="btn-soft" onClick={async () => {
@@ -619,7 +619,7 @@ export function SettingsModal() {
           {activeTab === 'integrations' && (
             <>
               <SettingsSection id="customFields">
-          <h3>Custom Fields</h3>
+          <h3>Custom fields</h3>
           {customFieldDefs.length > 0 && (
             <div className="cf-list">
               {customFieldDefs.map((f) => (

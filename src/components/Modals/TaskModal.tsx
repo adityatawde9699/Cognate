@@ -210,7 +210,7 @@ export function TaskModal() {
               onChange={e => setTitle(e.target.value)}
               placeholder="What needs doing?"
               autoFocus
-              style={{ display: 'block', width: '100%', minHeight: '44px', fontSize: '1.15rem', fontWeight: 500, color: 'var(--text)', background: 'var(--bg-2)', border: '1px solid rgba(255,255,255,.18)', borderRadius: '9px', padding: '12px 14px', boxSizing: 'border-box', outline: 'none', WebkitAppearance: 'none', appearance: 'none' as any }}
+              style={{ display: 'block', width: '100%', minHeight: '44px', fontSize: '1.15rem', fontWeight: 500, color: 'var(--text)', background: 'var(--bg-2)', border: '1px solid var(--border-strong)', borderRadius: '9px', padding: '12px 14px', boxSizing: 'border-box', outline: 'none', WebkitAppearance: 'none', appearance: 'none' as any }}
             />
           </div>
 
@@ -223,7 +223,7 @@ export function TaskModal() {
               value={description}
               onChange={e => setDescription(e.target.value)}
               placeholder="Add details, context, or a checklist…"
-              style={{ display: 'block', width: '100%', minHeight: '88px', fontSize: '.9rem', color: 'var(--text-m)', background: 'var(--bg-2)', border: '1px solid rgba(255,255,255,.18)', borderRadius: '9px', padding: '12px 14px', boxSizing: 'border-box', outline: 'none', resize: 'vertical', WebkitAppearance: 'none', appearance: 'none' as any }}
+              style={{ display: 'block', width: '100%', minHeight: '88px', fontSize: '.9rem', color: 'var(--text-m)', background: 'var(--bg-2)', border: '1px solid var(--border-strong)', borderRadius: '9px', padding: '12px 14px', boxSizing: 'border-box', outline: 'none', resize: 'vertical', WebkitAppearance: 'none', appearance: 'none' as any }}
             ></textarea>
           </div>
 
@@ -248,7 +248,7 @@ export function TaskModal() {
                 type="date"
                 value={deadline}
                 onChange={e => setDeadline(e.target.value)}
-                style={{ padding: '9px 12px', fontSize: '.87rem', color: 'var(--text)', background: 'var(--bg-2)', border: '1px solid rgba(255,255,255,.18)', borderRadius: '9px', outline: 'none', width: '100%', boxSizing: 'border-box', WebkitAppearance: 'none', appearance: 'none' as any }}
+                style={{ padding: '9px 12px', fontSize: '.87rem', color: 'var(--text)', background: 'var(--bg-2)', border: '1px solid var(--border-strong)', borderRadius: '9px', outline: 'none', width: '100%', boxSizing: 'border-box', WebkitAppearance: 'none', appearance: 'none' as any }}
               />
             </div>
 
@@ -261,7 +261,7 @@ export function TaskModal() {
                   onChange={e => setTags(e.target.value)}
                   aria-label="Tags"
                   placeholder="work, marketing"
-                  style={{ flex: 1, padding: '9px 12px', fontSize: '.87rem', color: 'var(--text)', background: 'var(--bg-2)', border: '1px solid rgba(255,255,255,.18)', borderRadius: '9px', outline: 'none', boxSizing: 'border-box', WebkitAppearance: 'none', appearance: 'none' as any }}
+                  style={{ flex: 1, padding: '9px 12px', fontSize: '.87rem', color: 'var(--text)', background: 'var(--bg-2)', border: '1px solid var(--border-strong)', borderRadius: '9px', outline: 'none', boxSizing: 'border-box', WebkitAppearance: 'none', appearance: 'none' as any }}
                 />
                 <button type="button" className="btn-ai btn-ai-inline" disabled={!!aiBusy} onClick={handleSuggestTags} style={{ padding: '6px 10px', borderRadius: '8px', fontSize: '.8rem', flexShrink: 0 }}>
                   <i className={`fa-solid ${aiBusy === 'tags' ? 'fa-spinner fa-spin' : 'fa-tags'}`}></i>
@@ -272,7 +272,7 @@ export function TaskModal() {
 
             <div style={{ display: 'grid', gridTemplateColumns: '110px minmax(0, 1fr)', alignItems: 'center', gap: '12px', padding: '7px 0' }}>
               <label style={{ color: 'var(--text-m)', fontSize: '.83rem' }}><i className="fa-solid fa-folder" style={{ marginRight: '8px', color: 'var(--text-d)' }}></i>Project</label>
-              <select aria-label="Project" value={projectId} onChange={e => setProjectId(e.target.value)} style={{ padding: '9px 12px', fontSize: '.87rem', color: 'var(--text)', background: 'var(--bg-2)', border: '1px solid rgba(255,255,255,.18)', borderRadius: '9px', outline: 'none', width: '100%', boxSizing: 'border-box', WebkitAppearance: 'none', appearance: 'none' as any }}>
+              <select aria-label="Project" value={projectId} onChange={e => setProjectId(e.target.value)} style={{ padding: '9px 12px', fontSize: '.87rem', color: 'var(--text)', background: 'var(--bg-2)', border: '1px solid var(--border-strong)', borderRadius: '9px', outline: 'none', width: '100%', boxSizing: 'border-box', WebkitAppearance: 'none', appearance: 'none' as any }}>
                 <option value="">No project</option>
                 {(projects || []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
@@ -280,7 +280,7 @@ export function TaskModal() {
 
             <div style={{ display: 'grid', gridTemplateColumns: '110px minmax(0, 1fr)', alignItems: 'center', gap: '12px', padding: '7px 0' }}>
               <label style={{ color: 'var(--text-m)', fontSize: '.83rem' }}><i className="fa-solid fa-flag-checkered" style={{ marginRight: '8px', color: 'var(--text-d)' }}></i>Milestone</label>
-              <select aria-label="Milestone" value={milestoneId} onChange={e => setMilestoneId(e.target.value)} style={{ padding: '9px 12px', fontSize: '.87rem', color: 'var(--text)', background: 'var(--bg-2)', border: '1px solid rgba(255,255,255,.18)', borderRadius: '9px', outline: 'none', width: '100%', boxSizing: 'border-box', WebkitAppearance: 'none', appearance: 'none' as any }}>
+              <select aria-label="Milestone" value={milestoneId} onChange={e => setMilestoneId(e.target.value)} style={{ padding: '9px 12px', fontSize: '.87rem', color: 'var(--text)', background: 'var(--bg-2)', border: '1px solid var(--border-strong)', borderRadius: '9px', outline: 'none', width: '100%', boxSizing: 'border-box', WebkitAppearance: 'none', appearance: 'none' as any }}>
                 <option value="">No milestone</option>
                 {milestones
                   .filter(m => !m.project_id || !projectId || m.project_id === projectId)
@@ -290,7 +290,7 @@ export function TaskModal() {
 
             <div style={{ display: 'grid', gridTemplateColumns: '110px minmax(0, 1fr)', alignItems: 'center', gap: '12px', padding: '7px 0' }}>
               <label style={{ color: 'var(--text-m)', fontSize: '.83rem' }}><i className="fa-solid fa-repeat" style={{ marginRight: '8px', color: 'var(--text-d)' }}></i>Repeat</label>
-              <select aria-label="Repeat" value={recurrence} onChange={e => setRecurrence(e.target.value as any)} style={{ padding: '9px 12px', fontSize: '.87rem', color: 'var(--text)', background: 'var(--bg-2)', border: '1px solid rgba(255,255,255,.18)', borderRadius: '9px', outline: 'none', width: '100%', boxSizing: 'border-box', WebkitAppearance: 'none', appearance: 'none' as any }}>
+              <select aria-label="Repeat" value={recurrence} onChange={e => setRecurrence(e.target.value as any)} style={{ padding: '9px 12px', fontSize: '.87rem', color: 'var(--text)', background: 'var(--bg-2)', border: '1px solid var(--border-strong)', borderRadius: '9px', outline: 'none', width: '100%', boxSizing: 'border-box', WebkitAppearance: 'none', appearance: 'none' as any }}>
                 <option value="none">Does not repeat</option>
                 <option value="daily">Daily</option>
                 <option value="weekly">Weekly</option>
@@ -306,7 +306,7 @@ export function TaskModal() {
                     aria-label={f.name}
                     value={customFields[f.id] || ''}
                     onChange={e => setCustomFields(c => ({ ...c, [f.id]: e.target.value }))}
-                    style={{ padding: '9px 12px', fontSize: '.87rem', color: 'var(--text)', background: 'var(--bg-2)', border: '1px solid rgba(255,255,255,.18)', borderRadius: '9px', outline: 'none', width: '100%', boxSizing: 'border-box', WebkitAppearance: 'none', appearance: 'none' as any }}
+                    style={{ padding: '9px 12px', fontSize: '.87rem', color: 'var(--text)', background: 'var(--bg-2)', border: '1px solid var(--border-strong)', borderRadius: '9px', outline: 'none', width: '100%', boxSizing: 'border-box', WebkitAppearance: 'none', appearance: 'none' as any }}
                   >
                     <option value="">—</option>
                     {(f.options || []).map(o => <option key={o} value={o}>{o}</option>)}
@@ -317,7 +317,7 @@ export function TaskModal() {
                     aria-label={f.name}
                     value={customFields[f.id] || ''}
                     onChange={e => setCustomFields(c => ({ ...c, [f.id]: e.target.value }))}
-                    style={{ padding: '9px 12px', fontSize: '.87rem', color: 'var(--text)', background: 'var(--bg-2)', border: '1px solid rgba(255,255,255,.18)', borderRadius: '9px', outline: 'none', width: '100%', boxSizing: 'border-box', WebkitAppearance: 'none', appearance: 'none' as any }}
+                    style={{ padding: '9px 12px', fontSize: '.87rem', color: 'var(--text)', background: 'var(--bg-2)', border: '1px solid var(--border-strong)', borderRadius: '9px', outline: 'none', width: '100%', boxSizing: 'border-box', WebkitAppearance: 'none', appearance: 'none' as any }}
                   />
                 )}
               </div>

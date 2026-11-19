@@ -377,8 +377,8 @@ export function LiveSyncSettings() {
       )}
 
       {on && cfg?.version === 3 && (
-        <div className="form-group" style={{ background: 'rgba(0,0,0,0.03)', padding: '12px', borderRadius: '8px' }}>
-          <label>Setup Code (for pairing new devices)</label>
+        <div className="form-group" style={{ background: 'var(--surface)', padding: '12px', borderRadius: '8px' }}>
+          <label>Setup code (for pairing new devices)</label>
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '6px' }}>
             <input
               type="text"
@@ -393,14 +393,14 @@ export function LiveSyncSettings() {
           <small className="form-hint">
             To connect another device, select &ldquo;Join Existing Workspace&rdquo; on that device and enter this Setup Code alongside your sync passphrase.
           </small>
-          <div style={{ marginTop: '8px', padding: '8px', background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: '6px' }}>
-            <p style={{ margin: 0, fontSize: '12px', color: '#991b1b', lineHeight: 1.4 }}>
+          <div style={{ marginTop: '8px', padding: '8px', background: 'var(--danger-glow)', border: '1px solid var(--danger)', borderRadius: '8px' }}>
+            <p style={{ margin: 0, fontSize: '12px', color: 'var(--text)', lineHeight: 1.4 }}>
               <strong><i className="fa-solid fa-triangle-exclamation"></i> Warning:</strong> QR code pairing is not implemented. You must manually copy or record this 27-character Setup Code and Passphrase. Losing every device without the Setup Code or an encrypted recovery kit permanently loses access to your workspace.
             </p>
           </div>
           {backupLocation && (
-            <div style={{ marginTop: '8px', padding: '8px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '6px' }}>
-              <p style={{ margin: 0, fontSize: '12px', color: '#334155', lineHeight: 1.4, wordBreak: 'break-all' }}>
+            <div style={{ marginTop: '8px', padding: '8px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '6px' }}>
+              <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-m)', lineHeight: 1.4, wordBreak: 'break-all' }}>
                 <strong><i className="fa-solid fa-file-shield"></i> Verified pre-migration backup:</strong> <code>{backupLocation}</code>
               </p>
             </div>
@@ -409,11 +409,11 @@ export function LiveSyncSettings() {
       )}
 
       {on && syncV3Enabled && cfg?.version === 2 && (
-        <div className="form-group" style={{ border: '1px solid #f59e0b', padding: '14px', borderRadius: '8px', background: '#fffbeb' }}>
-          <strong style={{ color: '#b45309' }}>
+        <div className="form-group" style={{ border: '1px solid var(--warning)', padding: '14px', borderRadius: '8px', background: 'var(--surface)' }}>
+          <strong style={{ color: 'var(--warning)' }}>
             <i className="fa-solid fa-triangle-exclamation"></i> Sync Protocol v2 Active
           </strong>
-          <p style={{ margin: '6px 0', fontSize: '13px', color: '#78350f' }}>
+          <p style={{ margin: '6px 0', fontSize: '13px', color: 'var(--text-m)' }}>
             Upgrade to Sync Protocol v3 for hardened per-room salt derivation, Crockford Base32 Setup Codes, and two-factor confidentiality.
           </p>
           <div style={{ marginTop: '10px' }}>
@@ -433,14 +433,14 @@ export function LiveSyncSettings() {
       )}
 
       {on && syncV3Enabled && binding?.v2_fallback?.room && cfg?.deleteToken && relayCaps?.delete_supported && roomClaimedByMe && !anotherPartyControls && (
-        <div className="form-group" style={{ border: '1px dashed #94a3b8', padding: '12px', borderRadius: '8px', marginTop: '14px' }}>
-          <strong>Legacy Relay Cleanup</strong>
-          <p style={{ fontSize: '12px', margin: '4px 0 8px 0', color: '#64748b' }}>
+        <div className="form-group" style={{ border: '1px dashed var(--border-strong)', padding: '12px', borderRadius: '8px', marginTop: '14px' }}>
+          <strong>Legacy relay cleanup</strong>
+          <p style={{ fontSize: '12px', margin: '4px 0 8px 0', color: 'var(--text-d)' }}>
             This workspace was migrated from v2. You can permanently erase historical v2 ciphertext from the relay.
           </p>
           {softDeletePending ? (
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <span style={{ fontSize: '13px', color: '#059669' }}>
+              <span style={{ fontSize: '13px', color: 'var(--accent)' }}>
                 <i className="fa-solid fa-clock"></i> Soft-deleted. Permanent purge in 7 days.
               </span>
               <button className="btn-ghost" onClick={handleCancelSoftDelete} disabled={busy}>
@@ -466,14 +466,14 @@ export function LiveSyncSettings() {
               </button>
             </div>
           )}
-          <p style={{ fontSize: '11px', color: '#64748b', marginTop: '8px', marginBottom: 0 }}>
+          <p style={{ fontSize: '11px', color: 'var(--text-d)', marginTop: '8px', marginBottom: 0 }}>
             <i className="fa-solid fa-info-circle"></i> If the delete token is lost, history cannot be deleted via the client. A manual server operator database wipe is the only remaining path.
           </p>
         </div>
       )}
 
       {on && syncV3Enabled && anotherPartyControls && (
-        <div className="form-group" style={{ border: '1px solid #ef4444', padding: '12px', borderRadius: '8px', marginTop: '14px', background: '#fef2f2', color: '#991b1b' }}>
+        <div className="form-group" style={{ border: '1px solid var(--danger)', padding: '12px', borderRadius: '8px', marginTop: '14px', background: 'var(--danger-glow)', color: 'var(--text)' }}>
           <strong><i className="fa-solid fa-triangle-exclamation"></i> Another party controls this room. Treat its history as exposed.</strong>
         </div>
       )}
@@ -519,7 +519,7 @@ export function LiveSyncSettings() {
 
           {effectiveMode === 'join' && (
             <div className="form-group">
-              <label>Setup Code</label>
+              <label>Setup code</label>
               <input
                 type="text"
                 value={setupCode}
@@ -576,7 +576,7 @@ export function LiveSyncSettings() {
             )}
             {effectiveMode === 'legacy' && (
               <button className="btn-soft" onClick={handleLegacyConnect} disabled={busy}>
-                <i className={`fa-solid ${busy ? 'fa-spinner fa-spin' : 'fa-link'}`}></i> {syncV3Enabled ? 'Connect Legacy v2' : 'Connect to Relay'}
+                <i className={`fa-solid ${busy ? 'fa-spinner fa-spin' : 'fa-link'}`}></i> {syncV3Enabled ? 'Connect Legacy v2' : 'Connect to relay'}
               </button>
             )}
           </div>
@@ -597,7 +597,7 @@ export function LiveSyncSettings() {
         </small>
       )}
       {msg && (
-        <small className="form-hint" style={{ display: 'block', marginTop: '6px', color: '#2563eb' }}>
+        <small className="form-hint" style={{ display: 'block', marginTop: '6px', color: 'var(--text-m)' }}>
           {msg}
         </small>
       )}
@@ -605,8 +605,8 @@ export function LiveSyncSettings() {
         The relay stores only ciphertext — it can&apos;t read your tasks. Edits merge conflict-free (CRDT), so devices converge even after working offline.
       </small>
 
-      <details className="sync-advanced-section" style={{ marginTop: '16px', borderTop: '1px solid rgba(0,0,0,0.1)', paddingTop: '12px' }}>
-        <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: '13px', color: '#64748b' }}>
+      <details className="sync-advanced-section" style={{ marginTop: '16px', borderTop: '1px solid var(--border)', paddingTop: '12px' }}>
+        <summary style={{ cursor: 'pointer', fontWeight: 500, fontSize: '13px', color: 'var(--text-m)' }}>
           Advanced
         </summary>
         <div style={{ marginTop: '10px' }}>
