@@ -1,8 +1,8 @@
-use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use serde_json::{json, Value};
 use crate::ratelimit::ip_budget_key;
 use crate::store::{now_secs, Store};
+use serde_json::{json, Value};
+use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub const MAX_BODY: usize = 1_048_576;
 pub const MAX_STORE: usize = 32 * 1_048_576;
@@ -17,9 +17,9 @@ thread_local! {
 }
 
 pub fn room_quota() -> usize {
-    TEST_ROOM_QUOTA.with(|c| c.get()).unwrap_or_else(|| {
-        ROOM_QUOTA.load(Ordering::Relaxed)
-    })
+    TEST_ROOM_QUOTA
+        .with(|c| c.get())
+        .unwrap_or_else(|| ROOM_QUOTA.load(Ordering::Relaxed))
 }
 
 #[cfg(test)]
@@ -33,7 +33,10 @@ pub fn reset_room_quota_for_tests() {
 }
 
 pub fn room_bytes(room_data: &HashMap<String, Value>) -> usize {
-    room_data.values().map(|v| serde_json::to_vec(v).map_or(0, |b| b.len())).sum()
+    room_data
+        .values()
+        .map(|v| serde_json::to_vec(v).map_or(0, |b| b.len()))
+        .sum()
 }
 
 #[derive(Default)]
@@ -47,16 +50,29 @@ pub struct ClientBudget {
     pub failed_tokens_count: u32,
 }
 
-pub fn check_write_limits(ip: &str, path: &str, body: &str, store: &Store, cfg: &crate::Config) -> Option<(u16, String)> {
+pub fn check_write_limits(
+    ip: &str,
+    path: &str,
+    body: &str,
+    store: &Store,
+    cfg: &crate::Config,
+) -> Option<(u16, String)> {
     let key = ip_budget_key(ip);
-    let parts: Vec<&str> = path.split('?').next().unwrap_or("").split('/').filter(|s| !s.is_empty()).collect();
-    let room_key = if (parts.len() == 4 || parts.len() == 5) && parts[0] == "v2" && parts[1] == "rooms" {
-        format!("@v2:{}", parts[2])
-    } else if parts.len() == 4 && parts[0] == "rooms" {
-        parts[1].to_string()
-    } else {
-        return None;
-    };
+    let parts: Vec<&str> = path
+        .split('?')
+        .next()
+        .unwrap_or("")
+        .split('/')
+        .filter(|s| !s.is_empty())
+        .collect();
+    let room_key =
+        if (parts.len() == 4 || parts.len() == 5) && parts[0] == "v2" && parts[1] == "rooms" {
+            format!("@v2:{}", parts[2])
+        } else if parts.len() == 4 && parts[0] == "rooms" {
+            parts[1].to_string()
+        } else {
+            return None;
+        };
 
     let now = now_secs();
     let mut q_guard = cfg.quotas.lock().unwrap();
@@ -85,14 +101,20 @@ pub fn check_write_limits(ip: &str, path: &str, body: &str, store: &Store, cfg: 
     }
     let budget = q_guard.entry(key).or_default();
 
-    let is_token_op = (parts.len() == 4 || parts.len() == 5) && parts[0] == "v2" && parts[1] == "rooms" && ["delete", "undelete", "claim", "freeze"].contains(&parts[3]);
+    let is_token_op = (parts.len() == 4 || parts.len() == 5)
+        && parts[0] == "v2"
+        && parts[1] == "rooms"
+        && ["delete", "undelete", "claim", "freeze"].contains(&parts[3]);
     if is_token_op {
         if now.saturating_sub(budget.failed_tokens_window_start) >= 60 {
             budget.failed_tokens_window_start = now;
             budget.failed_tokens_count = 0;
         }
         if budget.failed_tokens_count >= 10 {
-            return Some((429, json!({"error": "too many failed token attempts; try again later"}).to_string()));
+            return Some((
+                429,
+                json!({"error": "too many failed token attempts; try again later"}).to_string(),
+            ));
         }
     }
 
@@ -101,7 +123,10 @@ pub fn check_write_limits(ip: &str, path: &str, body: &str, store: &Store, cfg: 
         budget.write_bytes = 0;
     }
     if budget.write_bytes.saturating_add(body.len()) > cfg.ip_write_limit_bytes {
-        return Some((429, json!({"error": "client write byte budget exceeded"}).to_string()));
+        return Some((
+            429,
+            json!({"error": "client write byte budget exceeded"}).to_string(),
+        ));
     }
 
     if now.saturating_sub(budget.new_rooms_window_start) >= 3600 {
@@ -111,12 +136,22 @@ pub fn check_write_limits(ip: &str, path: &str, body: &str, store: &Store, cfg: 
     let store_guard = store.lock().unwrap();
     let is_new_room = !store_guard.contains_key(&room_key);
     if is_new_room && budget.new_rooms_count >= cfg.ip_new_rooms_limit {
-        return Some((429, json!({"error": "new room limit exceeded for IP"}).to_string()));
+        return Some((
+            429,
+            json!({"error": "new room limit exceeded for IP"}).to_string(),
+        ));
     }
 
-    let ip_stored: usize = budget.created_rooms.iter().filter_map(|r| store_guard.get(r).map(room_bytes)).sum();
+    let ip_stored: usize = budget
+        .created_rooms
+        .iter()
+        .filter_map(|r| store_guard.get(r).map(room_bytes))
+        .sum();
     if ip_stored.saturating_add(body.len()) > cfg.ip_max_store_bytes {
-        return Some((507, json!({"error": "client storage quota exceeded"}).to_string()));
+        return Some((
+            507,
+            json!({"error": "client storage quota exceeded"}).to_string(),
+        ));
     }
 
     None
@@ -124,14 +159,21 @@ pub fn check_write_limits(ip: &str, path: &str, body: &str, store: &Store, cfg: 
 
 pub fn record_successful_write(ip: &str, path: &str, body: &str, cfg: &crate::Config) {
     let key = ip_budget_key(ip);
-    let parts: Vec<&str> = path.split('?').next().unwrap_or("").split('/').filter(|s| !s.is_empty()).collect();
-    let room_key = if (parts.len() == 4 || parts.len() == 5) && parts[0] == "v2" && parts[1] == "rooms" {
-        format!("@v2:{}", parts[2])
-    } else if parts.len() == 4 && parts[0] == "rooms" {
-        parts[1].to_string()
-    } else {
-        return;
-    };
+    let parts: Vec<&str> = path
+        .split('?')
+        .next()
+        .unwrap_or("")
+        .split('/')
+        .filter(|s| !s.is_empty())
+        .collect();
+    let room_key =
+        if (parts.len() == 4 || parts.len() == 5) && parts[0] == "v2" && parts[1] == "rooms" {
+            format!("@v2:{}", parts[2])
+        } else if parts.len() == 4 && parts[0] == "rooms" {
+            parts[1].to_string()
+        } else {
+            return;
+        };
     let now = now_secs();
     let mut q_guard = cfg.quotas.lock().unwrap();
     let budget = q_guard.entry(key).or_default();
@@ -140,7 +182,9 @@ pub fn record_successful_write(ip: &str, path: &str, body: &str, cfg: &crate::Co
         budget.write_bytes = 0;
     }
     budget.write_bytes = budget.write_bytes.saturating_add(body.len());
-    if budget.new_rooms_window_start == 0 || now.saturating_sub(budget.new_rooms_window_start) >= 3600 {
+    if budget.new_rooms_window_start == 0
+        || now.saturating_sub(budget.new_rooms_window_start) >= 3600
+    {
         budget.new_rooms_window_start = now;
         budget.new_rooms_count = 0;
     }

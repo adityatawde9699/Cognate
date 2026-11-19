@@ -20,7 +20,7 @@ Run Rust checks in each independent crate:
 (cd server && cargo clippy -- -D warnings)
 ```
 
-The PR workflow `.github/workflows/test.yml` enforces these checks. Desktop Rust formatting is advisory, not a blocking check. Playwright reports are uploaded in CI; coverage collection is not configured.
+The PR workflow `.github/workflows/test.yml` enforces these checks. Rust formatting (`cargo fmt --check` for the desktop crate and the relay) is a blocking check. Playwright reports are uploaded in CI; coverage collection is not configured.
 
 ## Coverage and limits
 

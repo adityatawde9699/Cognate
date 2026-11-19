@@ -1,21 +1,21 @@
-use tauri_plugin_sql::{Migration, MigrationKind};
+use chrono::{Local, NaiveDate};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, Emitter,
+    Emitter, Manager,
 };
-use chrono::{NaiveDate, Local};
+use tauri_plugin_sql::{Migration, MigrationKind};
 
-mod integrations;
 mod ai;
 #[cfg(desktop)]
 mod background_reminders;
-mod secrets;
 mod backup;
-mod operation_store;
-mod planner;
 #[cfg(desktop)]
 mod desktop_health;
+mod integrations;
+mod operation_store;
+mod planner;
+mod secrets;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Phase {
@@ -85,11 +85,15 @@ pub fn run() {
 
     let mut builder = tauri::Builder::default();
     #[cfg(desktop)]
-    { builder = builder.plugin(tauri_plugin_single_instance::init(|app, _, _| {
-        if let Some(window) = app.get_webview_window("main") {
-            let _ = window.show(); let _ = window.unminimize(); let _ = window.set_focus();
-        }
-    })); }
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }));
+    }
     builder = builder
         .manage(ai::AiRequests::default())
         .manage(std::sync::Mutex::new(PomoState {
@@ -247,7 +251,7 @@ fn plan_team(req: planner::TeamPlanRequest) -> Result<planner::TeamPlanResult, S
 #[tauri::command]
 fn calc_priority(importance: u8, effort: u8, deadline: Option<String>) -> Result<String, String> {
     let imp = (importance as f64 / 5.0) * 4.0;
-    
+
     let deadl = if let Some(dl) = deadline {
         if dl.is_empty() {
             0.0
@@ -256,7 +260,7 @@ fn calc_priority(importance: u8, effort: u8, deadline: Option<String>) -> Result
                 Ok(parsed_date) => {
                     let now = Local::now().naive_local().date();
                     let days_left = parsed_date.signed_duration_since(now).num_days() as f64;
-                    
+
                     if days_left <= 0.0 {
                         4.0
                     } else if days_left <= 14.0 {
@@ -311,7 +315,10 @@ fn set_pomodoro_config(
 }
 
 #[tauri::command]
-fn toggle_pomodoro(app: tauri::AppHandle, state: tauri::State<'_, std::sync::Mutex<PomoState>>) -> Result<bool, String> {
+fn toggle_pomodoro(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, std::sync::Mutex<PomoState>>,
+) -> Result<bool, String> {
     let mut s = state.lock().unwrap();
     s.is_active = !s.is_active;
     let is_active = s.is_active;
@@ -342,7 +349,11 @@ fn toggle_pomodoro(app: tauri::AppHandle, state: tauri::State<'_, std::sync::Mut
                                 finished_work = true;
                                 if s_curr.auto_start_break {
                                     let long = s_curr.completed_work % 4 == 0;
-                                    let blen = if long { s_curr.long_break_secs } else { s_curr.short_break_secs };
+                                    let blen = if long {
+                                        s_curr.long_break_secs
+                                    } else {
+                                        s_curr.short_break_secs
+                                    };
                                     s_curr.mode = Phase::Break;
                                     s_curr.phase_total = blen;
                                     s_curr.time_left = blen;
@@ -366,7 +377,11 @@ fn toggle_pomodoro(app: tauri::AppHandle, state: tauri::State<'_, std::sync::Mut
                     let payload = TickPayload {
                         remaining: s_curr.time_left,
                         total: s_curr.phase_total.max(1),
-                        mode: match s_curr.mode { Phase::Work => "work", Phase::Break => "break" }.to_string(),
+                        mode: match s_curr.mode {
+                            Phase::Work => "work",
+                            Phase::Break => "break",
+                        }
+                        .to_string(),
                     };
                     (payload, s_curr.is_active)
                 };

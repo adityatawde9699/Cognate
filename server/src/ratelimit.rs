@@ -14,7 +14,10 @@ pub fn ip_budget_key(ip: &str) -> String {
             std::net::IpAddr::V4(v4) => v4.to_string(),
             std::net::IpAddr::V6(v6) => {
                 let segs = v6.segments();
-                format!("{:x}:{:x}:{:x}:{:x}::/64", segs[0], segs[1], segs[2], segs[3])
+                format!(
+                    "{:x}:{:x}:{:x}:{:x}::/64",
+                    segs[0], segs[1], segs[2], segs[3]
+                )
             }
         }
     } else {
@@ -29,12 +32,19 @@ pub fn rate_ok(rate: &RateMap, ip: &str, now: u64, limit: u32, window: u64) -> b
     if m.len() >= 10000 {
         m.retain(|_, bucket| now.saturating_sub(bucket.window_start) < window);
         if m.len() >= 10000 && !m.contains_key(&key) {
-            if let Some(oldest_key) = m.iter().min_by_key(|(_, b)| b.window_start).map(|(k, _)| k.clone()) {
+            if let Some(oldest_key) = m
+                .iter()
+                .min_by_key(|(_, b)| b.window_start)
+                .map(|(k, _)| k.clone())
+            {
                 m.remove(&oldest_key);
             }
         }
     }
-    let b = m.entry(key).or_insert(Bucket { window_start: now, count: 0 });
+    let b = m.entry(key).or_insert(Bucket {
+        window_start: now,
+        count: 0,
+    });
     if now.saturating_sub(b.window_start) >= window {
         b.window_start = now;
         b.count = 0;
@@ -50,7 +60,13 @@ pub fn resolve_client_ip(socket_ip: &str, headers: &[Header], trusted_hops: usiz
     let hops: Vec<&str> = headers
         .iter()
         .filter(|h| h.field.equiv("X-Forwarded-For"))
-        .flat_map(|h| h.value.as_str().split(',').map(|s| s.trim()).filter(|s| !s.is_empty()))
+        .flat_map(|h| {
+            h.value
+                .as_str()
+                .split(',')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+        })
         .collect();
     if hops.len() >= trusted_hops {
         let candidate = hops[hops.len() - trusted_hops];

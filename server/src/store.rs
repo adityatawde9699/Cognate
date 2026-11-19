@@ -1,11 +1,11 @@
+use crate::quota::MAX_STORE;
+use crate::routes::route_v;
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 #[cfg(test)]
 use std::time::Duration;
-use serde_json::{json, Value};
-use crate::quota::MAX_STORE;
-use crate::routes::route_v;
 
 pub type Store = Mutex<HashMap<String, HashMap<String, Value>>>;
 pub type Versions = Mutex<HashMap<String, u64>>;
@@ -97,10 +97,13 @@ pub fn load_store(path: &str) -> Result<Data, String> {
     match std::fs::metadata(path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(HashMap::new()),
         Err(error) => return Err(error.to_string()),
-        Ok(metadata) if metadata.len() > MAX_STORE as u64 => return Err("Relay store exceeds quota".into()),
-        _ => {},
+        Ok(metadata) if metadata.len() > MAX_STORE as u64 => {
+            return Err("Relay store exceeds quota".into())
+        }
+        _ => {}
     }
-    serde_json::from_slice(&std::fs::read(path).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+    serde_json::from_slice(&std::fs::read(path).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())
 }
 
 pub fn persist_bytes(json: &[u8], path: &str) -> Result<(), String> {
@@ -112,31 +115,46 @@ pub fn persist_bytes(json: &[u8], path: &str) -> Result<(), String> {
         }
     }
     use std::io::Write;
-    let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e| e.to_string())?.as_nanos();
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_nanos();
     let tmp = format!("{path}.{}.{}.pending", std::process::id(), unique);
     let result = (|| -> std::io::Result<()> {
         let mut options = std::fs::OpenOptions::new();
         options.write(true).create_new(true);
-        #[cfg(unix)] { use std::os::unix::fs::OpenOptionsExt; options.mode(0o600); }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
         let mut file = options.open(&tmp)?;
         file.write_all(json)?;
         file.sync_all()?;
         drop(file);
         std::fs::rename(&tmp, path)?;
-        #[cfg(unix)] {
-            let parent = std::path::Path::new(path).parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(std::path::Path::new("."));
+        #[cfg(unix)]
+        {
+            let parent = std::path::Path::new(path)
+                .parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .unwrap_or(std::path::Path::new("."));
             std::fs::File::open(parent)?.sync_all()?;
         }
         Ok(())
     })();
-    if result.is_err() { let _ = std::fs::remove_file(&tmp); }
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
     result.map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
 pub fn persist_data(data: &Data, path: &str) -> Result<(), String> {
     let json = serde_json::to_vec(data).map_err(|e| e.to_string())?;
-    if json.len() > MAX_STORE { return Err("Relay store quota exceeded".into()); }
+    if json.len() > MAX_STORE {
+        return Err("Relay store quota exceeded".into());
+    }
     persist_bytes(&json, path)
 }
 
@@ -146,12 +164,23 @@ pub fn persist(store: &Store, path: &str) -> Result<(), String> {
 }
 
 pub fn identifier(value: &str) -> bool {
-    !value.is_empty() && value.len() <= 128 && value.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 /// Acknowledge only after the proposed snapshot has been synced and published.
 /// Mutex is released during fsync to reduce contention.
-pub fn durable_write(store: &Store, versions: &Versions, method: &str, path: &str, body: &str, data_path: &str) -> (u16, String) {
+pub fn durable_write(
+    store: &Store,
+    versions: &Versions,
+    method: &str,
+    path: &str,
+    body: &str,
+    data_path: &str,
+) -> (u16, String) {
     let _write_permit = WRITE_LOCK.lock().unwrap();
 
     let candidate_versions = Mutex::new(HashMap::new());
@@ -168,7 +197,11 @@ pub fn durable_write(store: &Store, versions: &Versions, method: &str, path: &st
             Ok(_) => return (507, json!({"error": "store quota exceeded"}).to_string()),
             Err(e) => {
                 STORAGE_FAILURES.fetch_add(1, Ordering::Relaxed);
-                return (503, json!({"error": format!("serialization failed: {e}"), "acknowledged": false}).to_string());
+                return (
+                    503,
+                    json!({"error": format!("serialization failed: {e}"), "acknowledged": false})
+                        .to_string(),
+                );
             }
         };
         let current_gen = PERSIST_GENERATION.load(Ordering::SeqCst);
@@ -178,7 +211,11 @@ pub fn durable_write(store: &Store, versions: &Versions, method: &str, path: &st
     if let Err(error) = persist_bytes(&json_bytes, data_path) {
         STORAGE_FAILURES.fetch_add(1, Ordering::Relaxed);
         eprintln!("Relay persistence failed: {error}");
-        return (503, json!({"error": "durable storage unavailable; retry", "acknowledged": false}).to_string());
+        return (
+            503,
+            json!({"error": "durable storage unavailable; retry", "acknowledged": false})
+                .to_string(),
+        );
     }
 
     *store.lock().unwrap() = candidate;
@@ -195,6 +232,12 @@ pub fn durable_write(store: &Store, versions: &Versions, method: &str, path: &st
 }
 
 #[cfg(test)]
-pub fn durable_put(store: &Store, versions: &Versions, path: &str, body: &str, data_path: &str) -> (u16, String) {
+pub fn durable_put(
+    store: &Store,
+    versions: &Versions,
+    path: &str,
+    body: &str,
+    data_path: &str,
+) -> (u16, String) {
     durable_write(store, versions, "PUT", path, body, data_path)
 }

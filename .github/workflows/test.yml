@@ -61,7 +61,7 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: clippy, rustfmt
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
@@ -78,10 +78,9 @@ jobs:
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf webkitgtk-webdriver xvfb dbus-x11 gnome-keyring
 
       - name: Check Rust formatting
-        working-directory: src-tauri
-        continue-on-error: true # Might fail if rustfmt isn't perfectly satisfied initially
         run: |
-          cargo fmt -- --check || echo "Formatting not strictly required but recommended."
+          cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+          cargo fmt --manifest-path server/Cargo.toml -- --check
 
       - name: Check Rust linting
         working-directory: src-tauri

@@ -16,8 +16,12 @@ const DEFAULT_DURATION: u32 = 30;
 const DEFAULT_WORK_START: u32 = 6 * 60; // 06:00
 const DEFAULT_WORK_END: u32 = 23 * 60; // 23:00
 
-fn default_energy() -> String { "med".into() }
-fn default_priority() -> String { "medium".into() }
+fn default_energy() -> String {
+    "med".into()
+}
+fn default_priority() -> String {
+    "medium".into()
+}
 
 #[derive(Deserialize, Clone)]
 pub struct PlanTask {
@@ -79,11 +83,14 @@ pub struct Unscheduled {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct PlanPin { pub task_id: String, pub duration_min:u32 }
+pub struct PlanPin {
+    pub task_id: String,
+    pub duration_min: u32,
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PlanResult {
-    #[serde(default,skip_serializing_if="Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pin: Option<PlanPin>,
     pub blocks: Vec<Block>,
     pub unscheduled: Vec<Unscheduled>,
@@ -126,12 +133,20 @@ fn energy_at_curve(min: u32, curve: &[u8]) -> u8 {
 }
 
 fn dur_of(t: &PlanTask) -> u32 {
-    if t.duration_min == 0 { DEFAULT_DURATION } else { t.duration_min }
+    if t.duration_min == 0 {
+        DEFAULT_DURATION
+    } else {
+        t.duration_min
+    }
 }
 
 /// Normalize a deadline for chronological sort; empty (no deadline) sorts last.
 fn deadline_key(d: &str) -> String {
-    if d.is_empty() { "9999-12-31".into() } else { d.to_string() }
+    if d.is_empty() {
+        "9999-12-31".into()
+    } else {
+        d.to_string()
+    }
 }
 
 /// Free intervals inside [ws, we] once `occupied` (busy + pinned) is removed.
@@ -202,7 +217,11 @@ fn reason_for(task: &PlanTask, start: u32, date: &str, busy: &[BusyBlock], curve
     }
     // Slotted right after a meeting?
     if let Some(b) = busy.iter().find(|b| b.end_min == start) {
-        let what = if b.title.is_empty() { "your calendar block".into() } else { format!("\"{}\"", b.title) };
+        let what = if b.title.is_empty() {
+            "your calendar block".into()
+        } else {
+            format!("\"{}\"", b.title)
+        };
         parts.push(format!("right after {what}"));
     }
 
@@ -213,59 +232,106 @@ fn reason_for(task: &PlanTask, start: u32, date: &str, busy: &[BusyBlock], curve
     }
 }
 
-pub fn validate(req: &PlanRequest) -> Result<(),String> {
+pub fn validate(req: &PlanRequest) -> Result<(), String> {
     fn date(s: &str) -> bool {
-        s.len()==10 && chrono::NaiveDate::parse_from_str(s,"%Y-%m-%d").is_ok_and(|d| d.format("%Y-%m-%d").to_string()==s)
+        s.len() == 10
+            && chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
+                .is_ok_and(|d| d.format("%Y-%m-%d").to_string() == s)
     }
-    if !date(&req.date) || req.work_start_min>=req.work_end_min || req.work_end_min>1440 { return Err("Invalid planner date or working hours".into()); }
-    if req.tasks.len()>10000 || req.busy.len()>10000 { return Err("Planner input exceeds supported size".into()); }
-    if !req.energy_curve.is_empty() && (req.energy_curve.len()!=24 || req.energy_curve.iter().any(|n|*n>2)) { return Err("Invalid energy curve".into()); }
+    if !date(&req.date) || req.work_start_min >= req.work_end_min || req.work_end_min > 1440 {
+        return Err("Invalid planner date or working hours".into());
+    }
+    if req.tasks.len() > 10000 || req.busy.len() > 10000 {
+        return Err("Planner input exceeds supported size".into());
+    }
+    if !req.energy_curve.is_empty()
+        && (req.energy_curve.len() != 24 || req.energy_curve.iter().any(|n| *n > 2))
+    {
+        return Err("Invalid energy curve".into());
+    }
     let mut ids = HashSet::new();
     for task in &req.tasks {
-        if task.id.is_empty() || !ids.insert(&task.id) { return Err("Planner task IDs must be unique".into()); }
-        if !(1..=1440).contains(&task.duration_min) || !(1..=5).contains(&task.importance) || !["hi","med","lo"].contains(&task.energy.as_str()) || !["high","medium","low"].contains(&task.priority.as_str()) || (!task.deadline.is_empty() && !date(&task.deadline)) { return Err("Invalid task fields".into()); }
-        if task.pinned_start_min.is_some_and(|n|n>1440 || !task.pinned) { return Err("Invalid pinned start".into()); }
+        if task.id.is_empty() || !ids.insert(&task.id) {
+            return Err("Planner task IDs must be unique".into());
+        }
+        if !(1..=1440).contains(&task.duration_min)
+            || !(1..=5).contains(&task.importance)
+            || !["hi", "med", "lo"].contains(&task.energy.as_str())
+            || !["high", "medium", "low"].contains(&task.priority.as_str())
+            || (!task.deadline.is_empty() && !date(&task.deadline))
+        {
+            return Err("Invalid task fields".into());
+        }
+        if task
+            .pinned_start_min
+            .is_some_and(|n| n > 1440 || !task.pinned)
+        {
+            return Err("Invalid pinned start".into());
+        }
     }
-    if req.busy.iter().any(|b|b.start_min>=b.end_min || b.end_min>1440) { return Err("Invalid busy interval".into()); }
+    if req
+        .busy
+        .iter()
+        .any(|b| b.start_min >= b.end_min || b.end_min > 1440)
+    {
+        return Err("Invalid busy interval".into());
+    }
     Ok(())
 }
 
 /// The scheduler. Pure: same input → same output.
 pub fn plan(req: &PlanRequest) -> PlanResult {
     if let Err(reason) = validate(req) {
-        return PlanResult { pin:None, blocks:vec![],unscheduled:req.tasks.iter().map(|t|Unscheduled {task_id:t.id.clone(),reason:reason.clone()}).collect() };
+        return PlanResult {
+            pin: None,
+            blocks: vec![],
+            unscheduled: req
+                .tasks
+                .iter()
+                .map(|t| Unscheduled {
+                    task_id: t.id.clone(),
+                    reason: reason.clone(),
+                })
+                .collect(),
+        };
     }
     let (ws, we) = (req.work_start_min, req.work_end_min);
     let mut blocks: Vec<Block> = Vec::new();
     let mut unscheduled: Vec<Unscheduled> = Vec::new();
 
     // 1) Pinned tasks claim their fixed slots first.
-    let mut occupied: Vec<(u32, u32)> =
-        req.busy.iter().map(|b| (b.start_min, b.end_min)).collect();
+    let mut occupied: Vec<(u32, u32)> = req.busy.iter().map(|b| (b.start_min, b.end_min)).collect();
 
-    let mut pins: Vec<&PlanTask> = req.tasks.iter().filter(|t|t.pinned).collect();
-    pins.sort_by(|a,b|a.id.cmp(&b.id));
+    let mut pins: Vec<&PlanTask> = req.tasks.iter().filter(|t| t.pinned).collect();
+    pins.sort_by(|a, b| a.id.cmp(&b.id));
     for t in pins {
         let Some(s) = t.pinned_start_min else {
-            unscheduled.push(Unscheduled {task_id:t.id.clone(),reason:"Pinned task has no start time".into()});
+            unscheduled.push(Unscheduled {
+                task_id: t.id.clone(),
+                reason: "Pinned task has no start time".into(),
+            });
             continue;
         };
         let e = s + dur_of(t);
-        if s<ws || e>we || occupied.iter().any(|&(start,end)|start<e && end>s) {
-            unscheduled.push(Unscheduled {task_id:t.id.clone(),reason:"Pinned time conflicts with working hours, calendar, or another pin".into()});
+        if s < ws || e > we || occupied.iter().any(|&(start, end)| start < e && end > s) {
+            unscheduled.push(Unscheduled {
+                task_id: t.id.clone(),
+                reason: "Pinned time conflicts with working hours, calendar, or another pin".into(),
+            });
             continue;
         }
-        occupied.push((s,e));
-        blocks.push(Block {task_id:t.id.clone(),start_min:s,end_min:e,reason:"Pinned to this time".into()});
+        occupied.push((s, e));
+        blocks.push(Block {
+            task_id: t.id.clone(),
+            start_min: s,
+            end_min: e,
+            reason: "Pinned to this time".into(),
+        });
     }
 
     // 2) Order the remaining tasks: deadline ↑, then priority/importance/energy ↓,
     //    then longer-first (pack big rocks), then id for a stable total order.
-    let mut pending: Vec<&PlanTask> = req
-        .tasks
-        .iter()
-        .filter(|t| !t.pinned)
-        .collect();
+    let mut pending: Vec<&PlanTask> = req.tasks.iter().filter(|t| !t.pinned).collect();
     pending.sort_by(|a, b| {
         deadline_key(&a.deadline)
             .cmp(&deadline_key(&b.deadline))
@@ -326,7 +392,11 @@ pub fn plan(req: &PlanRequest) -> PlanResult {
     }
 
     blocks.sort_by_key(|b| (b.start_min, b.task_id.clone()));
-    PlanResult { pin:None, blocks, unscheduled }
+    PlanResult {
+        pin: None,
+        blocks,
+        unscheduled,
+    }
 }
 
 // ── Team auto-planning (Act 3): balance, then schedule each member ──
@@ -390,15 +460,19 @@ pub struct TeamPlanResult {
 }
 
 fn capacity_of(m: &TeamMember) -> u32 {
-    let start=m.work_start_min.unwrap_or(DEFAULT_WORK_START);
-    let end=m.work_end_min.unwrap_or(DEFAULT_WORK_END);
-    let mut busy=m.busy.clone();busy.sort_by_key(|b|b.start_min);
-    let mut until=start;let mut occupied=0;
+    let start = m.work_start_min.unwrap_or(DEFAULT_WORK_START);
+    let end = m.work_end_min.unwrap_or(DEFAULT_WORK_END);
+    let mut busy = m.busy.clone();
+    busy.sort_by_key(|b| b.start_min);
+    let mut until = start;
+    let mut occupied = 0;
     for b in busy {
-        let from=start.max(b.start_min).max(until);let to=end.min(b.end_min);
-        occupied+=to.saturating_sub(from);until=until.max(to);
+        let from = start.max(b.start_min).max(until);
+        let to = end.min(b.end_min);
+        occupied += to.saturating_sub(from);
+        until = until.max(to);
     }
-    let available=end.saturating_sub(start).saturating_sub(occupied);
+    let available = end.saturating_sub(start).saturating_sub(occupied);
     available.min(m.capacity_min.unwrap_or(available))
 }
 
@@ -414,13 +488,33 @@ fn by_priority(a: &PlanTask, b: &PlanTask) -> std::cmp::Ordering {
 
 pub fn validate_team(req: &TeamPlanRequest) -> Result<(), String> {
     let mut actors = HashSet::new();
-    if req.members.len() > 200 || req.members.iter().any(|m| m.actor.is_empty() || !actors.insert(&m.actor) || m.capacity_min.is_some_and(|n|n>1440)) {
+    if req.members.len() > 200
+        || req.members.iter().any(|m| {
+            m.actor.is_empty()
+                || !actors.insert(&m.actor)
+                || m.capacity_min.is_some_and(|n| n > 1440)
+        })
+    {
         return Err("Invalid team members or capacity.".into());
     }
-    let tasks = req.tasks.iter().map(|t|t.task.clone()).collect::<Vec<_>>();
-    validate(&PlanRequest {date:req.date.clone(),work_start_min:DEFAULT_WORK_START,work_end_min:DEFAULT_WORK_END,tasks:tasks.clone(),busy:vec![],energy_curve:vec![]})?;
+    let tasks = req.tasks.iter().map(|t| t.task.clone()).collect::<Vec<_>>();
+    validate(&PlanRequest {
+        date: req.date.clone(),
+        work_start_min: DEFAULT_WORK_START,
+        work_end_min: DEFAULT_WORK_END,
+        tasks: tasks.clone(),
+        busy: vec![],
+        energy_curve: vec![],
+    })?;
     for m in &req.members {
-        validate(&PlanRequest {date:req.date.clone(),work_start_min:m.work_start_min.unwrap_or(DEFAULT_WORK_START),work_end_min:m.work_end_min.unwrap_or(DEFAULT_WORK_END),tasks:tasks.clone(),busy:m.busy.clone(),energy_curve:vec![]})?;
+        validate(&PlanRequest {
+            date: req.date.clone(),
+            work_start_min: m.work_start_min.unwrap_or(DEFAULT_WORK_START),
+            work_end_min: m.work_end_min.unwrap_or(DEFAULT_WORK_END),
+            tasks: tasks.clone(),
+            busy: m.busy.clone(),
+            energy_curve: vec![],
+        })?;
     }
     Ok(())
 }
@@ -438,12 +532,14 @@ pub fn plan_team(req: &TeamPlanRequest) -> TeamPlanResult {
         };
     }
 
-    let mut buckets: HashMap<String, Vec<TeamPlanTask>> =
-        members.iter().map(|m| (m.actor.clone(), Vec::new())).collect();
+    let mut buckets: HashMap<String, Vec<TeamPlanTask>> = members
+        .iter()
+        .map(|m| (m.actor.clone(), Vec::new()))
+        .collect();
     let mut load: HashMap<String, u32> = members.iter().map(|m| (m.actor.clone(), 0u32)).collect();
     let mut assignments: Vec<TeamAssignment> = Vec::new();
 
-    let mut unroutable=Vec::new();
+    let mut unroutable = Vec::new();
     // Phase 1a — honour explicit assignments.
     let mut free: Vec<TeamPlanTask> = Vec::new();
     for t in &req.tasks {
@@ -463,7 +559,7 @@ pub fn plan_team(req: &TeamPlanRequest) -> TeamPlanResult {
         let d = dur_of(&t.task);
         let pick = members
             .iter()
-            .filter(|m|load[&m.actor].saturating_add(d)<=capacity_of(m))
+            .filter(|m| load[&m.actor].saturating_add(d) <= capacity_of(m))
             .min_by(|a, b| {
                 let aa = load[&a.actor] + d;
                 let ba = load[&b.actor] + d;
@@ -471,10 +567,16 @@ pub fn plan_team(req: &TeamPlanRequest) -> TeamPlanResult {
                 let bf = u8::from(ba > capacity_of(b));
                 af.cmp(&bf).then(aa.cmp(&ba)).then(a.actor.cmp(&b.actor))
             })
-            .map(|m|m.actor.clone());
-        let Some(pick)=pick else {unroutable.push(t.task.id.clone());continue;};
+            .map(|m| m.actor.clone());
+        let Some(pick) = pick else {
+            unroutable.push(t.task.id.clone());
+            continue;
+        };
         *load.get_mut(&pick).unwrap() += d;
-        assignments.push(TeamAssignment { task_id: t.task.id.clone(), actor: pick.clone() });
+        assignments.push(TeamAssignment {
+            task_id: t.task.id.clone(),
+            actor: pick.clone(),
+        });
         buckets.get_mut(&pick).unwrap().push(t);
     }
 
@@ -506,7 +608,12 @@ pub fn plan_team(req: &TeamPlanRequest) -> TeamPlanResult {
         by_member.insert(m.actor.clone(), result);
     }
 
-    TeamPlanResult { by_member, loads, assignments, unroutable }
+    TeamPlanResult {
+        by_member,
+        loads,
+        assignments,
+        unroutable,
+    }
 }
 
 #[cfg(test)]
@@ -545,7 +652,11 @@ mod tests {
         curve[13..=16].fill(2);
         curve[9..=11].fill(0);
         // A midday block splits the day so the curve gets to pick a window.
-        let busy = vec![BusyBlock { start_min: 660, end_min: 780, title: "Block".into() }];
+        let busy = vec![BusyBlock {
+            start_min: 660,
+            end_min: 780,
+            title: "Block".into(),
+        }];
         let mk = |curve: Vec<u8>| PlanRequest {
             date: "2026-06-24".into(),
             work_start_min: DEFAULT_WORK_START,
@@ -566,18 +677,28 @@ mod tests {
     #[test]
     fn stays_within_working_hours() {
         let r = req(
-            vec![task("a", 60, "", "high", "med"), task("b", 120, "", "low", "med")],
+            vec![
+                task("a", 60, "", "high", "med"),
+                task("b", 120, "", "low", "med"),
+            ],
             vec![],
         );
         let out = plan(&r);
         for b in &out.blocks {
-            assert!(b.start_min >= DEFAULT_WORK_START && b.end_min <= DEFAULT_WORK_END, "block outside work hours: {b:?}");
+            assert!(
+                b.start_min >= DEFAULT_WORK_START && b.end_min <= DEFAULT_WORK_END,
+                "block outside work hours: {b:?}"
+            );
         }
     }
 
     #[test]
     fn no_overlaps_among_blocks_or_busy() {
-        let busy = vec![BusyBlock { start_min: DEFAULT_WORK_START + 240, end_min: DEFAULT_WORK_START + 300, title: "Standup".into() }];
+        let busy = vec![BusyBlock {
+            start_min: DEFAULT_WORK_START + 240,
+            end_min: DEFAULT_WORK_START + 300,
+            title: "Standup".into(),
+        }];
         let r = req(
             vec![
                 task("a", 90, "", "high", "med"),
@@ -587,13 +708,22 @@ mod tests {
             busy.clone(),
         );
         let out = plan(&r);
-        let mut intervals: Vec<(u32, u32)> = out.blocks.iter().map(|b| (b.start_min, b.end_min)).collect();
+        let mut intervals: Vec<(u32, u32)> = out
+            .blocks
+            .iter()
+            .map(|b| (b.start_min, b.end_min))
+            .collect();
         for b in &busy {
             intervals.push((b.start_min, b.end_min));
         }
         for i in 0..intervals.len() {
             for j in (i + 1)..intervals.len() {
-                assert!(!overlaps(intervals[i], intervals[j]), "overlap {:?} vs {:?}", intervals[i], intervals[j]);
+                assert!(
+                    !overlaps(intervals[i], intervals[j]),
+                    "overlap {:?} vs {:?}",
+                    intervals[i],
+                    intervals[j]
+                );
             }
         }
     }
@@ -610,17 +740,31 @@ mod tests {
         let out = plan(&r);
         let sooner = out.blocks.iter().find(|b| b.task_id == "sooner").unwrap();
         let later = out.blocks.iter().find(|b| b.task_id == "later").unwrap();
-        assert!(sooner.start_min < later.start_min, "earlier deadline must come first");
+        assert!(
+            sooner.start_min < later.start_min,
+            "earlier deadline must come first"
+        );
     }
 
     #[test]
     fn busy_blocks_are_avoided() {
-        let busy = vec![BusyBlock { start_min: DEFAULT_WORK_START, end_min: DEFAULT_WORK_START + 60, title: "Call".into() }];
+        let busy = vec![BusyBlock {
+            start_min: DEFAULT_WORK_START,
+            end_min: DEFAULT_WORK_START + 60,
+            title: "Call".into(),
+        }];
         let r = req(vec![task("a", 60, "", "high", "med")], busy);
         let out = plan(&r);
         let a = &out.blocks.iter().find(|b| b.task_id == "a").unwrap();
-        assert!(a.start_min >= DEFAULT_WORK_START + 60, "task must start after the busy block");
-        assert!(a.reason.contains("right after"), "rationale should mention the meeting: {}", a.reason);
+        assert!(
+            a.start_min >= DEFAULT_WORK_START + 60,
+            "task must start after the busy block"
+        );
+        assert!(
+            a.reason.contains("right after"),
+            "rationale should mention the meeting: {}",
+            a.reason
+        );
     }
 
     #[test]
@@ -631,7 +775,10 @@ mod tests {
         let r = req(vec![p, task("a", 60, "", "high", "med")], vec![]);
         let out = plan(&r);
         let pinned = out.blocks.iter().find(|b| b.task_id == "pinned").unwrap();
-        assert_eq!((pinned.start_min, pinned.end_min), (DEFAULT_WORK_START + 420, DEFAULT_WORK_START + 480));
+        assert_eq!(
+            (pinned.start_min, pinned.end_min),
+            (DEFAULT_WORK_START + 420, DEFAULT_WORK_START + 480)
+        );
         assert_eq!(pinned.reason, "Pinned to this time");
         // The other task must not collide with the pinned slot.
         let a = out.blocks.iter().find(|b| b.task_id == "a").unwrap();
@@ -642,12 +789,18 @@ mod tests {
     fn high_energy_tasks_prefer_the_morning_peak() {
         // A low task and a high task; the high one should land in the AM peak.
         let r = req(
-            vec![task("deep", 60, "", "medium", "hi"), task("admin", 60, "", "medium", "lo")],
+            vec![
+                task("deep", 60, "", "medium", "hi"),
+                task("admin", 60, "", "medium", "lo"),
+            ],
             vec![],
         );
         let out = plan(&r);
         let deep = out.blocks.iter().find(|b| b.task_id == "deep").unwrap();
-        assert!(energy_at(deep.start_min) == 2, "high-energy task should be in a peak window");
+        assert!(
+            energy_at(deep.start_min) == 2,
+            "high-energy task should be in a peak window"
+        );
     }
 
     #[test]
@@ -672,21 +825,42 @@ mod tests {
                     task("b", 45, "", "low", "lo"),
                     task("c", 30, "2026-06-25", "medium", "med"),
                 ],
-                vec![BusyBlock { start_min: 660, end_min: 720, title: "Sync".into() }],
+                vec![BusyBlock {
+                    start_min: 660,
+                    end_min: 720,
+                    title: "Sync".into(),
+                }],
             )
         };
         let one = plan(&make());
         let two = plan(&make());
-        let ids1: Vec<_> = one.blocks.iter().map(|b| (b.task_id.clone(), b.start_min)).collect();
-        let ids2: Vec<_> = two.blocks.iter().map(|b| (b.task_id.clone(), b.start_min)).collect();
+        let ids1: Vec<_> = one
+            .blocks
+            .iter()
+            .map(|b| (b.task_id.clone(), b.start_min))
+            .collect();
+        let ids2: Vec<_> = two
+            .blocks
+            .iter()
+            .map(|b| (b.task_id.clone(), b.start_min))
+            .collect();
         assert_eq!(ids1, ids2);
     }
 
     fn tmember(actor: &str) -> TeamMember {
-        TeamMember { actor: actor.into(), work_start_min: Some(DEFAULT_WORK_START), work_end_min: Some(DEFAULT_WORK_END), busy: vec![], capacity_min: None }
+        TeamMember {
+            actor: actor.into(),
+            work_start_min: Some(DEFAULT_WORK_START),
+            work_end_min: Some(DEFAULT_WORK_END),
+            busy: vec![],
+            capacity_min: None,
+        }
     }
     fn ttask(id: &str, dur: u32, assignee: Option<&str>) -> TeamPlanTask {
-        TeamPlanTask { task: task(id, dur, "", "medium", "med"), assignee: assignee.map(|s| s.into()) }
+        TeamPlanTask {
+            task: task(id, dur, "", "medium", "med"),
+            assignee: assignee.map(|s| s.into()),
+        }
     }
 
     #[test]
@@ -694,7 +868,12 @@ mod tests {
         let req = TeamPlanRequest {
             date: "2026-06-25".into(),
             members: vec![tmember("A"), tmember("B")],
-            tasks: vec![ttask("t1", 120, None), ttask("t2", 120, None), ttask("t3", 120, None), ttask("t4", 120, None)],
+            tasks: vec![
+                ttask("t1", 120, None),
+                ttask("t2", 120, None),
+                ttask("t3", 120, None),
+                ttask("t4", 120, None),
+            ],
         };
         let out = plan_team(&req);
         let a = out.loads.iter().find(|l| l.actor == "A").unwrap();
@@ -708,7 +887,13 @@ mod tests {
     fn team_honours_explicit_assignment_and_flags_overload() {
         let req = TeamPlanRequest {
             date: "2026-06-25".into(),
-            members: vec![TeamMember { actor: "A".into(), work_start_min: Some(DEFAULT_WORK_START), work_end_min: Some(DEFAULT_WORK_END), busy: vec![], capacity_min: Some(120) }],
+            members: vec![TeamMember {
+                actor: "A".into(),
+                work_start_min: Some(DEFAULT_WORK_START),
+                work_end_min: Some(DEFAULT_WORK_END),
+                busy: vec![],
+                capacity_min: Some(120),
+            }],
             tasks: vec![ttask("t1", 90, Some("A")), ttask("t2", 90, Some("A"))],
         };
         let out = plan_team(&req);
@@ -719,44 +904,97 @@ mod tests {
 
     #[test]
     fn team_marks_unroutable_without_members() {
-        let req = TeamPlanRequest { date: "2026-06-25".into(), members: vec![], tasks: vec![ttask("t1", 60, None)] };
+        let req = TeamPlanRequest {
+            date: "2026-06-25".into(),
+            members: vec![],
+            tasks: vec![ttask("t1", 60, None)],
+        };
         let out = plan_team(&req);
         assert_eq!(out.unroutable, vec!["t1".to_string()]);
     }
     #[test]
     fn team_busy_union_and_missing_assignee_are_not_available_capacity() {
-        let mut member=tmember("A");member.work_start_min=Some(540);member.work_end_min=Some(1020);
-        member.busy=vec![BusyBlock{start_min:540,end_min:600,title:"".into()},BusyBlock{start_min:570,end_min:630,title:"".into()}];
-        let req=TeamPlanRequest{date:"2026-10-09".into(),members:vec![member],tasks:vec![ttask("large",480,None),ttask("orphan",30,Some("removed"))]};
-        validate_team(&req).unwrap();let out=plan_team(&req);
-        assert_eq!(out.loads[0].capacity_min,390);assert!(out.assignments.is_empty());assert_eq!(out.unroutable,vec!["orphan","large"]);
+        let mut member = tmember("A");
+        member.work_start_min = Some(540);
+        member.work_end_min = Some(1020);
+        member.busy = vec![
+            BusyBlock {
+                start_min: 540,
+                end_min: 600,
+                title: "".into(),
+            },
+            BusyBlock {
+                start_min: 570,
+                end_min: 630,
+                title: "".into(),
+            },
+        ];
+        let req = TeamPlanRequest {
+            date: "2026-10-09".into(),
+            members: vec![member],
+            tasks: vec![
+                ttask("large", 480, None),
+                ttask("orphan", 30, Some("removed")),
+            ],
+        };
+        validate_team(&req).unwrap();
+        let out = plan_team(&req);
+        assert_eq!(out.loads[0].capacity_min, 390);
+        assert!(out.assignments.is_empty());
+        assert_eq!(out.unroutable, vec!["orphan", "large"]);
     }
     #[test]
     fn team_contract_validates_even_without_members() {
-        let req=TeamPlanRequest{date:"invalid".into(),members:vec![],tasks:vec![]};assert!(validate_team(&req).is_err());
-        let req=TeamPlanRequest{date:"2026-10-09".into(),members:vec![tmember("A"),tmember("A")],tasks:vec![]};assert!(validate_team(&req).is_err());
+        let req = TeamPlanRequest {
+            date: "invalid".into(),
+            members: vec![],
+            tasks: vec![],
+        };
+        assert!(validate_team(&req).is_err());
+        let req = TeamPlanRequest {
+            date: "2026-10-09".into(),
+            members: vec![tmember("A"), tmember("A")],
+            tasks: vec![],
+        };
+        assert!(validate_team(&req).is_err());
     }
     #[test]
     fn shared_adversarial_planner_contract() {
-        let corpus: Vec<serde_json::Value> = serde_json::from_str(include_str!("../../src/services/fixtures/planner-contract.json")).unwrap();
+        let corpus: Vec<serde_json::Value> = serde_json::from_str(include_str!(
+            "../../src/services/fixtures/planner-contract.json"
+        ))
+        .unwrap();
         for fixture in corpus {
             let request = serde_json::from_value::<PlanRequest>(fixture["request"].clone());
-            if fixture["valid"]==false {
-                assert!(request.is_err() || validate(request.as_ref().unwrap()).is_err(),"{}",fixture["name"]);
+            if fixture["valid"] == false {
+                assert!(
+                    request.is_err() || validate(request.as_ref().unwrap()).is_err(),
+                    "{}",
+                    fixture["name"]
+                );
                 continue;
             }
             let request = request.unwrap();
             validate(&request).unwrap();
             let result = plan(&request);
-            let scheduled = serde_json::json!(result.blocks.iter().map(|b|&b.task_id).collect::<Vec<_>>());
-            let unscheduled = serde_json::json!(result.unscheduled.iter().map(|b|&b.task_id).collect::<Vec<_>>());
-            assert_eq!(scheduled,fixture["scheduled"],"{}",fixture["name"]);
-            assert_eq!(unscheduled,fixture["unscheduled"],"{}",fixture["name"]);
+            let scheduled =
+                serde_json::json!(result.blocks.iter().map(|b| &b.task_id).collect::<Vec<_>>());
+            let unscheduled = serde_json::json!(result
+                .unscheduled
+                .iter()
+                .map(|b| &b.task_id)
+                .collect::<Vec<_>>());
+            assert_eq!(scheduled, fixture["scheduled"], "{}", fixture["name"]);
+            assert_eq!(unscheduled, fixture["unscheduled"], "{}", fixture["name"]);
             for b in result.blocks {
-                assert!(b.start_min>=request.work_start_min && b.end_min<=request.work_end_min);
-                for busy in &request.busy { assert!(!overlaps((b.start_min,b.end_min),(busy.start_min,busy.end_min))); }
+                assert!(b.start_min >= request.work_start_min && b.end_min <= request.work_end_min);
+                for busy in &request.busy {
+                    assert!(!overlaps(
+                        (b.start_min, b.end_min),
+                        (busy.start_min, busy.end_min)
+                    ));
+                }
             }
         }
     }
-
 }

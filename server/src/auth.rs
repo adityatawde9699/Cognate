@@ -1,8 +1,8 @@
+use crate::store::Data;
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use tiny_http::Header;
-use serde_json::{json, Value};
-use crate::store::Data;
 
 pub fn sha256_hex(data: &[u8]) -> String {
     let mut hasher = Sha256::new();
@@ -28,14 +28,18 @@ pub fn bearer_ok(headers: &[Header], expected: &str) -> bool {
         return true; // no token configured → open
     }
     let want = format!("Bearer {expected}");
-    headers
-        .iter()
-        .any(|h| h.field.equiv("Authorization") && constant_time_eq(h.value.as_str().trim().as_bytes(), want.as_bytes()))
+    headers.iter().any(|h| {
+        h.field.equiv("Authorization")
+            && constant_time_eq(h.value.as_str().trim().as_bytes(), want.as_bytes())
+    })
 }
 
 pub fn authorize_token(guard: &Data, room: &str, body: &str) -> Result<String, (u16, String)> {
     let token = match serde_json::from_str::<Value>(body) {
-        Ok(v) => v.get("delete_token").and_then(|t| t.as_str()).map(|s| s.to_string()),
+        Ok(v) => v
+            .get("delete_token")
+            .and_then(|t| t.as_str())
+            .map(|s| s.to_string()),
         Err(_) => None,
     };
     let token = match token {
@@ -44,7 +48,8 @@ pub fn authorize_token(guard: &Data, room: &str, body: &str) -> Result<String, (
     };
 
     let token_hash = sha256_hex(token.as_bytes());
-    let stored_hash = guard.get(room)
+    let stored_hash = guard
+        .get(room)
         .and_then(|r| r.get("@meta"))
         .and_then(|m| m.get("delete_token_hash"))
         .and_then(|h| h.as_str());

@@ -12,7 +12,11 @@ fn entry(app: &tauri::AppHandle, key: &str) -> Result<keyring::Entry, keyring::E
     // Preserve production credentials while isolating differently identified
     // test builds from the user's real signing identity and provider tokens.
     let identifier = &app.config().identifier;
-    let service = if identifier == "com.cognate.app" { SERVICE } else { identifier };
+    let service = if identifier == "com.cognate.app" {
+        SERVICE
+    } else {
+        identifier
+    };
     keyring::Entry::new(service, key)
 }
 
