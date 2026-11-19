@@ -314,15 +314,30 @@ export interface SchedulingEstimate {
   provenance: EstimateProvenance;
 }
 
+/** Tasks per request. Each estimate is ~35 tokens of JSON, so a batch must fit the reply budget. */
+const ESTIMATE_BATCH = 12;
+
 /**
  * Estimate how long each task will take and how much focus it demands, so the
  * planner can size blocks and match work to the user's energy curve. Returns
- * one estimate per task (best-effort; ids not understood are dropped).
+ * one estimate per task, requested in batches.
  */
 export async function estimateScheduling(
   tasks: { id: string; title: string; description?: string; tags?: string[]; importance: number; effort: number }[]
 ): Promise<SchedulingEstimate[]> {
   if (tasks.length === 0) return [];
+  const out: SchedulingEstimate[] = [];
+  // One request per batch: a single call for a whole inbox overflows the
+  // reply budget and the provider truncates the JSON.
+  for (let i = 0; i < tasks.length; i += ESTIMATE_BATCH) {
+    out.push(...await estimateBatch(tasks.slice(i, i + ESTIMATE_BATCH)));
+  }
+  return out;
+}
+
+async function estimateBatch(
+  tasks: { id: string; title: string; description?: string; tags?: string[]; importance: number; effort: number }[]
+): Promise<SchedulingEstimate[]> {
   const rows = tasks.map((t) => {
     const bits = [`id=${t.id}`, t.title];
     if (t.tags?.length) bits.push(`#${t.tags.join(' #')}`);
@@ -337,7 +352,7 @@ export async function estimateScheduling(
     'Use the effort hint (1-5) as a prior but adjust for the task itself.';
   const prompt = `Tasks:\n${rows.join('\n')}`;
   let provenance: EstimateProvenance | undefined;
-  const raw = await generateJSON<unknown>(system, prompt, 1024, info => { provenance = info; });
+  const raw = await generateJSON<unknown>(system, prompt, 512 + tasks.length * 64, info => { provenance = info; });
   const ids = new Set(tasks.map(t => t.id)), seen = new Set<string>();
   const estimates = valid.list(raw, tasks.length);
   if (estimates.length !== tasks.length) throw valid.invalidAdvice();

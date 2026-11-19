@@ -22,6 +22,21 @@ describe('AI advice contracts',()=>{
     expect(result[0]).toMatchObject({id:'a',duration_min:45,energy:'hi',provenance:{provider:'ollama',model:'llama3.1',local:true}});
     expect(result[0].provenance.estimated_at).toMatch(/^\d{4}-/);
   });
+  it('sizes a large inbox in batches so no reply overflows its token budget',async()=>{
+    const many=Array.from({length:30},(_,i)=>({id:`t${i}`,title:`Task ${i}`,importance:3,effort:3}));
+    mock.invoke.mockImplementation(async(_cmd:string,{args}:any)=>{
+      const ids=[...args.prompt.matchAll(/id=(t\d+)/g)].map((m:RegExpMatchArray)=>m[1]);
+      return JSON.stringify(ids.map((id:string)=>({id,duration_min:30,energy:'med'})));
+    });
+    const result=await estimateScheduling(many);
+    expect(result.map(r=>r.id)).toEqual(many.map(t=>t.id));
+    expect(mock.invoke).toHaveBeenCalledTimes(3);
+    for(const [,{args}] of mock.invoke.mock.calls as any[]) {
+      const n=(args.prompt.match(/id=t\d+/g)||[]).length;
+      expect(n).toBeLessThanOrEqual(12);
+      expect(args.maxTokens).toBeGreaterThanOrEqual(n*60);
+    }
+  });
   it.each([
     [{id:'a',duration_min:'45',energy:'hi'}], [{id:'a',duration_min:31,energy:'hi'}],
     [{id:'a',duration_min:300,energy:'hi'}], [{id:'a',duration_min:45,energy:'HIGH'}],

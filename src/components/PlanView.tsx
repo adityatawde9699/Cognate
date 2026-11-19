@@ -410,7 +410,7 @@ export function PlanView() {
             <i className={`fa-solid ${enriching ? 'fa-spinner fa-spin' : 'fa-hourglass-half'}`}></i>
             <span>{enriching ? 'Estimating…' : 'AI estimate'}</span>
           </button>
-          <button className="btn-ghost plan-brief" onClick={handleBrief} disabled={briefing || scheduled.length === 0} title="Ask your AI chief of staff to brief you on the day">
+          <button className="btn-ghost plan-brief" onClick={handleBrief} disabled={briefing} title="Ask your AI chief of staff to brief you on the day">
             <i className={`fa-solid ${briefing ? 'fa-spinner fa-spin' : 'fa-comment-dots'}`}></i>
             <span>{briefing ? 'Briefing…' : 'Brief me'}</span>
           </button>
