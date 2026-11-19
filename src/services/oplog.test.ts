@@ -150,3 +150,14 @@ describe('adversarial operation admission', () => {
     expect(converged([a], [b])).toBe(true);
   });
 });
+
+describe('remote clock skew policy', () => {
+  const op = (wall: number) => ({ id: 'x', kind: 'set', entity: 'e', field: 'f', value: 1, hlc: { wall, counter: 0, actor: 'a' } }) as any;
+  it('accepts past and near-future timestamps, rejects far-future ones', async () => {
+    const { assertRemoteSkew, MAX_REMOTE_SKEW_MS } = await import('./oplog');
+    const now = 1_000_000_000_000;
+    expect(() => assertRemoteSkew([op(now - 10 * 86_400_000)], now)).not.toThrow();
+    expect(() => assertRemoteSkew([op(now + MAX_REMOTE_SKEW_MS)], now)).not.toThrow();
+    expect(() => assertRemoteSkew([op(now + MAX_REMOTE_SKEW_MS + 1)], now)).toThrow(/five minutes ahead/);
+  });
+});

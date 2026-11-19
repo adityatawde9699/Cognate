@@ -39,6 +39,20 @@ export function hlcCompare(a: HLC, b: HLC): number {
 export const hlcEqual = (a: HLC, b: HLC): boolean => hlcCompare(a, b) === 0;
 
 /**
+ * Skew policy for operations from other devices. A remote timestamp further
+ * ahead of local time than this is rejected before it can pull the local clock
+ * (and every later local edit) into the future. Past timestamps are always
+ * fine: late delivery is normal, and history is never judged by age.
+ */
+export const MAX_REMOTE_SKEW_MS = 5 * 60 * 1000;
+
+export function assertRemoteSkew(ops: readonly Op[], now: number = Date.now()): void {
+  if (ops.some((op) => op.hlc.wall > now + MAX_REMOTE_SKEW_MS)) {
+    throw new Error('Remote device clock is more than five minutes ahead. Correct its clock before syncing.');
+  }
+}
+
+/**
  * A clock advances on every local event and on receipt of a remote HLC,
  * never moving backwards — the guarantee that makes causal order hold even
  * when device wall-clocks disagree.

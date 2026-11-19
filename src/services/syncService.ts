@@ -7,7 +7,7 @@
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 
 import { loadOps, commitProjection } from '../db';
-import { merge, materialize, validateOps, type Op } from './oplog';
+import { assertRemoteSkew, merge, materialize, validateOps, type Op } from './oplog';
 import { projectTasks, diffTasks } from './projector';
 import { observeOps } from './oplogStore';
 import { loadAllTasks } from './taskService';
@@ -57,6 +57,7 @@ function parseBundle(json: string): Op[] {
  */
 export async function mergeIntoApp(incoming: Op[]): Promise<{ applied: number; upserts: number; deletes: number }> {
   validateOps(incoming);
+  assertRemoteSkew(incoming);
   const audit = await captureHistoryAudit();
   if (audit.gaps.some(gap => gap.reason !== 'log-only-entity')) {
     throw new Error('Local rows differ from saved history. Export and review a history audit in Settings before syncing.');

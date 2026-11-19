@@ -2,7 +2,7 @@
  * unacknowledged local operations are never removed when a request fails. */
 import {failureCode} from './diagnostics';
 import { getSetting, setSetting,loadOps } from '../db';
-import { canonicalJson, validateOps, type Op } from './oplog';
+import { assertRemoteSkew, canonicalJson, validateOps, type Op } from './oplog';
 import { getIdentity } from './identity';
 import { importPublicKey, signBytes, verifyBytes, seal, open, type SealedBlob } from './crypto';
 import { httpGet, httpPut } from './relayTransport';
@@ -49,7 +49,7 @@ export async function signBatch(context:BatchContext,ops:Op[]):Promise<SignedBat
 export async function verifyBatch(batch:SignedBatch,context:BatchContext):Promise<void> {
   if (!batch || (batch.v!==2 && batch.v!==3) || !batch.id || canonical(batch.context)!==canonical(context) || !batch.actor || !batch.pub || !batch.sig) throw new Error('Invalid sync batch context.');
   validateOps(batch.ops);
-  if(batch.ops.some(op=>op.hlc.wall>Date.now()+5*60*1000)) throw new Error('Remote device clock is more than five minutes ahead. Correct its clock before syncing.');
+  assertRemoteSkew(batch.ops);
   if (batch.ops.length>200 || batch.ops.some(op=>op.hlc.actor!==batch.actor)) throw new Error('Invalid batch author or size.');
   const {sig,...payload}=batch;
   if (!await verifyBytes(await importPublicKey(batch.pub),sig,bytes(payload))) throw new Error('Invalid sync batch signature.');

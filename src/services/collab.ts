@@ -30,7 +30,7 @@
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 
 import {validAvailability,type TeamAvailability} from './teamAvailability';
-import { hlcCompare, validateOps, merge, type Op } from './oplog';
+import { assertRemoteSkew, hlcCompare, validateOps, merge, type Op } from './oplog';
 import { importPublicKey, signBytes, verifyBytes } from './crypto';
 
 // ── Roles ────────────────────────────────────────────────
@@ -101,6 +101,7 @@ export async function verifySignedOp(s: SignedOp): Promise<VerifiedOp | null> {
   if (!s || !s.op || !s.pub || !s.sig) return null;
   try {
     validateOps([s.op]);
+    assertRemoteSkew([s.op]);
     const pubKey = await importPublicKey(s.pub);
     const ok = await verifyBytes(pubKey, s.sig, opBytes(s.op));
     return ok ? { op: s.op, pub: s.pub } : null;
