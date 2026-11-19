@@ -436,7 +436,7 @@ export function PlanView() {
       <div className="plan-body">
         <div className="plan-timeline-wrap" ref={timelineRef}>
         <div className="plan-section-heading"><h2>Schedule</h2><span>Local time</span></div>
-        <div className="plan-timeline" ref={scrollerRef}>
+        <div className="plan-timeline" ref={scrollerRef} tabIndex={0} role="region" aria-label="Day schedule">
         <div className="plan-canvas" style={{ height: `${dayHeight}px` }}>
           {hours.map((m) => (
             <div key={m} className={`plan-hour ${showNow && Math.floor(nowMin / 60) === Math.floor(m / 60) ? 'is-now' : ''}`} style={{ top: `${toY(m)}px` }}>

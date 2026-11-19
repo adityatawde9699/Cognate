@@ -336,7 +336,7 @@ export function SettingsModal() {
           <h2>Settings</h2>
           <p>Timer, AI, calendar and sync</p>
         </div>
-        <button className="btn-icon" onClick={() => setSettingsModalOpen(false)}>
+        <button className="btn-icon" aria-label="Close settings" onClick={() => setSettingsModalOpen(false)}>
           <i className="fa-solid fa-xmark"></i>
         </button>
       </div>
@@ -379,22 +379,22 @@ export function SettingsModal() {
               <SettingsSection id="timer">
           <h3>Timer</h3>
           <div className="form-group row">
-            <label>Work Session (m)</label>
-            <input type="number" value={workMins} onChange={e => {
+            <label>Work session (min)</label>
+            <input aria-label="Work session (min)" type="number" value={workMins} onChange={e => {
               setWorkMins(e.target.value);
               handleUpdateSetting('pomo_work_mins', e.target.value);
             }} min="1" max="120" />
           </div>
           <div className="form-group row">
-            <label>Short Break (m)</label>
-            <input type="number" value={shortBreakMins} onChange={e => {
+            <label>Short break (min)</label>
+            <input aria-label="Short break (min)" type="number" value={shortBreakMins} onChange={e => {
               setShortBreakMins(e.target.value);
               handleUpdateSetting('pomo_short_break_mins', e.target.value);
             }} min="1" max="30" />
           </div>
           <div className="form-group row">
-            <label>Long Break (m)</label>
-            <input type="number" value={longBreakMins} onChange={e => {
+            <label>Long break (min)</label>
+            <input aria-label="Long break (min)" type="number" value={longBreakMins} onChange={e => {
               setLongBreakMins(e.target.value);
               handleUpdateSetting('pomo_long_break_mins', e.target.value);
             }} min="1" max="60" />
@@ -403,7 +403,7 @@ export function SettingsModal() {
           <div className="form-group row switch-row">
             <label>Auto-start breaks</label>
             <label className="switch">
-              <input type="checkbox" checked={autoBreak} onChange={e => {
+              <input aria-label="Auto-start breaks" type="checkbox" checked={autoBreak} onChange={e => {
                 setAutoBreak(e.target.checked);
                 handleUpdateSetting('pomo_auto_break', e.target.checked ? '1' : '0');
               }} />
@@ -416,7 +416,7 @@ export function SettingsModal() {
           <div className="form-group row switch-row">
             <label>Desktop notifications</label>
             <label className="switch">
-              <input type="checkbox" checked={notifyEnabled} onChange={e => {
+              <input aria-label="Desktop notifications" type="checkbox" checked={notifyEnabled} onChange={e => {
                 setNotifyEnabled(e.target.checked);
                 handleUpdateSetting('notify_enabled', e.target.checked ? '1' : '0');
               }} />
@@ -479,7 +479,7 @@ export function SettingsModal() {
 
           <div className="form-group">
             <label>Provider</label>
-            <select value={aiProvider} onChange={e => {
+            <select aria-label="Provider" value={aiProvider} onChange={e => {
               const provider = e.target.value;
               const next = PROVIDERS[provider] || PROVIDERS.anthropic;
               setAiProvider(provider);
@@ -499,8 +499,8 @@ export function SettingsModal() {
           </div>
 
           <div className="form-group">
-            <label>API Key {!meta.needsKey && <span className="opt-tag">optional</span>}</label>
-            <input type="password" value={aiKey} onChange={e => {
+            <label>API key {!meta.needsKey && <span className="opt-tag">optional</span>}</label>
+            <input aria-label="API key" type="password" value={aiKey} onChange={e => {
               setAiKey(e.target.value);
               handleUpdateSecret('ai_api_key', e.target.value);
             }} placeholder={meta.needsKey ? 'sk-…' : 'usually not needed for local'} autoComplete="off" />
@@ -512,7 +512,7 @@ export function SettingsModal() {
           {aiProvider !== 'anthropic' && (
             <div className="form-group">
               <label>Base URL</label>
-              <input type="url" value={aiBaseUrl} onChange={e => {
+              <input aria-label="Base URL" type="url" value={aiBaseUrl} onChange={e => {
                 setAiBaseUrl(e.target.value);
                 handleUpdateSetting('ai_base_url', e.target.value);
               }} placeholder={meta.base || 'https://your-server/v1'} autoComplete="off" />
@@ -522,7 +522,7 @@ export function SettingsModal() {
 
           <div className="form-group">
             <label>Model</label>
-            <input type="text" value={aiModel} onChange={e => {
+            <input aria-label="Model" type="text" value={aiModel} onChange={e => {
               setAiModel(e.target.value);
               handleUpdateSetting('ai_model', e.target.value);
             }} placeholder={meta.model ? `${meta.model}${aiProvider === 'anthropic' ? ' (default)' : ''}` : 'model name'} autoComplete="off" />
@@ -531,7 +531,7 @@ export function SettingsModal() {
           <div className="form-group row switch-row">
             <label>Smart quick-add <span className="opt-tag">AI</span></label>
             <label className="switch">
-              <input type="checkbox" checked={quickAddAi}
+              <input aria-label="Smart quick-add" type="checkbox" checked={quickAddAi}
                 onChange={(e) => { setQuickAddAi(e.target.checked); handleUpdateSetting('quickadd_ai', e.target.checked ? '1' : '0'); }} />
               <span className="slider"></span>
             </label>
@@ -551,7 +551,7 @@ export function SettingsModal() {
           <div className="form-group row">
             <label>Use custom work hours</label>
             <label className="switch">
-              <input type="checkbox" checked={useCustomWork} onChange={async (e) => {
+              <input aria-label="Use custom work hours" type="checkbox" checked={useCustomWork} onChange={async (e) => {
                 setUseCustomWork(e.target.checked);
                 await setSetting('use_custom_work_hours', e.target.checked ? '1' : '0');
                 window.dispatchEvent(new CustomEvent('settings-changed'));
@@ -563,22 +563,22 @@ export function SettingsModal() {
             <>
               <div className="form-group row">
                 <label>Work day starts</label>
-                <input type="time" value={workStart} onChange={(e) => { setWorkStart(e.target.value); saveWorkHours(e.target.value, workEnd); }} />
+                <input aria-label="Work day starts" type="time" value={workStart} onChange={(e) => { setWorkStart(e.target.value); saveWorkHours(e.target.value, workEnd); }} />
               </div>
               <div className="form-group row">
                 <label>Work day ends</label>
-                <input type="time" value={workEnd} onChange={(e) => { setWorkEnd(e.target.value); saveWorkHours(workStart, e.target.value); }} />
+                <input aria-label="Work day ends" type="time" value={workEnd} onChange={(e) => { setWorkEnd(e.target.value); saveWorkHours(workStart, e.target.value); }} />
               </div>
             </>
           ) : (
             <>
               <div className="form-group row">
                 <label>Wake time</label>
-                <input type="time" value={wakeStart} onChange={(e) => { setWakeStart(e.target.value); saveWakeSleep(e.target.value, wakeEnd); }} />
+                <input aria-label="Wake time" type="time" value={wakeStart} onChange={(e) => { setWakeStart(e.target.value); saveWakeSleep(e.target.value, wakeEnd); }} />
               </div>
               <div className="form-group row">
                 <label>Sleep time</label>
-                <input type="time" value={wakeEnd} onChange={(e) => { setWakeEnd(e.target.value); saveWakeSleep(wakeStart, e.target.value); }} />
+                <input aria-label="Sleep time" type="time" value={wakeEnd} onChange={(e) => { setWakeEnd(e.target.value); saveWakeSleep(wakeStart, e.target.value); }} />
               </div>
             </>
           )}
@@ -636,7 +636,7 @@ export function SettingsModal() {
           )}
           <div className="cf-add">
             <input type="text" placeholder="Field name" value={cfName} onChange={(e) => setCfName(e.target.value)} />
-            <select value={cfType} onChange={(e) => setCfType(e.target.value as CustomFieldType)}>
+            <select aria-label="Field type" value={cfType} onChange={(e) => setCfType(e.target.value as CustomFieldType)}>
               <option value="text">Text</option>
               <option value="number">Number</option>
               <option value="url">URL</option>
@@ -654,16 +654,16 @@ export function SettingsModal() {
           <h3>Integrations</h3>
 
           <div className="form-group">
-            <label>Discord Webhook</label>
-            <input type="url" value={discordHook} onChange={e => {
+            <label>Discord webhook</label>
+            <input aria-label="Discord webhook" type="url" value={discordHook} onChange={e => {
               setDiscordHook(e.target.value);
               handleUpdateSecret('int_discord', e.target.value);
             }} placeholder="https://discord.com/api/webhooks/..." />
           </div>
 
           <div className="form-group">
-            <label>Slack Webhook</label>
-            <input type="url" value={slackHook} onChange={e => {
+            <label>Slack webhook</label>
+            <input aria-label="Slack webhook" type="url" value={slackHook} onChange={e => {
               setSlackHook(e.target.value);
               handleUpdateSecret('int_slack', e.target.value);
             }} placeholder="https://hooks.slack.com/services/..." />
@@ -672,7 +672,7 @@ export function SettingsModal() {
           <div className="form-group row switch-row">
             <label>Post to webhooks when a task is completed</label>
             <label className="switch">
-              <input type="checkbox" checked={webhookOnComplete} onChange={e => {
+              <input aria-label="Post to webhooks when a task is completed" type="checkbox" checked={webhookOnComplete} onChange={e => {
                 setWebhookOnComplete(e.target.checked);
                 handleUpdateSetting('webhook_on_complete', e.target.checked ? '1' : '0');
               }} />
@@ -683,7 +683,7 @@ export function SettingsModal() {
           <div className="form-group row switch-row">
             <label>Deadline alerts to webhooks (due today / overdue)</label>
             <label className="switch">
-              <input type="checkbox" checked={webhookDeadlines} onChange={e => {
+              <input aria-label="Deadline alerts to webhooks (due today / overdue)" type="checkbox" checked={webhookDeadlines} onChange={e => {
                 setWebhookDeadlines(e.target.checked);
                 handleUpdateSetting('webhook_deadlines', e.target.checked ? '1' : '0');
               }} />
@@ -694,7 +694,7 @@ export function SettingsModal() {
           <div className="form-group row switch-row">
             <label>Daily digest to webhooks</label>
             <label className="switch">
-              <input type="checkbox" checked={webhookDigest} onChange={e => {
+              <input aria-label="Daily digest to webhooks" type="checkbox" checked={webhookDigest} onChange={e => {
                 setWebhookDigest(e.target.checked);
                 handleUpdateSetting('webhook_digest', e.target.checked ? '1' : '0');
               }} />

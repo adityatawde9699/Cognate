@@ -78,6 +78,7 @@ export function TaskComments({ taskId, projectId }: { taskId: string; projectId:
           <i className="fa-solid fa-user-check" style={{ marginRight: '8px', color: 'var(--text-d)' }}></i>Assignee
         </label>
         <select
+          aria-label="Assignee"
           value={assignee}
           onChange={(e) => assign(e.target.value)}
           disabled={busy}

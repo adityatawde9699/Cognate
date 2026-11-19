@@ -72,7 +72,7 @@ export function TemplatesModal() {
             <>
               <div className="editor-field">
                 <span className="field-label">Add into project (optional)</span>
-                <select value={applyProject} onChange={(e) => setApplyProject(e.target.value)}>
+                <select aria-label="Project" value={applyProject} onChange={(e) => setApplyProject(e.target.value)}>
                   <option value="">No project</option>
                   {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>

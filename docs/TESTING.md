@@ -50,7 +50,7 @@ New coverage includes recurring exception cancellation, feed-local VTIMEZONE, RD
 
 Typecheck, 289 Vitest tests across 42 files, and 29 Chromium browser tests passed. Five dedicated Plan regressions cover saved explanations/freshness after reload, captured tasks requiring review, keyboard focus trap/restoration and atomic pinning, conflict/quota failures retaining input and the prior schedule, and a 390px viewport with reachable capture/backlog and non-overlapping blocks. Semantic input fixtures cover task/calendar/hour changes, legacy/corrupt records, atomic pin projection and a committed plan whose UI refresh fails. The final mobile refinements were checked with the dedicated Plan suite.
 
-These checks do not constitute a complete screen-reader audit or a real touch-device/installed-OS matrix. Deployed team acceptance and broader accessibility acceptance remain open.
+`e2e/axe.spec.ts` runs an automated axe WCAG 2 A/AA scan of the Plan, Dashboard, Tasks, task editor and Settings views and fails on serious or critical violations. Automated scans catch only a subset of issues. These checks do not constitute a complete screen-reader audit or a real touch-device/installed-OS matrix. Deployed team acceptance and broader accessibility acceptance remain open.
 
 ## Team workflow run — 2026-10-09
 

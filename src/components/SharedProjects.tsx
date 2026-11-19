@@ -233,7 +233,7 @@ export function SharedProjects() {
       <div className="form-group">
         <label>Share a project</label>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          <select value={newProject} onChange={(e) => setNewProject(e.target.value)} style={{ flex: '1 1 140px' }}>
+          <select aria-label="Project to share" value={newProject} onChange={(e) => setNewProject(e.target.value)} style={{ flex: '1 1 100%' }}>
             <option value="">Choose a project…</option>
             {(projects || []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
@@ -314,6 +314,7 @@ export function SharedProjects() {
                           {isOwner && m.actor !== me ? (
                             <>
                               <select
+                                aria-label={`Role for ${m.actor}`}
                                 value={m.role}
                                 onChange={(e) => handleGrant(s.id, m.actor, e.target.value as Role)}
                                 disabled={busy}

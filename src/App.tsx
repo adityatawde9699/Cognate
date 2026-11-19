@@ -127,7 +127,7 @@ function App() {
               <p className="canvas-sub">{meta.sub}</p>
             </div>
             <div className="canvas-actions">
-              <div className="view-switch" role="tablist" aria-label="View">
+              <div className="view-switch" role="group" aria-label="View">
                 {([
                   ['board', 'fa-table-columns', 'Board'],
                   ['list', 'fa-list-ul', 'List'],
@@ -140,7 +140,7 @@ function App() {
                     className={`view-tab ${canvasView === v ? 'active' : ''}`}
                     onClick={() => setCanvasView(v)}
                     title={label}
-                    aria-selected={canvasView === v}
+                    aria-pressed={canvasView === v}
                   >
                     <i className={`fa-solid ${icon}`}></i>
                     <span>{label}</span>

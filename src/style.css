@@ -33,7 +33,7 @@
     --accent-strong: #34d399;
     --accent-muted:  rgba(52, 211, 153, .12);
     --accent-glow:   rgba(52, 211, 153, .24);   /* focus rings only */
-    --on-accent:     var(--on-accent);
+    --on-accent:     #06281e;
 
     --violet:       var(--accent);
     --violet-glow:  var(--accent-muted);
@@ -513,10 +513,6 @@ select:focus-visible {
     box-shadow: 0 8px 24px rgba(53, 53, 53, .12);
 }
 
-.task-card.done-card {
-    opacity: .5;
-    filter: grayscale(50%);
-}
 
 .task-card.dragging {
     opacity: .35;
@@ -1753,8 +1749,9 @@ body { background: var(--bg-1); }
     box-shadow: var(--shadow-md), inset 0 1px 0 rgba(255, 255, 255, 0.08); background: var(--glass-h);
 }
 .task-card:active { cursor: grabbing; transform: translateY(0) scale(.98); }
-.task-card.done-card { opacity: .5; background: var(--surface); animation: none; }
-.task-card.done-card:hover { opacity: .72; transform: none; box-shadow: var(--shadow-sm); }
+.task-card.done-card { background: var(--surface); animation: none; }
+.task-card.done-card .card-desc, .task-card.done-card .p-badge, .task-card.done-card .tag, .task-card.done-card .deadline-lbl { color: var(--text-d); }
+.task-card.done-card:hover { transform: none; box-shadow: var(--shadow-sm); }
 .card-top { display: flex; align-items: flex-start; gap: 12px; }
 .card-check {
     width: 19px; height: 19px; flex: 0 0 auto; margin-top: 1px;
@@ -2337,7 +2334,7 @@ body { background: var(--bg-1); }
 .tl-row { display: flex; align-items: center; gap: 0; cursor: pointer; }
 .tl-label { width: 220px; flex: 0 0 auto; padding-right: 16px; font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tl-track { position: relative; flex: 1 1 auto; height: 30px; border-radius: 8px; background: var(--surface); }
-.tl-track::before { content: ''; position: absolute; left: var(--today); top: 0; bottom: 0; width: 2px; background: var(--accent); opacity: .3; }
+.tl-track::before { content: ''; position: absolute; left: var(--today); top: 0; bottom: 0; width: 1px; background: var(--accent); opacity: .5; }
 .tl-bar { position: absolute; top: 5px; height: 20px; border-radius: 6px; background: var(--accent); display: flex; align-items: center; padding: 0 8px; min-width: 8px; transition: var(--t-ui); }
 .tl-row:hover .tl-bar { filter: brightness(1.08); }
 .tl-bar.high { background: color-mix(in srgb, var(--danger) 78%, var(--bg-1)); } .tl-bar.medium { background: color-mix(in srgb, var(--warning) 70%, var(--bg-1)); } .tl-bar.low { background: var(--text-d); }
@@ -2951,7 +2948,7 @@ body { background: var(--bg-1); }
 }
 .plan-empty i { font-size: 32px; opacity: .35; }
 .plan-empty p { font-size: 14px; font-weight: 500; margin: 0; }
-.plan-empty-sub { font-size: 12px; opacity: .7; }
+.plan-empty-sub { font-size: 12px; color: var(--text-d); }
 
 /* ── Backlog sidebar ──────────────────────────────────── */
 .plan-backlog {

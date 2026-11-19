@@ -9,7 +9,7 @@ export function LanguageSelect() {
     <div className="settings-section">
       <h3>{t('settings.language')}</h3>
       <div className="form-group">
-        <select value={locale} onChange={(e) => setLocale(e.target.value as Locale)}>
+        <select aria-label={t('settings.language')} value={locale} onChange={(e) => setLocale(e.target.value as Locale)}>
           {LOCALES.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
         </select>
         <small className="form-hint">Applies across the app instantly.</small>

@@ -103,7 +103,7 @@ export function CalendarAccount() {
       ) : (
         <>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            <select value={provider} onChange={(e) => setProvider(e.target.value as CalProvider)} style={{ flex: '0 0 auto' }}>
+            <select aria-label="Calendar provider" value={provider} onChange={(e) => setProvider(e.target.value as CalProvider)} style={{ flex: '0 0 auto' }}>
               {Object.entries(CAL_PROVIDERS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
             </select>
             <input
