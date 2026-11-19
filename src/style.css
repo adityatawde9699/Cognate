@@ -3196,4 +3196,62 @@ button.plan-block-title, button.plan-backlog-title { border: 0; background: none
 .btn-ai:hover:not(:disabled) { background: var(--surface-hover); color: var(--text); border-color: var(--border-strong); }
 input[type="range"] { height: 4px; border-radius: 2px; background: var(--border-strong); }
 input[type="range"]::-webkit-slider-thumb { background: var(--text); box-shadow: none; }
-.prop-priority strong { font-weight: 500; }
+
+/* Generate-tasks footer, AI buttons, plan Move control */
+.editor-panel > .editor-footer { padding: 16px 24px; border-top: 1px solid var(--border); margin-top: 0; }
+.btn-ai { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px; border-radius: 8px; font-size: 13px; font-weight: 500; }
+.plan-move { font-size: 12px; padding: 2px 8px; border-radius: 6px; color: var(--text-m); background: transparent; border: 1px solid var(--border); transition: var(--t-ui); }
+.plan-move:hover { background: var(--surface-hover); color: var(--text); border-color: var(--border-strong); }
+.editor-panel .editor-body > .btn-ai { display: inline-flex !important; }
+
+/* Long lists: skip layout and paint for cards that are off screen */
+.task-list > .card-drop-zone, .lv-row { content-visibility: auto; contain-intrinsic-size: auto 120px; }
+.lv-row { contain-intrinsic-size: auto 48px; }
+
+/* Built-in model picker */
+.builtin-list { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.builtin-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.builtin-row.on { border-color: var(--border-strong); background: var(--surface-2); }
+.builtin-pick { display: flex; align-items: flex-start; gap: 12px; flex: 1; min-width: 0; cursor: pointer; }
+.builtin-pick input { margin-top: 4px; }
+.builtin-pick strong { display: block; font-weight: 500; font-size: 13px; color: var(--text); }
+.builtin-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.builtin-actions progress { width: 96px; height: 4px; accent-color: var(--accent); }
+.builtin-pct, .builtin-ready { font-family: var(--font-mono); font-size: 12px; color: var(--text-d); }
+
+/* ── Windowed mode ───────────────────────────────────────── */
+/* Buttons never wrap their label onto two lines. */
+.btn-primary, .btn-ghost, .btn-add, .view-tab, .dock-link { white-space: nowrap; }
+.canvas-header { flex-wrap: wrap; row-gap: 12px; }
+
+/* Keep the dock (focus timer, Insights/Trash/Settings, New task) reachable in
+   short windows: it stays pinned while the nav above it scrolls. */
+.sidebar-dock { position: sticky; bottom: -16px; margin-bottom: -16px; padding-bottom: 16px; background: var(--bg-1); z-index: 1; }
+@media (max-height: 780px) {
+  .pomo-dock { flex-direction: row; align-items: center; gap: 12px; padding: 8px 12px; --ring-size: 40px; --ring-stroke: 2.4; }
+  .pomo-dock .pomo-time-txt { font-size: 10px; }
+  .pomo-dock .pomo-meta { flex: 1; min-width: 0; align-items: flex-start; text-align: left; }
+  .pomo-dock .pomo-task-name { font-size: 12px; }
+  .pomo-dock .pomo-sessions { display: none; }
+  .sidebar-dock { gap: 8px; padding-top: 12px; }
+}
+
+/* Linux frameless window: invisible resize edges, off while maximized. */
+.win-edges { position: fixed; inset: 0; pointer-events: none; z-index: 10000; }
+.win-edge { position: absolute; pointer-events: auto; }
+.win-edge-n, .win-edge-s { left: 8px; right: 8px; height: 5px; cursor: ns-resize; }
+.win-edge-n { top: 0; } .win-edge-s { bottom: 0; }
+.win-edge-e, .win-edge-w { top: 8px; bottom: 8px; width: 5px; cursor: ew-resize; }
+.win-edge-e { right: 0; } .win-edge-w { left: 0; }
+.win-edge-ne, .win-edge-nw, .win-edge-se, .win-edge-sw { width: 10px; height: 10px; }
+.win-edge-ne { top: 0; right: 0; cursor: nesw-resize; } .win-edge-sw { bottom: 0; left: 0; cursor: nesw-resize; }
+.win-edge-nw { top: 0; left: 0; cursor: nwse-resize; } .win-edge-se { bottom: 0; right: 0; cursor: nwse-resize; }
+:root[data-maximized] .win-edges { display: none; }
+
+/* Narrow sidebar (200-210px): icon-only dock links, no shortcut hint. */
+@media (max-width: 1080px) {
+  .dock-link span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .dock-link { justify-content: center; flex: 1; }
+  .dock-cta .shortcut-key { display: none; }
+  .dock-cta .btn-add { flex: 1; min-width: 0; }
+}

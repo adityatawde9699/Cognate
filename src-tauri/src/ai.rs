@@ -119,6 +119,7 @@ fn key_optional(provider: &str) -> bool {
 /// OpenAI-compatible /chat/completions endpoint depending on the provider.
 #[tauri::command]
 pub async fn ai_generate(
+    app: tauri::AppHandle,
     args: AiArgs,
     requests: tauri::State<'_, AiRequests>,
 ) -> Result<String, String> {
@@ -130,7 +131,7 @@ pub async fn ai_generate(
         return Err("AI request exceeds the supported size".into());
     }
     let Some(id) = args.request_id.clone() else {
-        return generate_inner(args).await;
+        return generate_inner(&app, args).await;
     };
     if id.is_empty() || id.len() > 64 || !id.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-')
     {
@@ -145,13 +146,13 @@ pub async fn ai_generate(
         active.insert(id.clone(), notify.clone());
     }
     let result = tokio::select! {
-        response = generate_inner(args) => response,
+        response = generate_inner(&app, args) => response,
         _ = notify.notified() => Err("AI request cancelled".into()),
     };
     requests.0.lock().await.remove(&id);
     result
 }
-async fn generate_inner(args: AiArgs) -> Result<String, String> {
+async fn generate_inner(app: &tauri::AppHandle, args: AiArgs) -> Result<String, String> {
     let provider = args
         .provider
         .as_deref()
@@ -159,6 +160,18 @@ async fn generate_inner(args: AiArgs) -> Result<String, String> {
         .filter(|p| !p.is_empty())
         .unwrap_or("anthropic")
         .to_lowercase();
+
+    // Built-in llama.cpp model: runs in this process, no key and no endpoint.
+    if provider == "embedded" {
+        let model_id = args.model.as_deref().map(str::trim).unwrap_or("");
+        let max_tokens = args.max_tokens.unwrap_or(1024).clamp(256, 8192);
+        let system = args
+            .system
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        return crate::local_llm::generate(app, model_id, system, &args.prompt, max_tokens).await;
+    }
 
     let api_key = args.api_key.trim().to_string();
     if api_key.is_empty() && !key_optional(&provider) {

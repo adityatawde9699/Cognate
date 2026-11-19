@@ -1,3 +1,4 @@
+import { BuiltInModel } from '../Settings/BuiltInModel';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { getSuspectedTaskDuplicates, getAllTasks, getSetting, IS_TAURI, setSetting } from '../../db';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
@@ -61,6 +62,7 @@ function SettingsSection({ id, featured = false, className = '', children }: Set
 
 interface ProviderMeta { label: string; model: string; base: string; needsKey: boolean; keyHint?: string }
 const PROVIDERS: Record<string, ProviderMeta> = {
+  embedded:  { label: 'Built-in (offline, no server)', model: 'qwen2.5-1.5b', base: '', needsKey: false },
   anthropic: { label: 'Anthropic (Claude)', model: 'claude-opus-4-8', base: '', needsKey: true, keyHint: 'console.anthropic.com' },
   openai:    { label: 'OpenAI', model: 'gpt-4o', base: 'https://api.openai.com/v1', needsKey: true, keyHint: 'platform.openai.com' },
   openrouter:{ label: 'OpenRouter', model: 'anthropic/claude-3.5-sonnet', base: 'https://openrouter.ai/api/v1', needsKey: true, keyHint: 'openrouter.ai/keys' },
@@ -165,7 +167,7 @@ export function SettingsModal() {
   if (!isSettingsModalOpen) return null;
 
   const meta = PROVIDERS[aiProvider] || PROVIDERS.anthropic;
-  const aiMode = aiProvider === 'ollama' || aiProvider === 'llamacpp' || aiProvider === 'custom' ? 'Local' : 'Cloud';
+  const aiMode = aiProvider === 'embedded' || aiProvider === 'ollama' || aiProvider === 'llamacpp' || aiProvider === 'custom' ? 'Local' : 'Cloud';
 
 
 
@@ -498,6 +500,9 @@ export function SettingsModal() {
             </small>
           </div>
 
+          {aiProvider === 'embedded' ? (
+            <BuiltInModel model={aiModel || meta.model} onSelect={(id) => { setAiModel(id); handleUpdateSetting('ai_model', id); }} />
+          ) : (<>
           <div className="form-group">
             <label>API key {!meta.needsKey && <span className="opt-tag">optional</span>}</label>
             <input aria-label="API key" type="password" value={aiKey} onChange={e => {
@@ -527,6 +532,7 @@ export function SettingsModal() {
               handleUpdateSetting('ai_model', e.target.value);
             }} placeholder={meta.model ? `${meta.model}${aiProvider === 'anthropic' ? ' (default)' : ''}` : 'model name'} autoComplete="off" />
           </div>
+          </>)}
 
           <div className="form-group row switch-row">
             <label>Smart quick-add <span className="opt-tag">AI</span></label>

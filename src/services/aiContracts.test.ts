@@ -22,6 +22,15 @@ describe('AI advice contracts',()=>{
     expect(result[0]).toMatchObject({id:'a',duration_min:45,energy:'hi',provenance:{provider:'ollama',model:'llama3.1',local:true}});
     expect(result[0].provenance.estimated_at).toMatch(/^\d{4}-/);
   });
+  it('runs the built-in provider with no key or endpoint and snaps its durations',async()=>{
+    mock.settings.set('ai_provider','embedded'); mock.settings.set('ai_model','qwen2.5-1.5b');
+    mock.invoke.mockResolvedValue(JSON.stringify([{id:'a',duration_min:21,energy:'hi'}]));
+    const result=await estimateScheduling(tasks);
+    expect(result[0]).toMatchObject({id:'a',duration_min:15,energy:'hi',provenance:{provider:'embedded',model:'qwen2.5-1.5b',local:true}});
+    const [cmd,{args}]=mock.invoke.mock.calls[0] as any;
+    expect(cmd).toBe('ai_generate');
+    expect(args).toMatchObject({provider:'embedded',model:'qwen2.5-1.5b'});
+  });
   it('sizes a large inbox in batches so no reply overflows its token budget',async()=>{
     const many=Array.from({length:30},(_,i)=>({id:`t${i}`,title:`Task ${i}`,importance:3,effort:3}));
     mock.invoke.mockImplementation(async(_cmd:string,{args}:any)=>{

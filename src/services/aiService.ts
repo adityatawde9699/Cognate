@@ -13,7 +13,7 @@ import { abortable, withAiRequest } from './aiRequests';
 import * as valid from './aiValidation';
 
 /** Providers that run locally and don't require an API key. */
-const LOCAL_PROVIDERS = ['ollama', 'llamacpp', 'custom'];
+const LOCAL_PROVIDERS = ['embedded', 'ollama', 'llamacpp', 'custom'];
 const DEFAULT_MODELS: Record<string, string> = {
   openai: 'gpt-4o',
   openrouter: 'anthropic/claude-3.5-sonnet',
@@ -23,6 +23,7 @@ const DEFAULT_MODELS: Record<string, string> = {
   deepseek: 'deepseek-chat',
   ollama: 'llama3.1',
   llamacpp: 'local-model',
+  embedded: 'qwen2.5-1.5b',
 };
 
 /** Low-level call into the Rust backend. */
@@ -356,8 +357,15 @@ async function estimateBatch(
   const ids = new Set(tasks.map(t => t.id)), seen = new Set<string>();
   const estimates = valid.list(raw, tasks.length);
   if (estimates.length !== tasks.length) throw valid.invalidAdvice();
+  // Small on-device models often answer "21" instead of a 15-minute multiple.
+  // Snap their numbers; every other provider stays strictly validated.
+  const snap = provenance?.provider === 'embedded';
   return estimates.map(value => {
-    const r = valid.object(value), id = valid.uniqueId(r, ids, seen);
+    const r = valid.object(value);
+    if (snap && typeof r.duration_min === 'number' && Number.isFinite(r.duration_min)) {
+      r.duration_min = Math.min(240, Math.max(15, Math.round(r.duration_min / 15) * 15));
+    }
+    const id = valid.uniqueId(r, ids, seen);
     const duration = valid.integer(r.duration_min, 15, 240);
     if (duration % 15 || !['hi', 'med', 'lo'].includes(String(r.energy)) || !provenance) throw valid.invalidAdvice();
     return { id, duration_min: duration, energy: r.energy as SchedulingEstimate['energy'], provenance };

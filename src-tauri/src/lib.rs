@@ -13,6 +13,7 @@ mod backup;
 #[cfg(desktop)]
 mod desktop_health;
 mod integrations;
+mod local_llm;
 mod operation_store;
 mod planner;
 mod secrets;
@@ -96,6 +97,7 @@ pub fn run() {
     }
     builder = builder
         .manage(ai::AiRequests::default())
+        .manage(local_llm::LocalLlm::default())
         .manage(std::sync::Mutex::new(PomoState {
             time_left: 25 * 60,
             is_active: false,
@@ -201,6 +203,10 @@ pub fn run() {
             integrations::fetch_ics,
             integrations::relay_fetch,
             ai::ai_generate,
+            local_llm::local_llm_status,
+            local_llm::local_llm_download,
+            local_llm::local_llm_cancel_download,
+            local_llm::local_llm_delete,
             ai::ai_cancel,
             desktop_health::desktop_health,
             desktop_health::desktop_process_id,

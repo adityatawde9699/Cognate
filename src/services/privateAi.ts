@@ -15,6 +15,7 @@ export const DEFAULT_LOCAL_MODEL = 'llama3.1';
 export interface AiPreset { provider: string; baseUrl: string; model: string }
 
 export function aiEndpoint(provider: string, baseUrl: string): string {
+  if (provider === 'embedded') return ''; // runs inside the app: no endpoint
   if (provider === 'anthropic') return 'https://api.anthropic.com/v1/messages';
   const defaults: Record<string, string> = { openai: 'https://api.openai.com/v1', openrouter: 'https://openrouter.ai/api/v1', groq: 'https://api.groq.com/openai/v1', xai: 'https://api.x.ai/v1', gemini: 'https://generativelanguage.googleapis.com/v1beta/openai', deepseek: 'https://api.deepseek.com/v1', ollama: OLLAMA_BASE, llamacpp: 'http://localhost:8080/v1' };
   const effective = baseUrl.trim() || defaults[provider] || '';
@@ -31,6 +32,7 @@ export function privateAiPreset(model = DEFAULT_LOCAL_MODEL): AiPreset {
 
 /** True when a provider/base pair keeps inference on-device. Pure. */
 export function isLocalProvider(provider: string, baseUrl: string): boolean {
+  if (provider === 'embedded') return true; // in-process model, never leaves the app
   if (provider === 'anthropic') return false;
   const effective = baseUrl.trim() || (provider==='ollama' ? OLLAMA_BASE : provider==='llamacpp' ? 'http://localhost:8080/v1' : '');
   try {
