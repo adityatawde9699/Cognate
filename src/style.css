@@ -1707,6 +1707,8 @@ body { background: var(--bg-1); }
     background: var(--surface); border: 1px solid var(--border); color: var(--text-m); font-size: 13px; font-weight: 500; transition: var(--t-ui);
 }
 .btn-soft:hover { background: var(--surface-hover); color: var(--text); border-color: var(--border-strong); }
+.btn-soft.btn-danger-soft { color: var(--danger); }
+.btn-soft.btn-danger-soft:hover:not(:disabled) { border-color: var(--danger); color: var(--danger); }
 .btn-icon { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 9px; color: var(--text-m); transition: var(--t-ui); }
 .btn-icon:hover { background: var(--surface-hover); color: var(--text); }
 

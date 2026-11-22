@@ -1,8 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { getIdentity, publicIdentity, signLocalOps, _resetForTests as resetIdentity } from './identity';
+import { getIdentity, publicIdentity, signLocalOps, replaceDeviceIdentity, _resetForTests as resetIdentity } from './identity';
 import { logTaskUpsert, _resetForTests as resetOplog } from './oplogStore';
 import { verifySignedOps, authorize } from './collab';
-import { loadOps, setSetting } from '../db';
+import { loadOps, setSetting, getSetting } from '../db';
+import { materialize } from './oplog';
+import { setSecret } from '../utils/secrets';
 import type { Task } from '../store';
 
 // In-memory localStorage so db.js's browser fallback (and the secrets fallback)
@@ -114,5 +116,35 @@ describe('identity recovery guards', () => {
     await setSetting('crdt_actor','replacement');
     resetIdentity(); resetOplog();
     await expect(getIdentity()).rejects.toThrow('binding changed');
+  });
+
+  it('replaces a lost key with a fresh actor and re-logs that device\'s data', async () => {
+    const before = await getIdentity();
+    await logTaskUpsert(task('t1', { title: 'kept' }));
+    await setSecret('crdt_signing_key', ''); // keychain wiped
+    resetIdentity();
+    await expect(getIdentity()).rejects.toThrow(/replace this device/);
+
+    const result = await replaceDeviceIdentity();
+    expect(result.previous).toBe(before.actor);
+    expect(result.actor).not.toBe(before.actor);
+    expect(result.relogged).toBe(1);
+    const after = await getIdentity();
+    expect(after.actor).toBe(result.actor);
+    expect(after.pub).not.toBe(before.pub);
+
+    const ops = await loadOps();
+    const reauthored = ops.filter(op => op.hlc.actor === after.actor && op.entity === 't1');
+    expect(reauthored.length).toBeGreaterThan(0);
+    const oldMax = Math.max(...ops.filter(op => op.hlc.actor === before.actor).map(op => op.hlc.wall * 1e6 + op.hlc.counter));
+    expect(Math.min(...reauthored.map(op => op.hlc.wall * 1e6 + op.hlc.counter))).toBeGreaterThan(oldMax);
+    expect(materialize(ops).get('t1')?.title).toBe('kept');
+    expect(JSON.parse(await getSetting('identity_replaced_from', '{}')).actor).toBe(before.actor);
+
+    // Survives a restart, and new ops sign with the new key.
+    resetIdentity(); resetOplog();
+    expect((await getIdentity()).actor).toBe(result.actor);
+    const signed = await signLocalOps(reauthored);
+    expect(signed.every(op => op.pub === after.pub)).toBe(true);
   });
 });

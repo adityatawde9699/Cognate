@@ -8,7 +8,7 @@
 
 import { useEffect, useState } from 'react';
 import { useStore } from '../store';
-import { publicIdentity } from '../services/identity';
+import { publicIdentity, replaceDeviceIdentity } from '../services/identity';
 import type { Member, Role } from '../services/collab';
 import type { ActivityEntry } from '../services/activity';
 import {
@@ -43,6 +43,7 @@ export function SharedProjects() {
   const [recoveryPass, setRecoveryPass] = useState('');
   const [recoveryKit, setRecoveryKit] = useState('');
   const [newRecoveryPass,setNewRecoveryPass]=useState(''),[retiredOldDevice,setRetiredOldDevice]=useState(false);
+  const [replaceAck, setReplaceAck] = useState(false);
 
   const refresh = async () => {
     const list = await listShares();
@@ -215,6 +216,21 @@ export function SharedProjects() {
       toast('Recovery kit restored');
     } catch (e: any) {
       setMsg(e?.message || 'Could not restore — wrong passphrase or invalid kit.');
+    } finally { setBusy(false); }
+  };
+
+  const handleReplaceIdentity = async () => {
+    if (!replaceAck) return;
+    setBusy(true);
+    try {
+      const res = await replaceDeviceIdentity();
+      setMe(res.actor);
+      setReplaceAck(false);
+      await refresh();
+      setMsg(`New device identity created. ${res.relogged} item${res.relogged === 1 ? '' : 's'} re-logged so your other devices receive them. Ask each shared project's owner to invite this device again, then export a new recovery kit.`);
+      toast('Device identity replaced');
+    } catch (e: any) {
+      setMsg(e?.message || 'Could not replace the device identity.');
     } finally { setBusy(false); }
   };
 
@@ -434,8 +450,23 @@ export function SharedProjects() {
           <button className="btn-soft" onClick={rewrapKit} disabled={busy || !recoveryKit || !recoveryPass || newRecoveryPass.length<12}>Change kit passphrase</button>
         </div>
         <small className="form-hint">
-          Encrypts your signing identity, tasks, projects, history, share secrets and relay passphrase. Use at least 12 characters. Restore on an empty replacement workspace, then retire the old device before syncing. Keep a separate database backup for calendars, templates and settings.
+          Encrypts your signing identity, tasks, projects, history, share secrets and relay passphrase. Use at least 12 characters. Restore on an empty replacement workspace, then retire the old device before syncing. Milestones and templates are included through history; keep a separate database backup for calendars and settings.
         </small>
+      </div>
+
+      <div className="form-group">
+        <label>Device identity</label>
+        <small className="form-hint">
+          If this device lost its signing key and you have no recovery kit, or the key may be exposed, replace it.
+          Your tasks stay. Your other devices accept the new identity on their next sync. Shared projects list the old
+          key, so each owner has to invite this device again. Old recovery kits stop matching this device.
+        </small>
+        <label><input type="checkbox" checked={replaceAck} onChange={event => setReplaceAck(event.target.checked)} /> I understand shared projects must re-invite this device.</label>
+        <div>
+          <button className="btn-soft btn-danger-soft" onClick={handleReplaceIdentity} disabled={busy || !replaceAck}>
+            <i className="fa-solid fa-key"></i> Replace device identity
+          </button>
+        </div>
       </div>
 
       {msg && <small className="form-hint" role="status">{msg}</small>}

@@ -68,3 +68,4 @@ export function commitPlan(date: string, result: import('./services/planService'
 
 export const USE_BROWSER_WORKSPACE: boolean;
 export function registerBrowserIdentity(actor:string, privateKey:string, publicKey:string): Promise<{priv:string;pub:string}>;
+export function replaceBrowserIdentity(oldActor: string, actor: string, privateKey: string, publicKey: string): Promise<void>;

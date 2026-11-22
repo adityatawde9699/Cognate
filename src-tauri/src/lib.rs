@@ -220,6 +220,7 @@ pub fn run() {
             operation_store::mutate_tasks,
             operation_store::mutate_entity_batch,
             operation_store::commit_projection,
+            operation_store::replace_device_identity,
             operation_store::replace_calendar_source,
             operation_store::planning_snapshot,
             operation_store::commit_plan,

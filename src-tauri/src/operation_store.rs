@@ -793,6 +793,99 @@ pub async fn commit_projection(
     apply_projection_with_identity(&mut db, ops, tasks, projects, records, expected, recovery).await
 }
 
+/// Retire this device's actor and signing key for a fresh pair (lost keychain,
+/// suspected key exposure). The new actor's clock starts past all history so
+/// no operation identity can repeat, and the old actor is recorded.
+async fn replace_identity(
+    db: &mut SqliteConnection,
+    actor: &str,
+    pub_key: &str,
+) -> Result<(), String> {
+    if !token(actor, 128) || !token(pub_key, 512) {
+        return Err("Invalid replacement identity".into());
+    }
+    let mut tx = db.begin().await.map_err(|e| e.to_string())?;
+    let old: Option<String> =
+        sqlx::query_scalar("SELECT value FROM app_state WHERE key='crdt_actor'")
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+    if old.as_deref() == Some(actor) {
+        return Err("Replacement identity must use a new actor".into());
+    }
+    let used: i64 = sqlx::query_scalar("SELECT count(*) FROM oplog WHERE actor=?")
+        .bind(actor)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+    if used > 0 {
+        return Err("Replacement actor already appears in history".into());
+    }
+    let latest =
+        sqlx::query("SELECT wall,counter FROM oplog ORDER BY wall DESC,counter DESC LIMIT 1")
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+    let now = chrono::Utc::now().timestamp_millis();
+    let clock = Timestamp {
+        actor: actor.into(),
+        wall: latest
+            .as_ref()
+            .map(|row| row.get::<i64, _>("wall").max(now))
+            .unwrap_or(now),
+        counter: latest
+            .map(|row| row.get::<i64, _>("counter") + 1)
+            .unwrap_or(0),
+    };
+    let replaced = serde_json::json!({
+        "actor": old,
+        "at": chrono::Utc::now().to_rfc3339(),
+    });
+    for (key, value) in [
+        (
+            "crdt_hlc",
+            serde_json::to_string(&clock).map_err(|e| e.to_string())?,
+        ),
+        ("crdt_actor", actor.to_string()),
+        ("crdt_signing_pub", pub_key.to_string()),
+        (
+            "crdt_signing_binding",
+            serde_json::json!({"actor":actor,"pub":pub_key}).to_string(),
+        ),
+        ("identity_replaced_from", replaced.to_string()),
+    ] {
+        sqlx::query("INSERT INTO app_state(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+            .bind(key)
+            .bind(value)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    tx.commit().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn replace_device_identity(
+    app: AppHandle,
+    actor: String,
+    pub_key: String,
+) -> Result<(), String> {
+    let _maintenance = crate::backup::MAINTENANCE.lock().await;
+    let path = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| e.to_string())?
+        .join("cognote.db");
+    let options = sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(path)
+        .create_if_missing(false)
+        .busy_timeout(std::time::Duration::from_secs(5));
+    let mut db = SqliteConnection::connect_with(&options)
+        .await
+        .map_err(|e| e.to_string())?;
+    replace_identity(&mut db, &actor, &pub_key).await
+}
+
 async fn planning_state(db: &mut SqliteConnection) -> Result<Value, String> {
     let tasks = current_rows(db, "tasks").await?;
     let calendar: Vec<String> = sqlx::query_scalar("SELECT json_object('id',id,'title',title,'start',start,'end',end,'source',source,'created_at',created_at) FROM calendar_events ORDER BY id")
@@ -1348,6 +1441,50 @@ mod tests {
         assert_eq!(milestones[0]["id"], "m2");
         let templates = current_rows(&mut db, "templates").await.unwrap();
         assert_eq!(templates[0]["data"], serde_json::json!({"tasks":[]}));
+    }
+    #[tokio::test]
+    async fn replaced_identity_starts_past_history_and_never_reuses_an_actor() {
+        let mut db = task_db().await;
+        mutate(&mut db, "UPDATE tasks SET title='before'", vec![])
+            .await
+            .unwrap();
+        let old: String = sqlx::query_scalar("SELECT value FROM app_state WHERE key='crdt_actor'")
+            .fetch_one(&mut db)
+            .await
+            .unwrap();
+        assert!(replace_identity(&mut db, &old, "pub").await.is_err());
+        replace_identity(&mut db, "fresh", "pub2").await.unwrap();
+        let (wall, counter): (i64, i64) = sqlx::query_as(
+            "SELECT wall,counter FROM oplog ORDER BY wall DESC,counter DESC LIMIT 1",
+        )
+        .fetch_one(&mut db)
+        .await
+        .unwrap();
+        let clock: String = sqlx::query_scalar("SELECT value FROM app_state WHERE key='crdt_hlc'")
+            .fetch_one(&mut db)
+            .await
+            .unwrap();
+        let clock: Timestamp = serde_json::from_str(&clock).unwrap();
+        assert_eq!(clock.actor, "fresh");
+        assert!((clock.wall, clock.counter) > (wall, counter));
+        let from: String =
+            sqlx::query_scalar("SELECT value FROM app_state WHERE key='identity_replaced_from'")
+                .fetch_one(&mut db)
+                .await
+                .unwrap();
+        assert!(from.contains(&old));
+        mutate(&mut db, "UPDATE tasks SET title='after'", vec![])
+            .await
+            .unwrap();
+        let author: String = sqlx::query_scalar("SELECT actor FROM oplog WHERE value='\"after\"'")
+            .fetch_one(&mut db)
+            .await
+            .unwrap();
+        assert_eq!(author, "fresh");
+        assert!(
+            replace_identity(&mut db, &old, "pub3").await.is_err(),
+            "a retired actor cannot come back"
+        );
     }
     #[tokio::test]
     async fn stale_historical_audit_cannot_append_repairs() {

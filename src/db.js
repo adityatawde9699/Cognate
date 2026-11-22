@@ -379,6 +379,39 @@ export async function registerBrowserIdentity(actor, privateKey, publicKey) {
     });
     return registered;
 }
+/** Browser half of identity replacement: one transaction swaps actor, clock,
+ * and signing keys, and refuses an actor that already authored history. */
+export async function replaceBrowserIdentity(oldActor, actor, privateKey, publicKey) {
+    if (IS_TAURI) throw new Error('Use the native identity replacement.');
+    if (!USE_INDEXED_DB) {
+        // Node/test storage: the private key is already in the secrets store.
+        const ops = localLoadOps();
+        if (actor===oldActor || ops.some(op => op.hlc.actor===actor)) throw new Error('Replacement identity must use a new actor.');
+        const state = workspace();
+        const clock = new Clock(actor, Date.now());
+        if (state?.hlc) clock.receive(state.hlc);
+        for (const op of ops) if (hlcCompare(op.hlc, clock.current()) >= 0) clock.receive(op.hlc);
+        if (state) localStorage.setItem(ATOMIC_WORKSPACE_KEY, JSON.stringify({...state, actor, hlc:{...clock.current(), actor}}));
+        for (const [key,value] of Object.entries({crdt_actor:actor,crdt_signing_pub:publicKey,
+            crdt_signing_binding:JSON.stringify({actor,pub:publicKey}),
+            identity_replaced_from:JSON.stringify({actor:oldActor,at:new Date().toISOString()})})) localStorage.setItem(`cn_set_${key}`, value);
+        return;
+    }
+    await ensureBrowserStorage();
+    if(!isEncryptedSecret(privateKey)) privateKey=await encryptBrowserSecret(privateKey);
+    await patchBrowser(state => {
+        if (state.actor!==oldActor) throw new Error('Device actor changed during identity replacement.');
+        if (actor===oldActor || state.ops.some(op => op.hlc.actor===actor)) throw new Error('Replacement identity must use a new actor.');
+        const clock = new Clock(actor, Date.now());
+        if (state.hlc) clock.receive(state.hlc);
+        for (const op of state.ops) if (hlcCompare(op.hlc, clock.current()) >= 0) clock.receive(op.hlc);
+        state.actor = actor;
+        state.hlc = { ...clock.current(), actor };
+        state.settings = {...state.settings,crdt_actor:actor,crdt_signing_key:privateKey,crdt_signing_pub:publicKey,
+            crdt_signing_binding:JSON.stringify({actor,pub:publicKey}),
+            identity_replaced_from:JSON.stringify({actor:oldActor,at:new Date().toISOString()})};
+    });
+}
 export const USE_BROWSER_WORKSPACE = USE_INDEXED_DB;
 
 // ── Projects (Phase 3) ────────────────────────────────────
