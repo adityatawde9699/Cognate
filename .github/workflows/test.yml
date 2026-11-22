@@ -151,6 +151,13 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      # The windows-latest image has shipped a broken CMake (4.4 modules under
+      # a 4.5 binary); pin one so llama.cpp can configure.
+      - name: Install pinned CMake (Windows)
+        if: runner.os == 'Windows'
+        uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: '3.31.x'
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy

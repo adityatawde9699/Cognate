@@ -133,12 +133,13 @@ async function spawnRelay(options: { timeOffset?: number; initialStore?: string;
 }
 
 describe('ITEM 4: Real-Relay Release Gate (no fakeBatchRelay)', () => {
+  // Builds the relay; a cold CI build takes minutes, not the 10s hook default.
   beforeAll(() => {
     execFileSync('cargo', ['build', '--manifest-path', 'server/Cargo.toml']);
     if (!globalThis.localStorage) {
       Object.assign(globalThis, { localStorage: new DeviceStorage() });
     }
-  });
+  }, 600_000);
 
   beforeEach(async () => {
     setMigrationFailpoint(null);
