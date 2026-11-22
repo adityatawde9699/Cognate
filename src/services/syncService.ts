@@ -6,10 +6,11 @@
    incoming operations and projected rows commit together with preconditions.
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 
-import { loadOps, commitProjection } from '../db';
-import { assertRemoteSkew, merge, materialize, validateOps, type Op } from './oplog';
+import { loadOps, commitProjection, appendOps, getMilestones, getTemplates } from '../db';
+import { assertRemoteSkew, merge, materialize, validateOps, Clock, hlcCompare, type Op } from './oplog';
+import { projectRecords, unloggedRecordOps } from './recordSync';
 import { projectTasks, diffTasks } from './projector';
-import { observeOps } from './oplogStore';
+import { observeOps, actorId, ingestOps } from './oplogStore';
 import { loadAllTasks } from './taskService';
 import { useStore, type Project } from '../store';
 
@@ -55,9 +56,22 @@ function parseBundle(json: string): Op[] {
  * Commit admitted history and its full projection together after checking
  * the audited local snapshot; then refresh the view.
  */
+/** Log milestones/templates created before they replicated, once, so peers
+ * receive them and the projection below cannot drop them. */
+async function logUnloggedRecords(): Promise<void> {
+  const ops = await loadOps();
+  const clock = new Clock(await actorId(), Date.now());
+  for (const op of ops) if (hlcCompare(op.hlc, clock.current()) > 0) clock.receive(op.hlc);
+  const fresh = unloggedRecordOps(clock, { milestones: await getMilestones(), templates: await getTemplates() as any }, materialize(ops), ops);
+  if (!fresh.length) return;
+  await appendOps(fresh);
+  await ingestOps(fresh);
+}
+
 export async function mergeIntoApp(incoming: Op[]): Promise<{ applied: number; upserts: number; deletes: number }> {
   validateOps(incoming);
   assertRemoteSkew(incoming);
+  await logUnloggedRecords();
   const audit = await captureHistoryAudit();
   if (audit.gaps.some(gap => gap.reason !== 'log-only-entity')) {
     throw new Error('Local rows differ from saved history. Export and review a history audit in Settings before syncing.');
@@ -79,15 +93,17 @@ export async function mergeIntoApp(incoming: Op[]): Promise<{ applied: number; u
     projects.push({ id, name: String(state.name ?? existing?.name ?? ''), color: String(state.color ?? existing?.color ?? ''),
       created_at: String(state.created_at ?? existing?.created_at ?? ''), sort_order: Number(state.sort_order ?? existing?.sort_order ?? 0) });
   }
+  const records = projectRecords(materialize(merged));
   const { upserts, deletes } = diffTasks(audit.snapshot.tasks, tasks);
   await commitProjection(incoming, tasks, projects, {
     tasks: audit.snapshot.tasks.map(normalizedTask), projects: audit.snapshot.projects,
     ops: audit.snapshot.ops, normalizeTask: normalizedTask, fingerprint,
-  });
+  }, null, records);
   await observeOps(incoming);
   const filter = useStore.getState().currentFilter;
   await loadAllTasks(filter);
   useStore.getState().setProjects(projects);
+  useStore.getState().setMilestones(records.milestones);
   return { applied: incoming.length, upserts: upserts.length, deletes: deletes.length };
 }
 

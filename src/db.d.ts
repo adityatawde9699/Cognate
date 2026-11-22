@@ -59,7 +59,7 @@ export function deleteTemplate(id: string): Promise<void>;
 
 export function runDatabaseMaintenance<T>(action: () => Promise<T>, freezeAfterSuccess?: boolean): Promise<T>;
 
-export function commitProjection(ops: Op[], tasks: any[], projects: any[], expected: any, recovery?: {actor:string;pub:string;privateKey:string;kitId:string}): Promise<void>;
+export function commitProjection(ops: Op[], tasks: any[], projects: any[], expected: any, recovery?: {actor:string;pub:string;privateKey:string;kitId:string} | null, records?: {milestones:any[];templates:any[]} | null): Promise<void>;
 
 export interface PlanningSnapshot {tasks: import('./store').Task[]; calendar: CalendarEvent[]; settings: Record<string,string>}
 export function getPlanningSnapshot(): Promise<PlanningSnapshot>;

@@ -7,6 +7,8 @@ import {getConfig,enableSync} from './relayService';
 import {getIdentity,_resetForTests as resetIdentity} from './identity';
 import {_resetForTests as resetClock} from './oplogStore';
 import {getSetting,setSetting,IS_TAURI,commitProjection} from '../db';
+import { projectRecords } from './recordSync';
+import { materialize } from './oplog';
 import {getSecret,setSecret} from '../utils/secrets';
 import {encryptBrowserSecret} from '../utils/browserVault';
 import {captureHistoryAudit,normalizedTask,fingerprint,type HistoryAudit} from './historyAudit';
@@ -59,7 +61,8 @@ export async function importRecoveryKit(json:string,passphrase:string):Promise<{
       try {
         if(IS_TAURI) {await setSecret('crdt_signing_key',kit.identity.privateKey);if(await getSecret('crdt_signing_key')!==kit.identity.privateKey) throw new Error('Recovered keychain identity could not be verified.');}
         await commitProjection(kit.snapshot.ops,kit.snapshot.tasks,kit.snapshot.projects,{...current,normalizeTask:normalizedTask,fingerprint},
-          {...kit.identity,privateKey:await encryptBrowserSecret(kit.identity.privateKey),kitId:kit.id});
+          {...kit.identity,privateKey:await encryptBrowserSecret(kit.identity.privateKey),kitId:kit.id},
+          projectRecords(materialize(kit.snapshot.ops)));
         committed=true;
       } finally {if(!committed && IS_TAURI) await setSecret('crdt_signing_key',previous);}
       resetIdentity();resetClock();

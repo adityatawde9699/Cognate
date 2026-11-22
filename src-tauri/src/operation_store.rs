@@ -90,6 +90,24 @@ pub struct HistoryPrecondition {
     planning: Option<Value>,
 }
 
+const PROJECT_FIELDS: &[&str] = &["id", "name", "color", "created_at", "sort_order"];
+const MILESTONE_FIELDS: &[&str] = &[
+    "id",
+    "project_id",
+    "name",
+    "due",
+    "created_at",
+    "sort_order",
+];
+const TEMPLATE_FIELDS: &[&str] = &["id", "name", "data", "created_at"];
+/// Non-task tables that replicate through history, with their entity prefix.
+/// Settings are deliberately absent: they stay per-device.
+const RECORD_TABLES: [(&str, &str); 3] = [
+    ("projects", "project:"),
+    ("milestones", "milestone:"),
+    ("templates", "template:"),
+];
+
 pub(crate) async fn current_rows(
     db: &mut SqliteConnection,
     table: &str,
@@ -123,8 +141,12 @@ pub(crate) async fn current_rows(
             "min_block",
             "max_block",
         ]
+    } else if table == "milestones" {
+        MILESTONE_FIELDS
+    } else if table == "templates" {
+        TEMPLATE_FIELDS
     } else {
-        &["id", "name", "color", "created_at", "sort_order"]
+        PROJECT_FIELDS
     };
     let args = fields
         .iter()
@@ -134,6 +156,10 @@ pub(crate) async fn current_rows(
                     format!("json(CASE WHEN {field}=0 THEN 'false' ELSE 'true' END)")
                 }
                 "tags" | "custom_fields" => format!("json({field})"),
+                // A damaged template must not block every task save.
+                "data" => format!(
+                    "CASE WHEN json_valid({field}) THEN json({field}) ELSE json_quote({field}) END"
+                ),
                 _ => field.to_string(),
             };
             format!("'{field}',{expression}")
@@ -331,12 +357,14 @@ pub struct Statement {
 
 async fn entities(db: &mut SqliteConnection) -> Result<Vec<Value>, String> {
     let mut rows = current_rows(db, "tasks").await?;
-    for mut project in current_rows(db, "projects").await? {
-        project["id"] = Value::String(format!(
-            "project:{}",
-            project["id"].as_str().ok_or("Invalid project ID")?
-        ));
-        rows.push(project);
+    for (table, prefix) in RECORD_TABLES {
+        for mut record in current_rows(db, table).await? {
+            record["id"] = Value::String(format!(
+                "{prefix}{}",
+                record["id"].as_str().ok_or("Invalid record ID")?
+            ));
+            rows.push(record);
+        }
     }
     Ok(rows)
 }
@@ -361,12 +389,13 @@ async fn commit_batch(
     let mut insert_id = 0;
     for Statement { query, values } in statements {
         let normalized = query.trim().to_ascii_lowercase();
+        let tables = ["tasks", "projects", "milestones", "templates"];
         if !(normalized.starts_with("insert")
-            || normalized.starts_with("update tasks")
-            || normalized.starts_with("delete from tasks")
-            || normalized.starts_with("update projects")
-            || normalized.starts_with("delete from projects"))
-            || !(normalized.contains("tasks") || normalized.contains("projects"))
+            || tables.iter().any(|table| {
+                normalized.starts_with(&format!("update {table}"))
+                    || normalized.starts_with(&format!("delete from {table}"))
+            }))
+            || !tables.iter().any(|table| normalized.contains(table))
             || query.len() > 1_000_000
         {
             return Err("Unsupported entity mutation".into());
@@ -594,7 +623,14 @@ async fn apply_projection(
     projects: Vec<Value>,
     expected: HistoryPrecondition,
 ) -> Result<(), String> {
-    apply_projection_with_identity(db, ops, tasks, projects, expected, None).await
+    apply_projection_with_identity(db, ops, tasks, projects, None, expected, None).await
+}
+/// Milestones and templates rebuilt from history. Absent means the caller
+/// predates record sync, so those tables are left alone.
+#[derive(Deserialize, Default)]
+pub struct RecordProjection {
+    milestones: Vec<Value>,
+    templates: Vec<Value>,
 }
 #[derive(Deserialize)]
 pub struct RecoveryIdentity {
@@ -607,6 +643,7 @@ async fn apply_projection_with_identity(
     ops: Vec<Operation>,
     tasks: Vec<Value>,
     projects: Vec<Value>,
+    records: Option<RecordProjection>,
     expected: HistoryPrecondition,
     recovery: Option<RecoveryIdentity>,
 ) -> Result<(), String> {
@@ -655,21 +692,28 @@ async fn apply_projection_with_identity(
         "min_block",
         "max_block",
     ];
-    for (table, rows, fields) in [
-        (
-            "projects",
-            projects,
-            &["id", "name", "color", "created_at", "sort_order"][..],
-        ),
+    let mut tables = vec![
+        ("projects", projects, PROJECT_FIELDS),
         ("tasks", tasks, &task_fields[..]),
-    ] {
+    ];
+    if let Some(records) = records {
+        for table in ["milestones", "templates"] {
+            statements.push(Statement {
+                query: format!("DELETE FROM {table}"),
+                values: vec![],
+            });
+        }
+        tables.push(("milestones", records.milestones, MILESTONE_FIELDS));
+        tables.push(("templates", records.templates, TEMPLATE_FIELDS));
+    }
+    for (table, rows, fields) in tables {
         for row in rows {
             let mut columns = Vec::new();
             let mut values = Vec::new();
             for field in fields {
                 if let Some(value) = row.get(*field) {
                     columns.push(*field);
-                    values.push(if ["tags", "custom_fields"].contains(field) {
+                    values.push(if ["tags", "custom_fields", "data"].contains(field) {
                         Value::String(serde_json::to_string(value).map_err(|e| e.to_string())?)
                     } else {
                         value.clone()
@@ -729,6 +773,7 @@ pub async fn commit_projection(
     ops: Vec<Operation>,
     tasks: Vec<Value>,
     projects: Vec<Value>,
+    records: Option<RecordProjection>,
     expected: HistoryPrecondition,
     recovery: Option<RecoveryIdentity>,
 ) -> Result<(), String> {
@@ -745,7 +790,7 @@ pub async fn commit_projection(
     let mut db = SqliteConnection::connect_with(&options)
         .await
         .map_err(|e| e.to_string())?;
-    apply_projection_with_identity(&mut db, ops, tasks, projects, expected, recovery).await
+    apply_projection_with_identity(&mut db, ops, tasks, projects, records, expected, recovery).await
 }
 
 async fn planning_state(db: &mut SqliteConnection) -> Result<Value, String> {
@@ -1220,6 +1265,91 @@ mod tests {
         assert_eq!(tombstones, 1);
     }
     #[tokio::test]
+    async fn milestones_and_templates_enter_history() {
+        let mut db = task_db().await;
+        mutate(&mut db, "INSERT INTO milestones(id,project_id,name,due,created_at,sort_order) VALUES ('m1',NULL,'Launch','2026-12-01','2026-11-22',0)", vec![]).await.unwrap();
+        mutate(&mut db, "INSERT INTO templates(id,name,data,created_at) VALUES ('t1','Weekly','{\"tasks\":[]}','2026-11-22')", vec![]).await.unwrap();
+        mutate(
+            &mut db,
+            "UPDATE milestones SET name='Ship' WHERE id='m1'",
+            vec![],
+        )
+        .await
+        .unwrap();
+        let name: String = sqlx::query_scalar("SELECT value FROM oplog WHERE entity='milestone:m1' AND field='name' ORDER BY counter DESC LIMIT 1")
+            .fetch_one(&mut db).await.unwrap();
+        assert_eq!(name, "\"Ship\"");
+        let data: String = sqlx::query_scalar(
+            "SELECT value FROM oplog WHERE entity='template:t1' AND field='data'",
+        )
+        .fetch_one(&mut db)
+        .await
+        .unwrap();
+        assert_eq!(
+            data, "{\"tasks\":[]}",
+            "template data replicates as JSON, not a string"
+        );
+        mutate(&mut db, "DELETE FROM templates WHERE id='t1'", vec![])
+            .await
+            .unwrap();
+        let tombstones: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM oplog WHERE kind='del' AND entity='template:t1'",
+        )
+        .fetch_one(&mut db)
+        .await
+        .unwrap();
+        assert_eq!(tombstones, 1);
+    }
+    #[tokio::test]
+    async fn projection_rebuilds_milestones_and_templates_only_when_given() {
+        let mut db = task_db().await;
+        sqlx::query(
+            "INSERT INTO milestones(id,name,created_at) VALUES ('local','Local','2026-11-22')",
+        )
+        .execute(&mut db)
+        .await
+        .unwrap();
+        let tasks = current_rows(&mut db, "tasks").await.unwrap();
+        let expected = || HistoryPrecondition {
+            tasks: tasks.clone(),
+            projects: vec![],
+            ops: vec![],
+            planning: None,
+        };
+        apply_projection(&mut db, vec![], tasks.clone(), vec![], expected())
+            .await
+            .unwrap();
+        assert_eq!(
+            current_rows(&mut db, "milestones").await.unwrap().len(),
+            1,
+            "older callers leave milestones alone"
+        );
+        let records = RecordProjection {
+            milestones: vec![
+                serde_json::json!({"id":"m2","project_id":null,"name":"Remote","due":"","created_at":"2026-11-22","sort_order":1}),
+            ],
+            templates: vec![
+                serde_json::json!({"id":"t2","name":"Remote","data":{"tasks":[]},"created_at":"2026-11-22"}),
+            ],
+        };
+        apply_projection_with_identity(
+            &mut db,
+            vec![],
+            tasks.clone(),
+            vec![],
+            Some(records),
+            expected(),
+            None,
+        )
+        .await
+        .unwrap();
+        let milestones = current_rows(&mut db, "milestones").await.unwrap();
+        assert_eq!(milestones.len(), 1);
+        assert_eq!(milestones[0]["id"], "m2");
+        let templates = current_rows(&mut db, "templates").await.unwrap();
+        assert_eq!(templates[0]["data"], serde_json::json!({"tasks":[]}));
+    }
+    #[tokio::test]
     async fn stale_historical_audit_cannot_append_repairs() {
         let mut db = task_db().await;
         let expected = HistoryPrecondition {
@@ -1380,6 +1510,7 @@ mod tests {
             vec![op("recovered-op", "original")],
             replacement,
             vec![],
+            None,
             HistoryPrecondition {
                 tasks: vec![],
                 projects: vec![],

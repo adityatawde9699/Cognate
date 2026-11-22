@@ -7,6 +7,7 @@
    No DB, no store, no React — just data → data, so it is exhaustively testable.
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 
+import { isRecordEntity } from './recordSync';
 import { materialize, type Op, type EntityState } from './oplog';
 import type { Task } from '../store';
 
@@ -54,7 +55,7 @@ export function entityStateToTask(id: string, s: EntityState): Task {
  *  `member:` roster entry, a `comment:` thread, or a shared `project:` record
  *  must never project to a Task. */
 export function isTaskEntity(id: string): boolean {
-  return !id.startsWith('audit:') && !id.startsWith('member:') && !id.startsWith('comment:') && !id.startsWith('project:');
+  return !id.startsWith('audit:') && !id.startsWith('member:') && !id.startsWith('comment:') && !id.startsWith('project:') && !isRecordEntity(id);
 }
 
 /** Project an op-log to the full set of live + trashed tasks it represents. */

@@ -4,6 +4,7 @@ import { merge, Clock, hlcCompare, entityToOps, delOp, canonicalJson } from './s
 import { nextDeadline, recurrenceId } from './services/recurrenceRules';
 import { planInputKey } from './services/planReview';
 import { taskRecord } from './services/taskFields';
+import { recordOps } from './services/recordSync';
 /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
    src/db.js — SQLite database abstraction layer
    Uses @tauri-apps/plugin-sql in native Tauri context,
@@ -55,7 +56,7 @@ async function db() {
             const connection = await Database.load('sqlite:cognote.db');
             _db = {
                 execute: (...args) => {
-                    if (/\b(?:INSERT(?:\s+OR\s+\w+)?\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:tasks|projects)\b/i.test(args[0])) {
+                    if (/\b(?:INSERT(?:\s+OR\s+\w+)?\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:tasks|projects|milestones|templates)\b/i.test(args[0])) {
                         return guardedCall({ execute: async () => {
                             const { invoke } = await import('@tauri-apps/api/core');
                             return invoke('mutate_tasks', { query: args[0], values: args[1] ?? [] });
@@ -215,6 +216,8 @@ async function localSave(tasks, projects = localLoadProjects(), extra = {}) {
         }
     }
     for (const id of projectBefore.keys()) if (!projectAfter.has(id)) generated.push(delOp(clock, `project:${id}`));
+    if (extra.milestones) generated.push(...recordOps(clock, 'milestones', localLoadMiles(), extra.milestones));
+    if (extra.templates) generated.push(...recordOps(clock, 'templates', localLoadTpls(), extra.templates));
     await commitWorkspace(tasks, merge(ops, generated), actor, projects, extra);
 }
 
@@ -468,11 +471,8 @@ export async function deleteProject(id) {
 
 // ── Milestones (Phase 3) ──────────────────────────────────
 const LOCAL_MILE_KEY = 'cn_milestones_v1';
-function localLoadMiles() { return USE_INDEXED_DB ? workspace()?.milestones ?? [] : safeParseJSON(localStorage.getItem(LOCAL_MILE_KEY), []); }
-async function localSaveMiles(m) {
-    if (USE_INDEXED_DB) await commitWorkspace(localLoad(),localLoadOps(),workspace().actor,localLoadProjects(), {milestones:m});
-    else localStorage.setItem(LOCAL_MILE_KEY, JSON.stringify(m));
-}
+function localLoadMiles() { return workspace()?.milestones ?? safeParseJSON(localStorage.getItem(LOCAL_MILE_KEY), []); }
+async function localSaveMiles(m, tasks = localLoad()) { await localSave(tasks, localLoadProjects(), {milestones:m}); }
 
 export async function getMilestones() {
     if (!IS_TAURI) await ensureBrowserStorage();
@@ -511,22 +511,21 @@ export async function updateMilestone(id, data) {
 export async function deleteMilestone(id) {
     if (!IS_TAURI) await ensureBrowserStorage();
     if (!IS_TAURI) {
-        await localSaveMiles(localLoadMiles().filter(m => m.id !== id));
-        await localSave(localLoad().map(t => (t.milestone_id === id || t.milestoneId === id) ? { ...t, milestone_id: null, milestoneId: null } : t));
+        await localSaveMiles(localLoadMiles().filter(m => m.id !== id),
+            localLoad().map(t => (t.milestone_id === id || t.milestoneId === id) ? { ...t, milestone_id: null, milestoneId: null } : t));
         return;
     }
     const d = await db();
-    await d.execute('UPDATE tasks SET milestone_id=NULL WHERE milestone_id=?', [id]);
-    await d.execute('DELETE FROM milestones WHERE id=?', [id]);
+    await d.batch([
+        { query: 'UPDATE tasks SET milestone_id=NULL WHERE milestone_id=?', values: [id] },
+        { query: 'DELETE FROM milestones WHERE id=?', values: [id] },
+    ]);
 }
 
 // ── Templates (Phase 3) ───────────────────────────────────
 const LOCAL_TPL_KEY = 'cn_templates_v1';
-function localLoadTpls() { return USE_INDEXED_DB ? workspace()?.templates ?? [] : safeParseJSON(localStorage.getItem(LOCAL_TPL_KEY), []); }
-async function localSaveTpls(t) {
-    if (USE_INDEXED_DB) await commitWorkspace(localLoad(),localLoadOps(),workspace().actor,localLoadProjects(), {templates:t});
-    else localStorage.setItem(LOCAL_TPL_KEY, JSON.stringify(t));
-}
+function localLoadTpls() { return workspace()?.templates ?? safeParseJSON(localStorage.getItem(LOCAL_TPL_KEY), []); }
+async function localSaveTpls(t) { await localSave(localLoad(), localLoadProjects(), {templates:t}); }
 
 export async function getTemplates() {
     if (!IS_TAURI) await ensureBrowserStorage();
@@ -1225,7 +1224,9 @@ export async function appendOps(ops, expected = null) {
 
 /** Transactional import with a local-state precondition. No generated local
  * writes are added while materializing the already validated merged history. */
-export async function commitProjection(ops, tasks, projects, expected, recovery = null) {
+/** `records` ({milestones, templates}) rebuilt from history replaces those
+ * tables too; omit it to leave them untouched. */
+export async function commitProjection(ops, tasks, projects, expected, recovery = null, records = null) {
     if(recovery && (expected.tasks.length || expected.projects.length || expected.ops.length)) throw new Error('Identity recovery requires an empty workspace.');
     if (!IS_TAURI) await ensureBrowserStorage();
     const combined = merge(expected.ops, ops);
@@ -1236,7 +1237,7 @@ export async function commitProjection(ops, tasks, projects, expected, recovery 
         }
         const actor = workspace()?.actor || localStorage.getItem('cn_set_crdt_actor') || uuid();
         const extra = recovery ? {settings:{...workspace()?.settings,recovery_completed_data:recovery.kitId,crdt_actor:recovery.actor,crdt_signing_key:recovery.privateKey,crdt_signing_pub:recovery.pub,crdt_signing_binding:JSON.stringify({actor:recovery.actor,pub:recovery.pub})}} : {};
-        await commitWorkspace(tasks, combined, recovery?.actor ?? actor, projects,extra);
+        await commitWorkspace(tasks, combined, recovery?.actor ?? actor, projects, records ? {...extra, ...records} : extra);
         if(recovery && !USE_INDEXED_DB) {for(const [key,value] of Object.entries(extra.settings)) await setSetting(key,value);}
 
         return;
@@ -1244,7 +1245,7 @@ export async function commitProjection(ops, tasks, projects, expected, recovery 
     await db();
     const { invoke } = await import('@tauri-apps/api/core');
     await guardedCall({ commit: () => invoke('commit_projection', {
-        ops, tasks, projects, expected: { tasks: expected.tasks, projects: expected.projects, ops: expected.ops },
+        ops, tasks, projects, records, expected: { tasks: expected.tasks, projects: expected.projects, ops: expected.ops },
         recovery:recovery ? {actor:recovery.actor,pub_key:recovery.pub,kit_id:recovery.kitId} : null,
     }) }, 'commit', []);
 }
